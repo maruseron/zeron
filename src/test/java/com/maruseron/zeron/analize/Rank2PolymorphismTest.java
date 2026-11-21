@@ -148,8 +148,8 @@ public final class Rank2PolymorphismTest {
     public void compilesAndRunsReifiedGenericLambdaApplication() throws Exception {
         final var className = "Rank2Reified" + UUID.randomUUID().toString().replace("-", "");
         final var statements = parse("""
-                let describe: <T: reified> (T) -> String =
-                    <T: reified> (value: T) -> "typed";
+                let describe: <reified T> (T) -> String =
+                    <reified T> (value: T) -> "typed";
                 fn reifiedValue(): String = describe(1);
                 """);
         final var compiler = new CompilationService(statements, className);
@@ -239,7 +239,7 @@ public final class Rank2PolymorphismTest {
                     public render(): String = "item";
                 }
                 public fn applyRenderer(f: <T: Render> (T) -> String, item: Item): String = f(item);
-                public fn applyReified(f: <T: reified> (T) -> String, value: Int): String = f(value);
+                public fn applyReified(f: <reified T> (T) -> String, value: Int): String = f(value);
                 """.formatted(libraryPackage));
         final var client = parseUnit("Main.zn", """
                 package %s;
@@ -249,7 +249,7 @@ public final class Rank2PolymorphismTest {
                 import %s.applyReified;
                 fn result(): String =
                     applyRenderer(<T: Render> (value: T) -> value.render(), Item.new());
-                fn reifiedResult(): String = applyReified(<T: reified> (value: T) -> "typed", 1);
+                fn reifiedResult(): String = applyReified(<reified T> (value: T) -> "typed", 1);
                 """.formatted(clientPackage, libraryPackage, libraryPackage, libraryPackage,
                         libraryPackage));
 

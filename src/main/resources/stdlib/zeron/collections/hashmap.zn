@@ -14,7 +14,7 @@ fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
 /// Keys are compared with `Eq` and bucketed by `Hashable`, so equal keys must produce equal hashes
 /// and must not change in a way that affects either operation while they are in the map. Iteration
 /// order is not specified.
-public class HashMap<K: Hashable<K>, V: mut>
+public class HashMap<K: Hashable<K>, V admits mutable>
     is Map<K, V>,
        Sized<Pair<K, V>>,
        KeyedSink<K, V>,
@@ -75,16 +75,16 @@ public class HashMap<K: Hashable<K>, V: mut>
     /// `transform` receives the key and the value currently stored, or `None` when the key is
     /// absent. Returning `None` removes the entry; returning a value stores it. The result is
     /// returned.
-    public mut compute<E: effect...>(
+    public mut compute<E admits effect...>(
         key: K,
-        transform: (K, Option<V>) -> Option<V> raises E
-    ): Option<V> raises E = table.compute(key, transform);
+        transform: (K, Option<V>) -> Option<V> performs E
+    ): Option<V> performs E = table.compute(key, transform);
 
     /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
-    public mut computeIfAbsent<E: effect...>(
+    public mut computeIfAbsent<E admits effect...>(
         key: K,
-        transform: (K) -> V raises E
-    ): V raises E = table.computeIfAbsent(key, transform);
+        transform: (K) -> V performs E
+    ): V performs E = table.computeIfAbsent(key, transform);
 
     /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
     public mut remove(key: K): Option<V> = table.remove(key);

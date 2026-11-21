@@ -16,7 +16,7 @@ public contract Functor<F<_>> {
     map<A, B>(this: F<A>, transform: A -> B): F<B>;
 }
 
-fn applySecond<A: mut, B: mut, C: mut>(
+fn applySecond<A admits mutable, B admits mutable, C admits mutable>(
     combine: (A, B) -> C,
     second: B
 ): (A) -> C = first -> combine(first, second);

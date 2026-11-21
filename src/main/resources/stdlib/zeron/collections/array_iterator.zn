@@ -4,7 +4,7 @@ package zeron.collections;
 ///
 /// The iterator reads the array as it advances rather than copying it, so a later write to an
 /// element is observed when the iterator reaches it.
-public class ArrayIterator<T: nullable + mut> is Iterator<T> {
+public class ArrayIterator<T admits nullable + mutable> is Iterator<T> {
     arr: Array<T>;
     current: Int;
 

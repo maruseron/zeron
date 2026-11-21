@@ -897,7 +897,7 @@ public final class StandardLibraryTest {
                 import zeron.io.print;
                 import zeron.io.println;
                 import java.lang.System;
-                fn emit(): Unit raises IoFailure {
+                fn emit(): Unit performs IoFailure {
                     print("a");
                     print(42);
                     println("b");
@@ -938,7 +938,7 @@ public final class StandardLibraryTest {
         final var source = parse("Main.zn", """
                 package %s;
                 import zeron.io.println;
-                fn main(): Unit raises IoFailure {
+                fn main(): Unit performs IoFailure {
                     println("launched");
                 }
                 """.formatted(packageName));
@@ -1561,7 +1561,7 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.io.println;
                 let broken: Int = 1 / 0;
-                fn main(): Unit raises IoFailure {
+                fn main(): Unit performs IoFailure {
                     println("main");
                 }
                 """.formatted(packageName));
@@ -2468,13 +2468,13 @@ public final class StandardLibraryTest {
                     }
                     return 0;
                 }
-                fn add<T: mut + Numeric<T>>(left: T, right: T): T = left + right;
-                fn subtract<T: mut + Numeric<T>>(left: T, right: T): T = left - right;
-                fn multiply<T: mut + Numeric<T>>(left: T, right: T): T = left * right;
-                fn reciprocal<T: mut + Fractional<T>>(value: T): T = value.reciprocal();
+                fn add<T: Numeric<T> admits mutable>(left: T, right: T): T = left + right;
+                fn subtract<T: Numeric<T> admits mutable>(left: T, right: T): T = left - right;
+                fn multiply<T: Numeric<T> admits mutable>(left: T, right: T): T = left * right;
+                fn reciprocal<T: Fractional<T> admits mutable>(value: T): T = value.reciprocal();
                 fn numericResult(): Int = subtract(add(20, 24), 2);
                 fn reciprocalResult(): Float = reciprocal(2.0);
-                fn announce(): Unit raises IoFailure {
+                fn announce(): Unit performs IoFailure {
                     print("compiled");
                     println("!");
                 }

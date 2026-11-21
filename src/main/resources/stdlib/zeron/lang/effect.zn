@@ -4,7 +4,7 @@ import java.lang.Exception;
 
 /// The top effect type.
 ///
-/// Every declared effect is a subtype of `Effect` without naming it with `under`, so `raises
+/// Every declared effect is a subtype of `Effect` without naming it with `under`, so `performs
 /// Effect` permits any effect to escape through a callable boundary and an unguarded, irrefutable
 /// `case Effect` handles the complete raised set. `Effect` is also an ordinary value type: an
 /// effect value with static type `Effect` can be stored and raised again.

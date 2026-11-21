@@ -492,7 +492,7 @@ public final class FlowTypingTest {
                 public class Other%s<T> is Tagged%s<T> {
                     public constructor new;
                 }
-                public class Box%s<T: nullable> {
+                public class Box%s<T admits nullable> {
                     public constructor new;
                 }
                 fn isImplementation(value: Tagged%s<Int>): Boolean =

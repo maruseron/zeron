@@ -15,7 +15,7 @@ fn sameReference(left: Any?, right: Any?): Boolean = left === right;
 /// keys even when they are structurally equal. `K` is unconstrained, so values without `Eq` or
 /// `Hashable` can be keys. Identity is meaningful for reference values; boxed primitives are
 /// distinct objects unless the same instance is reused.
-public class IdentityHashMap<K, V: mut>
+public class IdentityHashMap<K, V admits mutable>
     is Map<K, V>,
        Sized<Pair<K, V>>,
        KeyedSink<K, V>,
@@ -64,16 +64,16 @@ public class IdentityHashMap<K, V: mut>
     public mut putIfAbsent(key: K, value: V): Option<V> = table.putIfAbsent(key, value);
 
     /// Recomputes the entry for `key` from its current value.
-    public mut compute<E: effect...>(
+    public mut compute<E admits effect...>(
         key: K,
-        transform: (K, Option<V>) -> Option<V> raises E
-    ): Option<V> raises E = table.compute(key, transform);
+        transform: (K, Option<V>) -> Option<V> performs E
+    ): Option<V> performs E = table.compute(key, transform);
 
     /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
-    public mut computeIfAbsent<E: effect...>(
+    public mut computeIfAbsent<E admits effect...>(
         key: K,
-        transform: (K) -> V raises E
-    ): V raises E = table.computeIfAbsent(key, transform);
+        transform: (K) -> V performs E
+    ): V performs E = table.computeIfAbsent(key, transform);
 
     /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
     public mut remove(key: K): Option<V> = table.remove(key);

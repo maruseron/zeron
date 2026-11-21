@@ -49,7 +49,7 @@ public final class MainEntryPointTest {
     public void unitMainUsesTheGeneratedLauncher() throws Exception {
         final var compiled = compile("""
                 package %s;
-                fn main(): Unit raises IoFailure = println("hello");
+                fn main(): Unit performs IoFailure = println("hello");
                 """, "unit");
         try (final var loader = loader(compiled.output())) {
             final var capture = captureOut(() -> loader.loadClass(compiled.packageName() + ".Main")
@@ -62,7 +62,7 @@ public final class MainEntryPointTest {
     public void argumentMainReceivesTheHostArguments() throws Exception {
         final var compiled = compile("""
                 package %s;
-                fn main(args: Array<String>): Unit raises IoFailure = println(args.length);
+                fn main(args: Array<String>): Unit performs IoFailure = println(args.length);
                 """, "args");
         try (final var loader = loader(compiled.output())) {
             final var capture = captureOut(() -> loader.loadClass(compiled.packageName() + ".Main")
@@ -89,11 +89,11 @@ public final class MainEntryPointTest {
                 package %s;
                 public class Job {
                     public constructor new;
-                    public start(): Unit raises IoFailure = println("started");
+                    public start(): Unit performs IoFailure = println("started");
                 }
                 fn main(): Job = Job.new();
                 public witness JobMain: Main<Job> for Job {
-                    static fn run(value: Job): Unit raises IoFailure = value.start();
+                    static fn run(value: Job): Unit performs IoFailure = value.start();
                 }
                 """, "user");
         try (final var loader = loader(compiled.output())) {
@@ -107,7 +107,7 @@ public final class MainEntryPointTest {
     public void resultEntryOkEndsNormally() throws Exception {
         final var compiled = compile("""
                 package %s;
-                fn main(): Result<Unit, String> raises IoFailure =
+                fn main(): Result<Unit, String> performs IoFailure =
                     Result<Unit, String>.Ok(println("ok"));
                 """, "result");
         try (final var loader = loader(compiled.output())) {

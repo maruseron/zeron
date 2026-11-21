@@ -19,7 +19,7 @@ public final class EffectRowTest {
     public void handlerResultMayWidenTheProtectedNullableResult() {
         final var result = resolve("""
                 effect IoFailure {}
-                fn readln(): String? raises IoFailure = raise IoFailure.new();
+                fn readln(): String? performs IoFailure = perform IoFailure.new();
                 handler SwallowToString { case IoFailure -> ""; }
                 fn line(): String? = handle (readln()) with SwallowToString;
                 """);
@@ -31,7 +31,7 @@ public final class EffectRowTest {
     public void incompatibleHandlerResultsAreStillRejected() {
         final var result = resolve("""
                 effect IoFailure {}
-                fn readln(): String? raises IoFailure = raise IoFailure.new();
+                fn readln(): String? performs IoFailure = perform IoFailure.new();
                 handler SwallowToInt { case IoFailure -> 0; }
                 fn line(): String? = handle (readln()) with SwallowToInt;
                 """);
@@ -43,11 +43,11 @@ public final class EffectRowTest {
     public void infersEmptyRowsForPureCallbacksAndPropagatesEffectfulCallbacks() {
         final var result = resolve("""
                 effect Failure {}
-                fn apply<T, R, E: effect...>(value: T, transform: (T) -> R raises E): R raises E =
+                fn apply<T, R, E admits effect...>(value: T, transform: (T) -> R performs E): R performs E =
                     transform(value);
                 fn pure(): Int = apply(1, value -> value + 1);
-                fn effectful(): Int raises Failure = apply(1, value -> raise Failure.new());
-                fn handled(): Int = handle (apply(1, value -> raise Failure.new())) with {
+                fn effectful(): Int performs Failure = apply(1, value -> perform Failure.new());
+                fn handled(): Int = handle (apply(1, value -> perform Failure.new())) with {
                     case Failure -> 41;
                 };
                 """);
@@ -60,14 +60,14 @@ public final class EffectRowTest {
         final var result = resolve("""
                 effect First {}
                 effect Second {}
-                fn combine<E: effect...>(
-                    left: () -> (() -> Int raises E),
-                    right: () -> Int raises E
-                ): Int raises E = right();
-                fn makeLeft(): () -> Int raises First = () -> raise First.new();
-                fn run(): Int raises First, Second = combine(
+                fn combine<E admits effect...>(
+                    left: () -> (() -> Int performs E),
+                    right: () -> Int performs E
+                ): Int performs E = right();
+                fn makeLeft(): () -> Int performs First = () -> perform First.new();
+                fn run(): Int performs First, Second = combine(
                     () -> makeLeft(),
-                    () -> raise Second.new()
+                    () -> perform Second.new()
                 );
                 """);
 
@@ -79,14 +79,14 @@ public final class EffectRowTest {
         final var result = resolve("""
                 effect Fixed {}
                 effect Extra {}
-                fn both(): Int raises Fixed, Extra {
-                    raise Fixed.new();
-                    raise Extra.new();
+                fn both(): Int performs Fixed, Extra {
+                    perform Fixed.new();
+                    perform Extra.new();
                     return 1;
                 }
-                fn observe<E: effect...>(callback: () -> Int raises Fixed, E): Int raises Fixed, E =
+                fn observe<E admits effect...>(callback: () -> Int performs Fixed, E): Int performs Fixed, E =
                     callback();
-                fn run(): Int raises Fixed, Extra = observe(() -> both());
+                fn run(): Int performs Fixed, Extra = observe(() -> both());
                 """);
 
         assertTrue(result.errors().toString(), result.errors().isEmpty());
@@ -96,10 +96,10 @@ public final class EffectRowTest {
     public void acceptsExplicitRowsAndSingletonEffectArguments() {
         final var result = resolve("""
                 effect Available {}
-                fn run<E: effect...>(callback: () -> Int raises E): Int raises E = callback();
+                fn run<E admits effect...>(callback: () -> Int performs E): Int performs E = callback();
                 fn empty(): Int = run<{}>(() -> 1);
-                fn singleton(): Int raises Available = run<{Available}>(() -> raise Available.new());
-                fn effectAsRow(): Int raises Available = run<Available>(() -> raise Available.new());
+                fn singleton(): Int performs Available = run<{Available}>(() -> perform Available.new());
+                fn effectAsRow(): Int performs Available = run<Available>(() -> perform Available.new());
                 """);
 
         assertTrue(result.errors().toString(), result.errors().isEmpty());
@@ -110,12 +110,12 @@ public final class EffectRowTest {
         for (final var source : List.of(
                 """
                 effect Available {}
-                fn relay<E: effect>(value: String): String = value;
+                fn relay<E admits effect>(value: String): String = value;
                 fn invalid(): String = relay<{Available}>("row");
                 """,
                 """
                 effect Available {}
-                fn relay<E: effect>(value: String): String = value;
+                fn relay<E admits effect>(value: String): String = value;
                 fn invalid(): String = relay<{}>("empty");
                 """)) {
             final var result = resolve(source);
@@ -130,8 +130,8 @@ public final class EffectRowTest {
     public void keepsEffectKindedParametersAsSingleEffects() {
         final var result = resolve("""
                 effect Available {}
-                fn relay<E: effect>(value: E): E raises E = value;
-                fn run(): Available raises Available = relay(Available.new());
+                fn relay<E admits effect>(value: E): E performs E = value;
+                fn run(): Available performs Available = relay(Available.new());
                 """);
 
         assertTrue(result.errors().toString(), result.errors().isEmpty());
@@ -142,8 +142,8 @@ public final class EffectRowTest {
         final var result = resolve("""
                 effect Permitted {}
                 effect Forbidden {}
-                fn take(callback: () -> Int raises Permitted): Int raises Permitted = callback();
-                fn invalid(): Int raises Permitted = take(() -> raise Forbidden.new());
+                fn take(callback: () -> Int performs Permitted): Int performs Permitted = callback();
+                fn invalid(): Int performs Permitted = take(() -> perform Forbidden.new());
                 """);
 
         assertFalse(result.errors().isEmpty());
@@ -162,9 +162,9 @@ public final class EffectRowTest {
     @Test
     public void pureFunctionFitsAnExpectedOpenRow() {
         final var result = resolve("""
-                fn assign<E: effect...>(
-                    callback: () -> Int raises {}
-                ): () -> Int raises E = callback;
+                fn assign<E admits effect...>(
+                    callback: () -> Int performs {}
+                ): () -> Int performs E = callback;
                 """);
 
         assertTrue(result.errors().toString(), result.errors().isEmpty());
@@ -173,10 +173,10 @@ public final class EffectRowTest {
     @Test
     public void recursiveRowPolymorphicFunctionsResolve() {
         final var result = resolve("""
-                fn recurse<E: effect...>(
+                fn recurse<E admits effect...>(
                     count: Int,
-                    callback: () -> Int raises E
-                ): Int raises E =
+                    callback: () -> Int performs E
+                ): Int performs E =
                     if (count == 0) then callback() else recurse(count - 1, callback);
                 fn pure(): Int = recurse(2, () -> 1);
                 """);
@@ -188,15 +188,15 @@ public final class EffectRowTest {
     public void nestedCallbackDepthCollectsAlternatingRowBounds() {
         final var valid = resolve("""
                 effect First {}
-                fn one<E: effect...>(consumer: (() -> Int raises E) -> Int): Int = 0;
+                fn one<E admits effect...>(consumer: (() -> Int performs E) -> Int): Int = 0;
                 fn pureConsumer(callback: () -> Int): Int = 0;
-                fn two<E: effect...>(consumer: ((() -> Int raises E) -> Int) -> Int): Int = 0;
-                fn firstConsumer(callback: (() -> Int raises First) -> Int): Int = 0;
-                fn three<E: effect...>(
-                    consumer: (((() -> Int raises E) -> Int) -> Int) -> Int
+                fn two<E admits effect...>(consumer: ((() -> Int performs E) -> Int) -> Int): Int = 0;
+                fn firstConsumer(callback: (() -> Int performs First) -> Int): Int = 0;
+                fn three<E admits effect...>(
+                    consumer: (((() -> Int performs E) -> Int) -> Int) -> Int
                 ): Int = 0;
                 fn nestedFirstConsumer(
-                    callback: ((() -> Int raises First) -> Int) -> Int
+                    callback: ((() -> Int performs First) -> Int) -> Int
                 ): Int = 0;
                 fn runOne(): Int = one(pureConsumer);
                 fn runTwo(): Int = two(firstConsumer);
@@ -206,13 +206,13 @@ public final class EffectRowTest {
 
         final var invalidAtDepthOne = resolve("""
                 effect Forbidden {}
-                fn nestedCheck<E: effect...>(
-                    producer: (() -> Int raises E),
-                    consumer: (() -> Int raises E) -> Int
-                ): Int raises E = producer();
+                fn nestedCheck<E admits effect...>(
+                    producer: (() -> Int performs E),
+                    consumer: (() -> Int performs E) -> Int
+                ): Int performs E = producer();
                 fn pureConsumer(callback: () -> Int): Int = 0;
-                fn invalid(): Int raises Forbidden =
-                    nestedCheck(() -> raise Forbidden.new(), pureConsumer);
+                fn invalid(): Int performs Forbidden =
+                    nestedCheck(() -> perform Forbidden.new(), pureConsumer);
                 """);
         assertFalse(invalidAtDepthOne.errors().toString(), invalidAtDepthOne.errors().isEmpty());
         assertTrue(invalidAtDepthOne.errors().toString(),
@@ -221,11 +221,11 @@ public final class EffectRowTest {
 
         final var invalidAtDepthTwo = resolve("""
                 effect Forbidden {}
-                fn nestedCheck<E: effect...>(
-                    consumer: ((() -> Int raises E) -> Int) -> Int,
-                    upper: (() -> Int raises E) -> Int
+                fn nestedCheck<E admits effect...>(
+                    consumer: ((() -> Int performs E) -> Int) -> Int,
+                    upper: (() -> Int performs E) -> Int
                 ): Int = 0;
-                fn firstConsumer(callback: (() -> Int raises Forbidden) -> Int): Int = 0;
+                fn firstConsumer(callback: (() -> Int performs Forbidden) -> Int): Int = 0;
                 fn pureConsumer(callback: () -> Int): Int = 0;
                 fn invalid(): Int = nestedCheck(firstConsumer, pureConsumer);
                 """);
@@ -236,13 +236,13 @@ public final class EffectRowTest {
 
         final var invalidAtDepthThree = resolve("""
                 effect Forbidden {}
-                fn nestedCheck<E: effect...>(
-                    producer: (() -> Int raises E),
-                    consumer: (((() -> Int raises E) -> Int) -> Int) -> Int
-                ): Int raises E = producer();
+                fn nestedCheck<E admits effect...>(
+                    producer: (() -> Int performs E),
+                    consumer: (((() -> Int performs E) -> Int) -> Int) -> Int
+                ): Int performs E = producer();
                 fn pureConsumer(callback: ((() -> Int) -> Int) -> Int): Int = 0;
-                fn invalid(): Int raises Forbidden =
-                    nestedCheck(() -> raise Forbidden.new(), pureConsumer);
+                fn invalid(): Int performs Forbidden =
+                    nestedCheck(() -> perform Forbidden.new(), pureConsumer);
                 """);
         assertFalse(invalidAtDepthThree.errors().toString(), invalidAtDepthThree.errors().isEmpty());
         assertTrue(invalidAtDepthThree.errors().toString(),
@@ -255,7 +255,7 @@ public final class EffectRowTest {
         final var valid = resolve("""
                 effect Fixed {}
                 effect Extra {}
-                fn relay<E: effect...>(callback: () -> Int raises Fixed, E): Int raises E =
+                fn relay<E admits effect...>(callback: () -> Int performs Fixed, E): Int performs E =
                     handle (callback()) with {
                         case Fixed -> 0;
                     };
@@ -265,7 +265,7 @@ public final class EffectRowTest {
         final var invalid = resolve("""
                 effect Fixed {}
                 effect Extra {}
-                fn relay<E: effect...>(callback: () -> Int raises Fixed, E): Int raises Fixed =
+                fn relay<E admits effect...>(callback: () -> Int performs Fixed, E): Int performs Fixed =
                     handle (callback()) with {
                         case Fixed -> 0;
                     };
@@ -279,7 +279,7 @@ public final class EffectRowTest {
     @Test
     public void rejectsHandlerCasesThatNameARowVariable() {
         final var result = resolve("""
-                fn invalid<E: effect...>(callback: () -> Int raises E): Int =
+                fn invalid<E admits effect...>(callback: () -> Int performs E): Int =
                     handle (callback()) with {
                         case E -> 0;
                     };
@@ -296,12 +296,12 @@ public final class EffectRowTest {
         final var valid = resolve("""
                 effect First {}
                 effect Second {}
-                contract Source<E: effect...> {
-                    read(callback: () -> Int raises E): Int raises E;
+                contract Source<E admits effect...> {
+                    read(callback: () -> Int performs E): Int performs E;
                 }
                 class Narrow is Source<{First, Second}> {
                     public constructor new;
-                    public read(callback: () -> Int raises First, Second): Int raises First = 0;
+                    public read(callback: () -> Int performs First, Second): Int performs First = 0;
                 }
                 """);
         assertTrue(valid.errors().toString(), valid.errors().isEmpty());
@@ -309,12 +309,12 @@ public final class EffectRowTest {
         final var invalid = resolve("""
                 effect First {}
                 effect Second {}
-                contract Source<E: effect...> {
-                    read(callback: () -> Int raises E): Int raises E;
+                contract Source<E admits effect...> {
+                    read(callback: () -> Int performs E): Int performs E;
                 }
                 class Widened is Source<{First}> {
                     public constructor new;
-                    public read(callback: () -> Int raises First): Int raises First, Second =
+                    public read(callback: () -> Int performs First): Int performs First, Second =
                         callback();
                 }
                 """);
@@ -325,22 +325,22 @@ public final class EffectRowTest {
     public void methodLevelRowsMustBeRepeatedByTheImplementation() {
         final var valid = resolve("""
                 contract Runner {
-                    run<E: effect...>(callback: () -> Int raises E): Int raises E;
+                    run<E admits effect...>(callback: () -> Int performs E): Int performs E;
                 }
                 class Impl is Runner {
                     public constructor new;
-                    public run<E: effect...>(callback: () -> Int raises E): Int raises E = callback();
+                    public run<E admits effect...>(callback: () -> Int performs E): Int performs E = callback();
                 }
                 """);
         assertTrue(valid.errors().toString(), valid.errors().isEmpty());
 
         final var invalid = resolve("""
                 contract Runner {
-                    run<E: effect...>(callback: () -> Int raises E): Int raises E;
+                    run<E admits effect...>(callback: () -> Int performs E): Int performs E;
                 }
                 class Impl is Runner {
                     public constructor new;
-                    public run<E: effect...>(callback: () -> Int raises E): Int = callback();
+                    public run<E admits effect...>(callback: () -> Int performs E): Int = callback();
                 }
                 """);
         assertFalse(invalid.errors().isEmpty());

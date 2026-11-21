@@ -102,11 +102,11 @@ A class can group a receiver-free helper with its instance API by declaring it `
 function is called through the class name, has no `this`, and cannot read instance state:
 
 ```zeron
-public class Box<T: mut> {
+public class Box<T admits mutable> {
     public property value: T;
     public constructor new;
 
-    public static fn of<U: mut>(value: U): Box<U> = Box<U>.new(value);
+    public static fn of<U admits mutable>(value: U): Box<U> = Box<U>.new(value);
     public static fn twice(value: Int): Int = value * 2;
 }
 ```

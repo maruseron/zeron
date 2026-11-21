@@ -23,7 +23,7 @@ public class HttpClient is Disposable {
     public constructor with(config: HttpClientConfig) =
         HttpClient.new(httpCreateClient(config.connectTimeout.nanoseconds), config);
 
-    public send(request: HttpRequest): HttpResponse raises HttpFailure {
+    public send(request: HttpRequest): HttpResponse performs HttpFailure {
         let mut responseTimeout = request.responseTimeout;
         if (responseTimeout == null) responseTimeout = this.config.responseTimeout;
         let mut bodyReadIdleTimeout = request.bodyReadIdleTimeout;
@@ -38,19 +38,19 @@ public class HttpClient is Disposable {
         if (not httpSendSucceeded(outcome)) {
             let kind = httpSendFailureKind(outcome);
             let message = httpSendFailureMessage(outcome);
-            raise HttpFailure.new(httpFailureKind(kind), message,
+            perform HttpFailure.new(httpFailureKind(kind), message,
                 httpSendFailureCause(outcome));
         }
 
         let response = httpSendResponse(outcome);
         if (not httpIsResponseHandle(response)) {
-            raise HttpFailure.new(HttpFailureKind.Transport(),
+            perform HttpFailure.new(HttpFailureKind.Transport(),
                 "The HTTP runtime returned an invalid response handle.", null);
         }
         return HttpResponse.from(response);
     }
 
-    public mut dispose(): Unit raises DisposeFailure {
+    public mut dispose(): Unit performs DisposeFailure {
         httpClientDispose(this.clientHandle);
     }
 }

@@ -31,15 +31,15 @@ public final class EffectRowCompilationTest {
                 public effect Failure {
                     public property code: Int;
                 }
-                public fn apply<T, R, E: effect...>(
+                public fn apply<T, R, E admits effect...>(
                     value: T,
-                    transform: (T) -> R raises E
-                ): R raises E = transform(value);
+                    transform: (T) -> R performs E
+                ): R performs E = transform(value);
                 fn pure(): Int = apply(1, value -> value + 1);
-                fn handled(): Int = handle (apply(1, value -> raise Failure.new(7))) with {
+                fn handled(): Int = handle (apply(1, value -> perform Failure.new(7))) with {
                     case Failure.code(code) -> code;
                 };
-                fn propagated(): Int raises Failure = apply(1, value -> raise Failure.new(9));
+                fn propagated(): Int performs Failure = apply(1, value -> perform Failure.new(9));
                 """.formatted(packageName));
         try {
             final var compiler = CompilationService.forCompilationUnits(List.of(unit),
@@ -80,10 +80,10 @@ public final class EffectRowCompilationTest {
                 public effect Failure {
                     public property code: Int;
                 }
-                public fn apply<T, R, E: effect...>(
+                public fn apply<T, R, E admits effect...>(
                     value: T,
-                    transform: (T) -> R raises E
-                ): R raises E = transform(value);
+                    transform: (T) -> R performs E
+                ): R performs E = transform(value);
                 """.formatted(libraryPackage));
         try {
             final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
@@ -118,7 +118,7 @@ public final class EffectRowCompilationTest {
                     import %s.Failure;
                     import %s.apply;
                     fn pure(): Int = apply(1, value -> value + 1);
-                    fn effectful(): Int raises Failure = apply(1, value -> raise Failure.new(11));
+                    fn effectful(): Int performs Failure = apply(1, value -> perform Failure.new(11));
                     """.formatted(clientPackage, libraryPackage, libraryPackage));
             final var clientCompiler = CompilationService.forCompilationUnits(List.of(clientUnit),
                     clientPackage + ".Client", clientPackage, List.of(index), true, List.of(),

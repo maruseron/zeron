@@ -140,7 +140,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Candidate | 0.9.0 |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
-| [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Candidate | 0.9.0 |
+| [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Leading Reification | Implemented | Candidate | 0.9.0 |
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Shipped | 0.8.0 |
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Shipped | 0.8.0 |
 | [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Shipped | 0.8.0 |
@@ -164,7 +164,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0144](./ZEP-0144.md) | Parameter Type Refinement and Call-Site Preconditions | Draft | Unscheduled | - |
 | [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
 | [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Implemented | Shipped | 0.8.0 |
-| [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
+| [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Implemented | Candidate | 0.9.0 |
 | [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Shipped | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Shipped | 0.8.0 |
@@ -194,7 +194,7 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0119, ZEP-0120, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -349,16 +349,18 @@ is implemented, and the remaining designs are `Draft`. The effect-control rows c
 the library rows add surface that does not touch handler typing or code generation:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
-  an effect declares a response type, `raise` becomes an expression whose value the handler
+  an effect declares a response type, `perform` becomes an expression whose value the handler
   supplies, and tail-resumptive cases compile to direct handler calls without stack capture. It
   also introduces the `Yield<T>`, `Ask<T>`, and `Log` library effects and the push direction of
   generators. The row stays `Candidate` until the bundle ships.
-- [ZEP-0147](./ZEP-0147.md) — replace `raise` and `raises` with `perform` and `performs`. A
-  source-breaking rename of the effect-operation vocabulary; it does not change response typing,
-  effect identity, or handler behavior.
-- [ZEP-0123](./ZEP-0123.md) — admissibility clauses and explicit effect responses. The `admits`
-  clause separates "which type arguments may be substituted" from "which operations are
-  available"; its `effect<R>` marker depends on ZEP-0118.
+- [ZEP-0147](./ZEP-0147.md) — replace `raise` and `raises` with `perform` and `performs`.
+  Implemented: a source-breaking rename of the effect-operation vocabulary; it does not change
+  response typing, effect identity, or handler behavior.
+- [ZEP-0123](./ZEP-0123.md) — admissibility clauses and leading reification. Implemented: the
+  `admits` clause separates "which type arguments may be substituted" from "which operations are
+  available"; it
+  moves `reified` to a leading capability and leaves response constraints to ZEP-0118's
+  `Responds<R>` bound.
 - [ZEP-0112](./ZEP-0112.md) — structured concurrency on virtual threads. A library-only `Scope` /
   `Task` track with cancellation and timeouts; independent of response typing.
 - [ZEP-0120](./ZEP-0120.md) — async as an effect and the `Future`/`Task` surface. Depends on

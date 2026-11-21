@@ -5,7 +5,7 @@ import zeron.internal.unwrapSome;
 import zeron.lang.Option;
 import zeron.lang.Pair;
 
-class HashTableEntry<K, V: mut> {
+class HashTableEntry<K, V admits mutable> {
     keyValue: K;
     cachedHash: Long;
     storedValue: V;
@@ -25,7 +25,7 @@ class HashTableEntry<K, V: mut> {
     public next(): HashTableEntry<K, V>? = this.nextEntry;
 }
 
-class HashTableIterator<K, V: mut> is Iterator<Pair<K, V>> {
+class HashTableIterator<K, V admits mutable> is Iterator<Pair<K, V>> {
     buckets: &Array<HashTableEntry<K, V>?>;
     bucketIndex: Int;
     current: HashTableEntry<K, V>?;
@@ -53,7 +53,7 @@ class HashTableIterator<K, V: mut> is Iterator<Pair<K, V>> {
     }
 }
 
-class HashTableKeyIterator<K, V: mut> is Iterator<K> {
+class HashTableKeyIterator<K, V admits mutable> is Iterator<K> {
     buckets: &Array<HashTableEntry<K, V>?>;
     bucketIndex: Int;
     current: HashTableEntry<K, V>?;
@@ -86,7 +86,7 @@ class HashTableKeyIterator<K, V: mut> is Iterator<K> {
 /// `HashTable` owns the bucket structure shared by `HashMap` and `IdentityHashMap`. The two
 /// functions must agree: keys that `equalityFunction` considers equal must produce the same hash
 /// from `hashFunction`.
-class HashTable<K, V: mut> {
+class HashTable<K, V admits mutable> {
     buckets: &Array<HashTableEntry<K, V>?>;
     elementCount: Int;
     hashFunction: (K) -> Long;
@@ -251,10 +251,10 @@ class HashTable<K, V: mut> {
         return val;
     }
 
-    public mut compute<E: effect...>(
+    public mut compute<E admits effect...>(
         key: K,
-        transform: (K, Option<V>) -> Option<V> raises E
-    ): Option<V> raises E {
+        transform: (K, Option<V>) -> Option<V> performs E
+    ): Option<V> performs E {
         let val = get(key);
         let new = transform(key, val);
         if (new matches Option.None()) {
@@ -267,10 +267,10 @@ class HashTable<K, V: mut> {
         return new;
     }
 
-    public mut computeIfAbsent<E: effect...>(
+    public mut computeIfAbsent<E admits effect...>(
         key: K,
-        transform: (K) -> V raises E
-    ): V raises E {
+        transform: (K) -> V performs E
+    ): V performs E {
         let val = get(key);
         if (val matches Option.None()) {
             let res = transform(key);

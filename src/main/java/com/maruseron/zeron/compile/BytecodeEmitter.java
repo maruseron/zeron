@@ -679,7 +679,7 @@ final class BytecodeEmitter {
             case Expr.If iff -> ExpressionFlowEmitter.emitIfExpression(context, composer, iff);
             case Expr.Pipeline pipeline -> ExpressionFlowEmitter.emitForExpression(context, composer, pipeline);
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
-            case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
+            case Expr.Raise perform -> ExpressionFlowEmitter.emitRaise(context, composer, perform);
             case Expr.Unsafe unsafe -> emitExpr(context, composer, unsafe.expression);
             case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
             case Expr.Do doExpression -> emitExpr(context, composer, doExpression.lowered());

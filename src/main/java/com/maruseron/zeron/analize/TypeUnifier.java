@@ -350,7 +350,7 @@ final class TypeUnifier {
                                  final boolean covariant) {
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                 where, "Effect '" + TypeFormatter.format(effect) + "' is not permitted "
-                        + (covariant ? "by the expected raises clause." : "by this callback position.")));
+                        + (covariant ? "by the expected performs clause." : "by this callback position.")));
     }
 
     private static boolean acceptsAny(final TypeDescriptor expected, final TypeDescriptor actual) {

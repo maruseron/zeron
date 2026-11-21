@@ -24,10 +24,10 @@ public final class StaticFunctionsTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-static-functions-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public class Box<T: mut> {
+                public class Box<T admits mutable> {
                     public property value: T;
                     public constructor new;
-                    public static fn of<U: mut>(value: U): Box<U> = Box<U>.new(value);
+                    public static fn of<U admits mutable>(value: U): Box<U> = Box<U>.new(value);
                     public static fn twice(value: Int): Int = value * 2;
                 }
                 namespace Box {
@@ -123,7 +123,7 @@ public final class StaticFunctionsTest {
                 }
                 """, "Unknown symbol: 'this'");
         assertDiagnostic("""
-                class Generic<T: mut> {
+                class Generic<T admits mutable> {
                     public constructor new;
                     value: T;
                     public static fn bad(value: T): T = value;

@@ -12,23 +12,23 @@ public effect TestFailure {
 }
 
 /// Fails the current test with `message`.
-public fn fail(message: String): Unit raises TestFailure =
-    raise TestFailure.new(message);
+public fn fail(message: String): Unit performs TestFailure =
+    perform TestFailure.new(message);
 
 /// Fails unless `condition` is true.
 public fn assertTrue(
     condition: Boolean,
     message: String = "expected condition to be true"
-): Unit raises TestFailure {
-    if (condition == false) raise TestFailure.new(message);
+): Unit performs TestFailure {
+    if (condition == false) perform TestFailure.new(message);
 }
 
 /// Fails when `condition` is true.
 public fn assertFalse(
     condition: Boolean,
     message: String = "expected condition to be false"
-): Unit raises TestFailure {
-    if (condition) raise TestFailure.new(message);
+): Unit performs TestFailure {
+    if (condition) perform TestFailure.new(message);
 }
 
 /// Fails unless `expected` and `actual` are equal.
@@ -36,9 +36,9 @@ public fn assertEquals<T: Eq<T> + Display>(
     expected: T,
     actual: T,
     message: String = ""
-): Unit raises TestFailure {
+): Unit performs TestFailure {
     if (expected != actual) {
-        raise TestFailure.new(if (message.isEmpty())
+        perform TestFailure.new(if (message.isEmpty())
             then "expected " + expected.toString() + ", got " + actual.toString()
             else message);
     }
@@ -49,26 +49,26 @@ public fn assertNotEquals<T: Eq<T> + Display>(
     unexpected: T,
     actual: T,
     message: String = ""
-): Unit raises TestFailure {
+): Unit performs TestFailure {
     if (unexpected == actual) {
-        raise TestFailure.new(if (message.isEmpty())
+        perform TestFailure.new(if (message.isEmpty())
             then "expected values to differ, got " + actual.toString()
             else message);
     }
 }
 
 /// Fails unless `value` is null.
-public fn assertNull<T: nullable>(value: T?, message: String = "expected a null value"): Unit
-        raises TestFailure {
-    if (value != null) raise TestFailure.new(message);
+public fn assertNull<T admits nullable>(value: T?, message: String = "expected a null value"): Unit
+        performs TestFailure {
+    if (value != null) perform TestFailure.new(message);
 }
 
 /// Fails when `value` is null.
-public fn assertNotNull<T: nullable>(
+public fn assertNotNull<T admits nullable>(
     value: T?,
     message: String = "expected a non-null value"
-): Unit raises TestFailure {
-    if (value == null) raise TestFailure.new(message);
+): Unit performs TestFailure {
+    if (value == null) perform TestFailure.new(message);
 }
 
 /// Fails unless `actual` is within `tolerance` of `expected`.
@@ -77,10 +77,10 @@ public fn assertApproximatelyEquals(
     actual: Float,
     tolerance: Float,
     message: String = ""
-): Unit raises TestFailure {
+): Unit performs TestFailure {
     if (actual > expected and actual - expected > tolerance
             or expected > actual and expected - actual > tolerance) {
-        raise TestFailure.new(if (message.isEmpty())
+        perform TestFailure.new(if (message.isEmpty())
             then "expected " + expected.toString() + " +/- " + tolerance.toString()
                 + ", got " + actual.toString()
             else message);

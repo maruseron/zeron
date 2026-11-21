@@ -630,7 +630,7 @@ public final class SumTypeTest {
                         case Choice.Nothing() -> "nothing";
                     };
                 }
-                fn throughBound<T: mut + Label>(value: T): String = value.label();
+                fn throughBound<T: Label admits mutable>(value: T): String = value.label();
                 fn run(): String =
                     if (Choice.Just(42).hasValue())
                     then throughBound(Choice.Just(42))
@@ -692,7 +692,7 @@ public final class SumTypeTest {
         final var libraryUnit = parse("Library.zn", """
                 package %s;
                 import zeron.lang.Comparable;
-                public type IO<A: mut> = Pure(value: A) | Bind<B: mut>(source: IO<A>, transform: (A) -> IO<B>);
+                public type IO<A admits mutable> = Pure(value: A) | Bind<B admits mutable>(source: IO<A>, transform: (A) -> IO<B>);
                 public type Sorted<A: Comparable<A>> = Empty | Cons(head: A, tail: Sorted<A>);
                 """.formatted(libraryPackage));
         try {

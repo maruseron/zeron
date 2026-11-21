@@ -24,16 +24,16 @@ public class TextWriter is Disposable {
 
     public constructor with(writer: &Writer) = TextWriter.new(writer);
 
-    public mut write(value: String): Unit raises IoFailure {
+    public mut write(value: String): Unit performs IoFailure {
         let bytes = stringGetBytes(value, StandardCharsets.UTF_8);
         this.writer.write(bytes, 0, bytes.length);
     }
 
-    public mut flush(): Unit raises IoFailure {
+    public mut flush(): Unit performs IoFailure {
         this.writer.flush();
     }
 
-    public mut dispose(): Unit raises DisposeFailure = this.writer.dispose();
+    public mut dispose(): Unit performs DisposeFailure = this.writer.dispose();
 }
 
 public class TextReader is Disposable {
@@ -43,7 +43,7 @@ public class TextReader is Disposable {
 
     public constructor with(reader: &Reader) = TextReader.new(reader);
 
-    public mut readAll(): String raises IoFailure {
+    public mut readAll(): String performs IoFailure {
         let mut buffer: &ByteArray = allocateByteArray(4096);
         let output = ByteArrayOutputStream.new();
         let mut complete = false;
@@ -61,22 +61,22 @@ public class TextReader is Disposable {
             decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
             return decoder.decode(ByteBuffer.wrap(output.toByteArray())).toString();
         }
-        raise IoFailure.new(unsafe java.io.IOException.new("UTF-8 charset unavailable"));
+        perform IoFailure.new(unsafe java.io.IOException.new("UTF-8 charset unavailable"));
     }
 
-    public mut dispose(): Unit raises DisposeFailure = this.reader.dispose();
+    public mut dispose(): Unit performs DisposeFailure = this.reader.dispose();
 }
 
-public fn readText(path: Path): String raises IoFailure =
+public fn readText(path: Path): String performs IoFailure =
     Files.readString(File.new(path.toString()).toPath());
 
-public fn openTextReader(path: Path): &TextReader raises IoFailure =
+public fn openTextReader(path: Path): &TextReader performs IoFailure =
     TextReader.with(openReader(path));
 
-public fn openTextWriter(path: Path): &TextWriter raises IoFailure =
+public fn openTextWriter(path: Path): &TextWriter performs IoFailure =
     TextWriter.with(openWriter(path));
 
-public fn writeText(path: Path, value: String): Unit raises IoFailure, DisposeFailure {
+public fn writeText(path: Path, value: String): Unit performs IoFailure, DisposeFailure {
     using (let writer: &TextWriter = openTextWriter(path)) {
         writer.write(value);
     }

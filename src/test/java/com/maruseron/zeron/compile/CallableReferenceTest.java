@@ -119,7 +119,7 @@ public final class CallableReferenceTest {
                     public property name: String;
                     public constructor new;
                 }
-                public contract FactoryModel<T: nullable + mut> requires zeron.lang.Model<T> {
+                public contract FactoryModel<T admits nullable + mutable> requires zeron.lang.Model<T> {
                     property construction: ConstructorRef<(String) -> &T>;
                 }
                 public model UserFactory is FactoryModel<User> {
@@ -156,11 +156,11 @@ public final class CallableReferenceTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-callable-generic-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public class Box<T: nullable + mut> {
+                public class Box<T admits nullable + mutable> {
                     public property value: T;
                     public constructor new;
-                    public map<U: nullable + mut>(transform: (T) -> U): U = transform(this.value);
-                    public static fn of<U: nullable + mut>(value: U): Box<U> = Box<U>.new(value);
+                    public map<U admits nullable + mutable>(transform: (T) -> U): U = transform(this.value);
+                    public static fn of<U admits nullable + mutable>(value: U): Box<U> = Box<U>.new(value);
                 }
                 fn twice(value: Int): Int = value * 2;
                 fn mapped(): Int {
@@ -202,12 +202,12 @@ public final class CallableReferenceTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-callable-inferred-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public class Box<T: nullable + mut> {
+                public class Box<T admits nullable + mutable> {
                     public property value: T;
                     public constructor new;
-                    public map<U: nullable + mut>(transform: (T) -> U): U =
+                    public map<U admits nullable + mutable>(transform: (T) -> U): U =
                         transform(this.value);
-                    public static fn make<U: nullable + mut>(value: U): Box<U> =
+                    public static fn make<U admits nullable + mutable>(value: U): Box<U> =
                         Box<U>.new(value);
                 }
                 fn twice(value: Int): Int = value * 2;
@@ -248,19 +248,19 @@ public final class CallableReferenceTest {
                     public property code: Int;
                 }
                 public contract Loader {
-                    load(value: Int): Int raises Invalid;
+                    load(value: Int): Int performs Invalid;
                 }
                 public class PositiveLoader is Loader {
                     public constructor new;
-                    public load(value: Int): Int raises Invalid {
+                    public load(value: Int): Int performs Invalid {
                         if (value < 0) {
-                            raise Invalid.new(1);
+                            perform Invalid.new(1);
                         }
                         return value;
                     }
                 }
                 fn loadThroughReference(value: Int): Int {
-                    let load: (Loader, Int) -> Int raises Invalid = Loader::load;
+                    let load: (Loader, Int) -> Int performs Invalid = Loader::load;
                     return handle (load(PositiveLoader.new(), value)) with {
                         case Invalid.code(code) -> code;
                     };
@@ -376,10 +376,10 @@ public final class CallableReferenceTest {
                 fn broken(): String = (User::hidden).identity;
                 """, "not accessible");
         assertResolutionFailsContaining("""
-                public class Box<T: nullable + mut> {
+                public class Box<T admits nullable + mutable> {
                     public property value: T;
                     public constructor new;
-                    public map<U: nullable + mut>(transform: (T) -> U): U =
+                    public map<U admits nullable + mutable>(transform: (T) -> U): U =
                         transform(this.value);
                 }
                 fn broken(): String = (Box<Int>::map).identity;

@@ -21,9 +21,9 @@ public class HttpHeaders {
 
     public constructor empty() = HttpHeaders.new(httpEmptyHeaders());
 
-    public constructor fromResponsePairs(entries: Array<String>) raises HttpFailure {
+    public constructor fromResponsePairs(entries: Array<String>) performs HttpFailure {
         if (not httpValidateResponseHeaderPairs(entries)) {
-            raise HttpFailure.new(HttpFailureKind.Protocol(),
+            perform HttpFailure.new(HttpFailureKind.Protocol(),
                     "The server returned invalid HTTP header data.", null);
         }
         return HttpHeaders.new(httpCopyHeaderPairs(entries));

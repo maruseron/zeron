@@ -221,7 +221,7 @@ public final class CompilationUnitTest {
                 fn identity(option: Option<Int>): Option<Int> = option;
                 fn created(): Option<Int> = Option.Some(42);
                 fn result(): Int = defaultImportMarker();
-                fn main(): Unit raises IoFailure {
+                fn main(): Unit performs IoFailure {
                     println("hello");
                 }
                 """);
@@ -229,7 +229,7 @@ public final class CompilationUnitTest {
                 package app;
                 import zeron.io.*;
                 import zeron.lang.*;
-                fn main(): Unit raises IoFailure {
+                fn main(): Unit performs IoFailure {
                     println("hello");
                 }
                 """);

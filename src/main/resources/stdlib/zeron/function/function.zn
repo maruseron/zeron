@@ -3,16 +3,16 @@ package zeron.function;
 import zeron.collections.HashMap;
 
 /// The identity function.
-public fn identity<A: mut>(a: A): A = a;
+public fn identity<A admits mutable>(a: A): A = a;
 
 /// Returns a new nullary function that, given a value `c`, will always
 /// return `c`.
-public fn supply<A: mut>(c: A): () -> A = 
+public fn supply<A admits mutable>(c: A): () -> A =
     () -> c;
 
 /// Returns a new function that, given a value `c` and regardless of input, 
 /// will always return `c`.
-public fn constant<A: mut, B: mut>(c: B): A -> B =
+public fn constant<A admits mutable, B admits mutable>(c: B): A -> B =
     x -> c;
 
 // core combiners 
@@ -23,7 +23,7 @@ public fn constant<A: mut, B: mut>(c: B): A -> B =
 /// compose(g, f)(x) == g(f(x))
 /// ```
 /// `pipe` is the inverse of this function.
-public fn compose<A: mut, B: mut, C: mut>(g: B -> C, f: A -> B): A -> C =
+public fn compose<A admits mutable, B admits mutable, C admits mutable>(g: B -> C, f: A -> B): A -> C =
     x -> g(f(x));
 
 /// Returns a new function that, given two functions `f` and `g` passes an 
@@ -32,46 +32,46 @@ public fn compose<A: mut, B: mut, C: mut>(g: B -> C, f: A -> B): A -> C =
 /// pipe(f, g)(x) == g(f(x))
 /// ```
 /// `compose` is the inverse of this function.
-public fn pipe<A: mut, B: mut, C: mut>(f: A -> B, g: B -> C): A -> C =
+public fn pipe<A admits mutable, B admits mutable, C admits mutable>(f: A -> B, g: B -> C): A -> C =
     x -> g(f(x));
 
 /// Returns a new function that flips the order of the arguments in `f`.
-public fn flip<A: mut, B: mut, C: mut>(f: (A, B) -> C): (B, A) -> C =
+public fn flip<A admits mutable, B admits mutable, C admits mutable>(f: (A, B) -> C): (B, A) -> C =
     (b, a) -> f(a, b);
 
-public fn curry<A: mut, B: mut, C: mut>(f: (A, B) -> C): A -> B -> C =
+public fn curry<A admits mutable, B admits mutable, C admits mutable>(f: (A, B) -> C): A -> B -> C =
     a -> (b: B) -> f(a, b);
 
-public fn curry3<A: mut, B: mut, C: mut, D: mut>(f: (A, B, C) -> D): A -> B -> C -> D =
+public fn curry3<A admits mutable, B admits mutable, C admits mutable, D admits mutable>(f: (A, B, C) -> D): A -> B -> C -> D =
     a -> (b: B) -> (c: C) -> f(a, b, c);
 
 // TODO: the resolver won't let you call an expression. work on this!
-//public fn uncurry2<A: mut, B: mut, C: mut>(f: (A) -> (B) -> C): (A, B) -> C
+//public fn uncurry2<A admits mutable, B admits mutable, C admits mutable>(f: (A) -> (B) -> C): (A, B) -> C
 //    (a, b) -> f(a)(b);
 
 // predicates
 
 /// Returns a new function that, given a boolean-valued function `p`,
 /// inverts its result.
-public fn negate<A: mut>(p: A -> Boolean): A -> Boolean =
+public fn negate<A admits mutable>(p: A -> Boolean): A -> Boolean =
     a -> not p(a);
 
 /// Returns a new function that, given two boolean-valued functions `f` and `g` 
 /// and any value `a`, returns `true` when both f(a) and g(a) are true.
 /// This operation is short circuiting, and the predicates will be evaluated in order.
-public fn both<A: mut>(f: A -> Boolean, g: A -> Boolean): A -> Boolean =
+public fn both<A admits mutable>(f: A -> Boolean, g: A -> Boolean): A -> Boolean =
     a -> f(a) and g(a);
 
 /// Returns a new function that, given two boolean-valued functions `f` and `g` 
 /// and any value `a`, returns `true` when either f(a) or g(a) are true.
 /// This operation is short circuiting, and the predicates will be evaluated in order.
-public fn either<A: mut>(f: A -> Boolean, g: A -> Boolean): A -> Boolean =
+public fn either<A admits mutable>(f: A -> Boolean, g: A -> Boolean): A -> Boolean =
     a -> f(a) or g(a);
 
 /// Returns a new function that wraps a given unary function `f` with a caching mechanism 
 /// to store and reuse previously computed results for identical inputs.
 /// This operation requires the argument type `A` to satisfy the Hashable contract.
-public fn memoize<A: Hashable<A>, B: mut>(f: A -> B): A -> B {
+public fn memoize<A: Hashable<A>, B admits mutable>(f: A -> B): A -> B {
     let cache = HashMap.empty<A, B>();
     
     return a -> cache.computeIfAbsent(a, k -> f(k));

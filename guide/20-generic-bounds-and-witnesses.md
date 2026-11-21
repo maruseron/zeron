@@ -37,7 +37,7 @@ bound its type constructor by `CollectionBuilder<C<_>>`:
 ```zeron
 import zeron.collections.CollectionBuilder;
 
-fn collectInto<C<_>: CollectionBuilder<C>, E: nullable + mut>(
+fn collectInto<C<_>: CollectionBuilder<C>, E admits nullable + mutable>(
     source: Iterable<E>
 ): &C<E> {
     let result = C.empty<E>();
@@ -197,7 +197,7 @@ migration release, and are removed one release after the standard library migrat
 A `default` witness is canonical evidence declared in the same file as the type it targets:
 
 ```zeron
-public class Box<T: mut> {
+public class Box<T admits mutable> {
     public constructor new(value: T);
 }
 

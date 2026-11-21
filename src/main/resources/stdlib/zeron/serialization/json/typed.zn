@@ -511,13 +511,13 @@ public class JsonTreeDecoder is Decoder {
 ///
 /// The evidence comes from derivation or an explicit witness; this helper does not inspect the
 /// value's runtime class.
-public fn decodeValue<T: mut + nullable + Decode<T, {}>>(value: &JsonValue): Result<T, DecodeError> {
+public fn decodeValue<T: Decode<T, {}> admits mutable + nullable>(value: &JsonValue): Result<T, DecodeError> {
     let decoder = JsonTreeDecoder.from(value);
     return decode<{}, T>(decoder);
 }
 
 /// Encodes `value` as a JSON value using its `Encode` evidence.
-public fn encodeValue<T: nullable + mut + Encode<T, {}>>(value: T): Result<&JsonValue, EncodeError> {
+public fn encodeValue<T: Encode<T, {}> admits nullable + mutable>(value: T): Result<&JsonValue, EncodeError> {
     let encoder = JsonTreeEncoder.empty();
     return match (encode<{}, T>(value, encoder)) {
         case Result.Ok(_) -> match (encoder.result()) {
@@ -543,7 +543,7 @@ public fn getErrorOffset(error: JsonError): Option<Int> = match (error) {
 ///
 /// A syntax error becomes a `DecodeError` whose `position` is the source offset reported by the
 /// parser.
-public fn parseAs<T: nullable + mut + Decode<T, {}>>(text: String): Result<T, DecodeError> =
+public fn parseAs<T: Decode<T, {}> admits nullable + mutable>(text: String): Result<T, DecodeError> =
     match (parse(text)) {
         case Ok(value) -> decodeValue<T>(value);
         case Err(error) -> Result<T, DecodeError>.Err(DecodeError.new(
@@ -551,7 +551,7 @@ public fn parseAs<T: nullable + mut + Decode<T, {}>>(text: String): Result<T, De
     };
 
 /// Encodes `value` and writes the result as compact JSON text.
-public fn stringifyAs<T: nullable + mut + Encode<T, {}>>(value: T): Result<String, EncodeError> =
+public fn stringifyAs<T: Encode<T, {}> admits nullable + mutable>(value: T): Result<String, EncodeError> =
     match (encodeValue<T>(value)) {
         case Ok(json) -> match (stringify(json)) {
             case Ok(text) -> Result<String, EncodeError>.Ok(text);

@@ -180,9 +180,9 @@ type parameters are implemented by [ZEP-0128](../zeps/ZEP-0128.md). A case may d
 marker-bounded parameters, which are existential in the sum type:
 
 ```zeron
-public type IO<A: mut> =
+public type IO<A admits mutable> =
       Pure(value: A)
-    | Bind<B: mut>(source: IO<A>, transform: (A) -> IO<B>);
+    | Bind<B admits mutable>(source: IO<A>, transform: (A) -> IO<B>);
 ```
 
 `IO<A>` still has one type argument; `Bind` chooses `B` at construction and matching treats it as
@@ -316,7 +316,7 @@ For example:
 ```zeron
 public newtype Meters = Float;
 public newtype UserId = String where value != "";
-public newtype IO<A: mut> = () -> A;
+public newtype IO<A admits mutable> = () -> A;
 ```
 
 `IO` is a function-shaped newtype: construction takes the function value, a newtype-owned extension

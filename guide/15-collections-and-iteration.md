@@ -44,15 +44,15 @@ small set of operations that describes how to get items one by one.
 The standard protocol is defined by two contracts in the `zeron.collections` package:
 
 ```zeron
-public type Step<T: nullable> =
+public type Step<T admits nullable> =
       Yield(value: T)
     | Done;
 
-public contract Iterable<T: nullable> {
+public contract Iterable<T admits nullable> {
     iterator(): &Iterator<T>;
 }
 
-public contract Iterator<T: nullable> {
+public contract Iterator<T admits nullable> {
     mut next(): Step<T>;
 }
 ```

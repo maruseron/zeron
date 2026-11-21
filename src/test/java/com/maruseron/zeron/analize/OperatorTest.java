@@ -81,12 +81,12 @@ public final class OperatorTest {
                     fn signum(): Vector = Vector.new(this.value.signum());
                     static fn fromInteger(value: Integer): Vector = Vector.new(value.toIntExact());
                 }
-                fn add<T: mut + Numeric<T>>(left: T, right: T): T = left + right;
-                fn subtract<T: mut + Numeric<T>>(left: T, right: T): T = left - right;
-                fn negate<T: mut + Numeric<T>>(value: T): T = -value;
-                fn multiply<T: mut + Numeric<T>>(left: T, right: T): T = left * right;
-                fn reciprocal<T: mut + Fractional<T>>(value: T): T = value.reciprocal();
-                fn forwarded<T: mut + Numeric<T>>(left: T, right: T): T = subtract(left, right);
+                fn add<T: Numeric<T> admits mutable>(left: T, right: T): T = left + right;
+                fn subtract<T: Numeric<T> admits mutable>(left: T, right: T): T = left - right;
+                fn negate<T: Numeric<T> admits mutable>(value: T): T = -value;
+                fn multiply<T: Numeric<T> admits mutable>(left: T, right: T): T = left * right;
+                fn reciprocal<T: Fractional<T> admits mutable>(value: T): T = value.reciprocal();
+                fn forwarded<T: Numeric<T> admits mutable>(left: T, right: T): T = subtract(left, right);
                 fn builtinAdd(): Int = add(2, 3);
                 fn builtinLongAdd(): Long = add(2L, 3L);
                 fn builtinFloatAdd(): Float = add(2.0, 3.0);

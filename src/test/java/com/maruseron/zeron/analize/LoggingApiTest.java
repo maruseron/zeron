@@ -63,7 +63,7 @@ public final class LoggingApiTest {
 
                     public wasFlushed(): Boolean = this.flushed;
 
-                    public mut dispose(): Unit raises DisposeFailure = ();
+                    public mut dispose(): Unit performs DisposeFailure = ();
                 }
 
                 fn filteringStopsBelowMinimum(): Boolean {

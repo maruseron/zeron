@@ -36,11 +36,11 @@ public final class TypedRaisedEffectsTest {
                     public property message: String;
                 }
                 public class Worker {
-                    public work(): Int raises Failure = raise Failure.new("method");
-                    public constructor start() raises Startup = raise Startup.new("constructor");
+                    public work(): Int performs Failure = perform Failure.new("method");
+                    public constructor start() performs Startup = perform Startup.new("constructor");
                 }
-                public fn fail(): String raises Failure = raise Failure.new("library");
-                public fn callback(value: Int): Int raises Failure = raise Failure.new("callback");
+                public fn fail(): String performs Failure = perform Failure.new("library");
+                public fn callback(value: Int): Int performs Failure = perform Failure.new("callback");
                 """.formatted(libraryPackage));
 
         try {
@@ -74,12 +74,12 @@ public final class TypedRaisedEffectsTest {
                     fn handled(): String = handle (fail()) with {
                         case Failure.message(message) -> message;
                     };
-                    fn captured(): () -> String = handle (raise Failure.new("captured")) with {
+                    fn captured(): () -> String = handle (perform Failure.new("captured")) with {
                         case Failure as error -> () -> error.message;
                     };
-                    fn work(): Int raises Failure = Worker.new().work();
-                    fn start(): Worker raises Startup = Worker.start();
-                    fn callbackType(): (Int) -> Int raises Failure = callback;
+                    fn work(): Int performs Failure = Worker.new().work();
+                    fn start(): Worker performs Startup = Worker.start();
+                    fn callbackType(): (Int) -> Int performs Failure = callback;
                     class Details {
                         public property first: String;
                         public property second: String;
@@ -92,20 +92,20 @@ public final class TypedRaisedEffectsTest {
                         public property details: Details;
                     }
                     fn structured(): String = handle (
-                        raise StructuredFailure.new(Details.new("nested", "pattern"))
+                        perform StructuredFailure.new(Details.new("nested", "pattern"))
                     ) with {
                         case StructuredFailure.details(Details.pair(left, right))
                             if left == "skip" -> "guarded";
                         case StructuredFailure as failure -> failure.details.first + failure.details.second;
                     };
                     fn alternatives(): String = handle (
-                        raise StructuredFailure.new(Details.new("a", "b"))
+                        perform StructuredFailure.new(Details.new("a", "b"))
                     ) with {
                         case StructuredFailure.details(Details.pair(left, right))
                             | StructuredFailure.details(Details.pair(left, right)) -> left + right;
                     };
-                    fn guardedPropagation(): String raises StructuredFailure = handle (
-                        raise StructuredFailure.new(Details.new("a", "b"))
+                    fn guardedPropagation(): String performs StructuredFailure = handle (
+                        perform StructuredFailure.new(Details.new("a", "b"))
                     ) with {
                         case StructuredFailure.details(Details.pair(left, right))
                             if left == "skip" -> "handled";
@@ -185,23 +185,23 @@ public final class TypedRaisedEffectsTest {
                 public effect Failure {
                     public property message: String;
                 }
-                fn compute(): Int raises Ask<Int> = raise Ask<Int>() + 22;
+                fn compute(): Int performs Ask<Int> = perform Ask<Int>() + 22;
                 fn asked(): Int = handle (compute()) with {
                     case Ask<Int>, k -> k.resume(8);
                 };
-                fn yielded(): Unit = handle (raise Yield<Int>(5)) with {
+                fn yielded(): Unit = handle (perform Yield<Int>(5)) with {
                     case Yield<Int>(value), k -> k.resume(());
                 };
-                fn nested(): Int = handle (raise Ask<Int>()) with {
-                    case Ask<Int>, outer -> outer.resume(handle (raise Ask<Int>()) with {
+                fn nested(): Int = handle (perform Ask<Int>()) with {
+                    case Ask<Int>, outer -> outer.resume(handle (perform Ask<Int>()) with {
                         case Ask<Int>, inner -> inner.resume(3);
                     });
                 };
-                fn mixed(): Int = handle (raise Ask<Int>() + 1) with {
+                fn mixed(): Int = handle (perform Ask<Int>() + 1) with {
                     case Ask<Int>, k -> k.resume(5);
                     case Failure as failure -> failure.message.length();
                 };
-                fn abortiveStillWorks(): Int = handle (raise Failure.new("boom")) with {
+                fn abortiveStillWorks(): Int = handle (perform Failure.new("boom")) with {
                     case Ask<Int>, k -> k.resume(1);
                     case Failure -> 9;
                 };
@@ -237,13 +237,13 @@ public final class TypedRaisedEffectsTest {
                 import zeron.lang.Ask;
                 import zeron.lang.Yield;
                 import zeron.lang.Log;
-                fn asked(): Int = handle (raise Ask<Int>()) with {
+                fn asked(): Int = handle (perform Ask<Int>()) with {
                     case Ask<Int>, k -> k.resume(7);
                 };
-                fn yielded(): Unit = handle (raise Yield<Int>(1)) with {
+                fn yielded(): Unit = handle (perform Yield<Int>(1)) with {
                     case Yield<Int>(value), k -> k.resume(());
                 };
-                fn logged(): Unit = handle (raise Log.new("message")) with {
+                fn logged(): Unit = handle (perform Log.new("message")) with {
                     case Log(message), k -> k.resume(());
                 };
                 """.formatted(packageName));
@@ -306,7 +306,7 @@ public final class TypedRaisedEffectsTest {
                 effect Failure { public property message: String; }
                 class Worker {}
                 extension Worker {
-                    fn run(): Int raises Failure = raise Failure.new("extension");
+                    fn run(): Int performs Failure = perform Failure.new("extension");
                 }
                 """);
         final var namespace = (com.maruseron.zeron.ast.Stmt.Namespace) unit.declarations().get(2);
@@ -319,14 +319,14 @@ public final class TypedRaisedEffectsTest {
     public void entryPointMayDeclareEffectsButTopLevelInitializersCannotRaiseThem() {
         final var entryPoint = parse("Main.zn", """
                 effect Failure {}
-                fn main(): Unit raises Failure = raise Failure.new();
+                fn main(): Unit performs Failure = perform Failure.new();
                 """);
         final var entryPointResult = new ResolutionService().resolveUnitsWithDiagnostics(List.of(entryPoint));
         assertTrue(entryPointResult.errors().isEmpty());
 
         final var initializer = parse("Initializer.zn", """
                 effect Failure {}
-                let failure: Failure = raise Failure.new();
+                let failure: Failure = perform Failure.new();
                 """);
         final var initializerResult = new ResolutionService().resolveUnitsWithDiagnostics(List.of(initializer));
         assertTrue(initializerResult.errors().stream()
@@ -335,12 +335,12 @@ public final class TypedRaisedEffectsTest {
         final var armEffects = parse("ArmEffects.zn", """
                 effect Original {}
                 effect FromHandler {}
-                fn original(): Int raises Original = raise Original.new();
-                fn handlesAndDeclares(): Int raises FromHandler = handle (original()) with {
-                    case Original -> raise FromHandler.new();
+                fn original(): Int performs Original = perform Original.new();
+                fn handlesAndDeclares(): Int performs FromHandler = handle (original()) with {
+                    case Original -> perform FromHandler.new();
                 };
                 fn handlesButOmitsArmEffect(): Int = handle (original()) with {
-                    case Original -> raise FromHandler.new();
+                    case Original -> perform FromHandler.new();
                 };
                 fn guardedDoesNotHandle(): Int = handle (original()) with {
                     case Original if true -> 1;
@@ -362,7 +362,7 @@ public final class TypedRaisedEffectsTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 public effect Startup {}
-                fn main(): Unit raises Startup = raise Startup.new();
+                fn main(): Unit performs Startup = perform Startup.new();
                 """.formatted(packageName));
         try {
             final var compiler = CompilationService.forCompilationUnits(List.of(unit),
@@ -395,7 +395,7 @@ public final class TypedRaisedEffectsTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 public effect Failure {}
-                fn relay<E: effect>(value: E): Int raises E = raise value;
+                fn relay<E admits effect>(value: E): Int performs E = perform value;
                 fn handled(): Int = handle (relay(Failure.new())) with {
                     case Failure -> 7;
                 };
@@ -422,7 +422,7 @@ public final class TypedRaisedEffectsTest {
         }
 
         final var unresolvedCase = parse("GenericHandler.zn", """
-                fn invalid<E: effect>(value: E): Int = handle (raise value) with {
+                fn invalid<E admits effect>(value: E): Int = handle (perform value) with {
                     case E -> 1;
                 };
                 """);

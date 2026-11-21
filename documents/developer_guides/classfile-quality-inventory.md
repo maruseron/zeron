@@ -523,9 +523,9 @@ should be tracked alongside the optimization work.
 
 1. **Fall-through non-`Unit` bodies are rejected.** A function, method, extension method, or
    default contract method with a non-`Unit` return type whose body can fall off the end now gets
-   `ZR2011` during resolution. Unit and inferred-Unit bodies remain allowed. A trailing `raise`, or
+   `ZR2011` during resolution. Unit and inferred-Unit bodies remain allowed. A trailing `perform`, or
    any expression of type `Never`, marks the remaining flow unreachable, so a body such as
-   `readAll(): String { ... raise IoFailure.new(...); }` is accepted.
+   `readAll(): String { ... perform IoFailure.new(...); }` is accepted.
 2. **Constant folding no longer crashes the compiler** for valid constant expressions such as
    `5 % 3` in a local `let` (see J.4). Unsupported operators and zero divisors return `null`, which
    becomes a missed optimization rather than a compiler failure.

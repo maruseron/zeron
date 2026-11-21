@@ -9,7 +9,7 @@ values, so each caller decides how to inspect or pass them along. But sometimes 
 should stop its normal path and transfer control to code that handles the problem. **Raised
 effects** express that kind of exceptional control flow with named, typed payloads.
 
-## Declaring and raising an effect
+## Declaring and performing an effect
 
 Declare an effect with a payload type that contains the information a handler may need:
 
@@ -19,16 +19,16 @@ public effect MissingUser {
 }
 ```
 
-Raise a value of that effect with `raise`. A function lists any effect that may escape in its
-`raises` clause:
+Perform a value of that effect with `perform`. A function lists any effect that may escape in its
+`performs` clause:
 
 ```zeron
-fn findUser(id: Int): String raises MissingUser =
-    raise MissingUser.new(id);
+fn findUser(id: Int): String performs MissingUser =
+    perform MissingUser.new(id);
 ```
 
-`raise` does not produce a normal result; its type is `Never`. The effect value carries details
-about what happened, while the `raises MissingUser` declaration makes the possibility visible in
+`perform` does not produce a normal result; its type is `Never`. The effect value carries details
+about what happened, while the `performs MissingUser` declaration makes the possibility visible in
 the function's type.
 
 Effects are useful when a failure should interrupt the current operation and be handled at a
@@ -47,12 +47,12 @@ public effect Yield<T> responds Unit {
 }
 ```
 
-A `raise` of a responding effect is an expression of the response type, so the raise site can use
+A `perform` of a responding effect is an expression of the response type, so the perform site can use
 the handler's answer:
 
 ```zeron
-fn question(): String raises Ask<String> =
-    "Hello, " + raise Ask<String>() + "!";
+fn question(): String performs Ask<String> =
+    "Hello, " + perform Ask<String>() + "!";
 
 fn answered(): String = handle (question()) with {
     case Ask<String>, k -> k.resume("Ada");
@@ -60,8 +60,8 @@ fn answered(): String = handle (question()) with {
 ```
 
 `answered()` produces `"Hello, Ada!"`. The value passed to `k.resume` becomes the result of the
-`raise` expression, and the protected computation continues from there. An effect without
-`responds` remains abortive: its `raise` still has type `Never` and does not continue.
+`perform` expression, and the protected computation continues from there. An effect without
+`responds` remains abortive: its `perform` still has type `Never` and does not continue.
 
 Only a tail-resumptive handler is supported. The resume token `k` is not a value: it may appear
 only as `k.resume(value)` in tail position of its own case, and that call must be the entire case
@@ -76,9 +76,9 @@ iteration; and `Log` carries a `String` message and responds with `Unit`. A `Yie
 each value and resumes immediately:
 
 ```zeron
-fn numbers(): Unit raises Yield<Int> {
-    raise Yield<Int>(1);
-    raise Yield<Int>(2);
+fn numbers(): Unit performs Yield<Int> {
+    perform Yield<Int>(1);
+    perform Yield<Int>(2);
 }
 
 fn printNumbers(): Unit = handle (numbers()) with {
@@ -96,12 +96,12 @@ fully written with closed arguments; `Failure<T>` inside generic code and wildca
 such as `Failure<_>` or `Failure<?>` are not accepted in this slice:
 
 ```zeron
-public effect Failure<T: nullable> {
+public effect Failure<T admits nullable> {
     public property value: T;
 }
 
-fn load(id: Int): String raises Failure<Int> =
-    raise Failure<Int>(id);
+fn load(id: Int): String performs Failure<Int> =
+    perform Failure<Int>(id);
 
 fn recovered(): String = handle (load(7)) with {
     case Failure<Int> as failure -> "missing " + failure.value.toString();
@@ -115,7 +115,7 @@ and the payload's exact application descriptor must equal the case's descriptor.
 carries one descriptor through canonical and named constructors; non-generic effects remain
 descriptor-free. `case Effect` still catches any application without exposing the applied payload
 type. Applied `under` ancestry, omitted handler arguments, and generic propagation through
-`E: effect` applications are deferred work.
+`E admits effect` applications are deferred work.
 
 ## Effect subtyping and the top `Effect`
 
@@ -141,15 +141,15 @@ parent's payload members; a child that wants the parent's methods on its own val
 them or declare the relevant `is` conformance. At most one parent path may carry payload state, and
 every other parent must be stateless. Cycles and naming `Effect` itself are rejected.
 
-A subeffect satisfies a broader `raises` requirement, so a function that may raise `FileNotFound`
-can be used where `raises IOError` is expected:
+A subeffect satisfies a broader `performs` requirement, so a function that may perform `FileNotFound`
+can be used where `performs IOError` is expected:
 
 ```zeron
-fn read(path: String): String raises FileNotFound = raise FileNotFound.new(path, 1);
-fn readBroadly(path: String): String raises IOError = read(path);
+fn read(path: String): String performs FileNotFound = perform FileNotFound.new(path, 1);
+fn readBroadly(path: String): String performs IOError = read(path);
 ```
 
-`Effect` is a value type and an explicit catch-all case. `raises Effect` permits any effect to
+`Effect` is a value type and an explicit catch-all case. `performs Effect` permits any effect to
 escape, and an unguarded `case Effect` handles every raised effect:
 
 ```zeron
@@ -164,17 +164,17 @@ constructed, and ordinary classes are never assignable to it.
 
 ## Propagation
 
-If a function calls another function that may raise an effect, it must either handle that effect
-or list it in its own `raises` clause. This rule applies to functions, methods, extensions, named
+If a function calls another function that may perform an effect, it must either handle that effect
+or list it in its own `performs` clause. This rule applies to functions, methods, extensions, named
 constructors, and function values. The entry-point `main` can declare effects too.
 
 A non-`Unit` entry has two effect boundaries. Producing the entry value runs `main` itself; an
 effect raised there escapes before `Main<A>.run` is reached. Interpreting the value runs
-`Main<A>.run`, whose contract declares `raises Effect`; a pure witness may narrow that row, while an
+`Main<A>.run`, whose contract declares `performs Effect`; a pure witness may narrow that row, while an
 effectful interpreter can declare its own effects. Neither path installs an implicit handler.
 
 ```zeron
-fn loadLabel(id: Int): String raises MissingUser =
+fn loadLabel(id: Int): String performs MissingUser =
     findUser(id);
 ```
 
@@ -183,32 +183,32 @@ its caller. A caller must continue that chain by handling or declaring the effec
 handled inside the function, it no longer needs to appear in that function's escaping effects.
 
 Raised effects are checked through function types as well. Passing a callback does not erase the
-effects it may raise: the expected function type must allow those effects, or the callback must be
+effects it may perform: the expected function type must allow those effects, or the callback must be
 handled before it is passed.
 
 ## Polymorphic effect rows
 
-A generic callback can accept a pure function or one that raises effects by quantifying over an
+A generic callback can accept a pure function or one that performs effects by quantifying over an
 effect row. Use `effect...` for a row parameter; the existing `effect` bound continues to mean one
 nominal effect type:
 
 ```zeron
-public fn map<T, R, E: effect...>(
+public fn map<T, R, E admits effect...>(
     list: List<T>,
-    transform: (T) -> R raises E
-): List<R> raises E = ...
+    transform: (T) -> R performs E
+): List<R> performs E = ...
 ```
 
 The compiler infers `{}` when `transform` is pure, or the callback's raised effects when it is
 effectful. A row can also be supplied explicitly as a set, such as `{}` or `{MissingUser}`; a
-single effect type is accepted as a singleton row. In a `raises` list, a name with kind `effect...`
+single effect type is accepted as a singleton row. In a `performs` list, a name with kind `effect...`
 expands to its row, while a name with kind `effect` contributes one effect.
 
-Rows can mix fixed effects with one row parameter, for example `raises MissingUser, E`. Calls
+Rows can mix fixed effects with one row parameter, for example `performs MissingUser, E`. Calls
 propagate both parts. Handling a fixed effect removes that label from the known part, but does not
 remove it from the unknown row: a handler cannot assume what an unresolved row contains. Function
 compatibility uses effect-set inclusion, so a pure callback can satisfy an open row requirement and
-an implementation cannot raise effects beyond its declared row.
+an implementation cannot perform effects beyond its declared row.
 
 Row parameters are compile-time only. They are preserved in compiled-library metadata, but add no
 runtime representation; raised values continue to use the existing `RaisedEffect` carrier. Higher-
@@ -244,12 +244,12 @@ A handler case for a responding effect may bind a resume token after the pattern
 comma:
 
 ```zeron
-handle (raise Ask<Int>()) with {
+handle (perform Ask<Int>()) with {
     case Ask<Int>, k -> k.resume(8);
 };
 ```
 
-The token makes the case tail-resumptive: the response is delivered to the raise site and the
+The token makes the case tail-resumptive: the response is delivered to the perform site and the
 protected computation continues. Nested inline handlers work, and effects raised while evaluating
 the resume argument are handled by the next enclosing handler. Abortive effects in the same handler
 continue to use the ordinary unwinding path, so a mixed handler can resume `Ask` and abort `Failure`.
@@ -288,18 +288,18 @@ String ~> {MissingUser}
 ```
 
 The type before `~>` is the normal result type of the protected computation. The first set lists
-effects that the handler completely handles, and the optional `raises` set lists effects that its
-cases may raise. Omitting it means the handler cases raise no effects; an explicit `raises {}` is
+effects that the handler completely handles, and the optional `performs` set lists effects that its
+cases may perform. Omitting it means the handler cases perform no effects; an explicit `performs {}` is
 equivalent and remains accepted. Both sets are finite and may be empty. Effect sets follow the same
-subtyping relation as `raises` clauses: a set is covered when every element is a subtype of a
+subtyping relation as `performs` clauses: a set is covered when every element is a subtype of a
 declared element, and assignment requires the same result with compatible effect sets.
 
 Function types and handler types can look similar at first glance because both describe what
-happens when some logic is applied, and both can mention effects with `raises`. But they describe
-different things. A function type describes the function's inputs and normal result; a `raises`
+happens when some logic is applied, and both can mention effects with `performs`. But they describe
+different things. A function type describes the function's inputs and normal result; a `performs`
 clause says which effects may escape when the function is called. A handler type instead describes
 the normal result of a protected computation, which effects the handler handles, and which effects
-its cases may raise. You can think of a handler as a policy for dealing with some effects around a
+its cases may perform. You can think of a handler as a policy for dealing with some effects around a
 computation.
 
 Applying a handler removes its fully handled effects from the protected expression and adds its
@@ -307,7 +307,7 @@ case-raised effects. Guarded or refutable cases do not count as complete coverag
 match at runtime, the original raised effect continues outward. Handler composition is not supported;
 use nested `handle` expressions when distinct policies must be applied in sequence.
 
-When a `using` scope raises an effect and disposal also fails, the original effect stays primary and
+When a `using` scope performs an effect and disposal also fails, the original effect stays primary and
 the cleanup failures are attached as suppressed outcomes. A handler arm can inspect them explicitly:
 
 ```zeron
@@ -343,20 +343,20 @@ Ordinary Java exceptions are not caught by effect handlers and keep their usual 
 when an external-class method explicitly maps a declared checked exception to an effect at its call
 boundary.
 
-Raised effects are not a purity system. A callable with an empty `raises` set can still mutate
+Raised effects are not a purity system. A callable with an empty `performs` set can still mutate
 through a `&T` receiver, write output, read the environment, or perform other observable work.
-`raises` records which typed effects may escape; it does not promise referential transparency. The
+`performs` records which typed effects may escape; it does not promise referential transparency. The
 Java host boundary follows the same rule. Curated `external class` facades remain the trusted, typed
 tier, and direct Java access requires an explicit `unsafe` boundary rather than an implicit purity
 claim. A Zeron effect raised inside an `unsafe` operand still escapes and must be handled or declared
 by the enclosing function. [ZEP-0148](../documents/zeps/ZEP-0148.md) implements Java SAM conversion: a
 lambda or top-level function reference converted to a Java functional interface must have an empty
-`raises` row, so a `RaisedEffect` never crosses into Java; handle or map the effect inside the
+`performs` row, so a `RaisedEffect` never crosses into Java; handle or map the effect inside the
 callback instead.
 
 Tail-resumptive handlers use a synchronous thread-local handler-frame stack rather than capturing a
-continuation. A responding `raise` selects the innermost matching frame, temporarily removes it while
-the handler runs, and returns the response to the raise site. If the case does not match, the same
+continuation. A responding `perform` selects the innermost matching frame, temporarily removes it while
+the handler runs, and returns the response to the perform site. If the case does not match, the same
 carrier continues outward. No continuation object, stack capture, or asynchronous suspension is
 involved, and a first-class handler value with a resuming case is rejected rather than lowered
 incorrectly.

@@ -49,7 +49,7 @@ be new enough to contain `zeron.test`.
 
 ## Writing a test
 
-A test is a public, top-level, parameterless function returning `Unit`. It may raise `TestFailure`;
+A test is a public, top-level, parameterless function returning `Unit`. It may perform `TestFailure`;
 that is how assertions report a failed expectation.
 
 ```zeron
@@ -60,7 +60,7 @@ import zeron.test.TestFailure;
 import zeron.test.assertEquals;
 
 @Test
-public fn additionAddsOperands(): Unit raises TestFailure {
+public fn additionAddsOperands(): Unit performs TestFailure {
     assertEquals(4, add(2, 2));
 }
 ```
@@ -91,7 +91,7 @@ The `zeron.test` module currently provides:
 
 | Function | Fails when |
 | --- | --- |
-| `fail(message)` | Always; raises `TestFailure` with `message` |
+| `fail(message)` | Always; performs `TestFailure` with `message` |
 | `assertTrue(condition, message = ...)` | `condition` is `false` |
 | `assertFalse(condition, message = ...)` | `condition` is `true` |
 | `assertEquals(expected, actual, message = "")` | The values differ |
@@ -109,11 +109,11 @@ the expected value and actual value. The generated runner currently reports the 
 status; assertion messages are carried by the `TestFailure` effect but are not printed in the
 per-test output.
 
-You can also raise a failure directly:
+You can also perform a failure directly:
 
 ```zeron
 @Test
-public fn rejectsEmptyName(): Unit raises TestFailure {
+public fn rejectsEmptyName(): Unit performs TestFailure {
     if (nameIsValid("")) {
         fail("empty names should be rejected");
     }
@@ -169,5 +169,5 @@ The initial testing API is deliberately small. It does not yet provide test filt
 setup or teardown hooks, parameterized tests, parallel or isolated execution, or a machine-readable
 report format. The runner also does not print assertion messages or per-test timings.
 
-A test that raises an effect other than `TestFailure` is reported as `FAILED` and makes the command
+A test that performs an effect other than `TestFailure` is reported as `FAILED` and makes the command
 exit nonzero, but the current summary does not include a separate error count.

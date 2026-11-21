@@ -34,16 +34,16 @@ public class HttpResponse is Disposable {
         get = this.bodyValue;
     }
 
-    public constructor from(response: Any?) raises HttpFailure {
+    public constructor from(response: Any?) performs HttpFailure {
         if (not httpIsResponseHandle(response)) {
-            raise HttpFailure.new(HttpFailureKind.Transport(),
+            perform HttpFailure.new(HttpFailureKind.Transport(),
                 "The HTTP runtime returned an invalid response handle.", null);
         }
         let versionText = httpResponseVersion(response);
         let version = match (versionText) {
             case "HTTP/1.1" -> HttpVersion.Http1_1();
             case "HTTP/2" -> HttpVersion.Http2();
-            case _ -> raise HttpFailure.new(HttpFailureKind.Protocol(),
+            case _ -> perform HttpFailure.new(HttpFailureKind.Protocol(),
                 "The HTTP runtime returned an unsupported protocol version.", null);
         };
         let body: &Reader = HttpResponseBody.from(response);
@@ -51,7 +51,7 @@ public class HttpResponse is Disposable {
         return HttpResponse.new(httpResponseStatus(response), headers, version, body);
     }
 
-    public mut dispose(): Unit raises DisposeFailure {
+    public mut dispose(): Unit performs DisposeFailure {
         this.body.dispose();
     }
 }

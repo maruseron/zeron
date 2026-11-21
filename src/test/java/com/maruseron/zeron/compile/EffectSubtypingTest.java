@@ -41,23 +41,23 @@ public final class EffectSubtypingTest {
                     public property name: String;
                     public property code: Int;
                 }
-                fn failFile(): Int raises FileNotFound = raise FileNotFound.new("boom", 42);
-                fn broad(): Int raises IOError = failFile();
-                fn inheritedView(): String = handle (raise FileNotFound.new("boom", 42)) with {
+                fn failFile(): Int performs FileNotFound = perform FileNotFound.new("boom", 42);
+                fn broad(): Int performs IOError = failFile();
+                fn inheritedView(): String = handle (perform FileNotFound.new("boom", 42)) with {
                     case IOError as error -> error.path;
                 };
-                fn stateless(): Int = handle (raise Retryable.new()) with {
+                fn stateless(): Int = handle (perform Retryable.new()) with {
                     case Retryable -> 5;
                 };
-                fn mostSpecific(): Int = handle (raise Child.new("child", 3)) with {
+                fn mostSpecific(): Int = handle (perform Child.new("child", 3)) with {
                     case Parent -> 1;
                     case Child as child -> child.code;
                 };
-                fn catchAll(): String = handle (raise Child.new("child", 3)) with {
+                fn catchAll(): String = handle (perform Child.new("child", 3)) with {
                     case Effect -> "caught";
                 };
                 fn nested(): Int = handle (
-                    handle (raise Child.new("child", 3)) with {
+                    handle (perform Child.new("child", 3)) with {
                         case Parent -> 9;
                     }
                 ) with {
@@ -73,13 +73,13 @@ public final class EffectSubtypingTest {
                     value.label = "renamed";
                     return value.label;
                 }
-                fn mutateThroughView(): String = handle (raise MutableChild.new("initial")) with {
+                fn mutateThroughView(): String = handle (perform MutableChild.new("initial")) with {
                     case MutableBase as value -> rename(value);
                 };
-                fn widenedFunction(): () -> Int raises IOError = failFile;
+                fn widenedFunction(): () -> Int performs IOError = failFile;
                 fn asEffect(value: Effect): Effect = value;
                 fn wrapHostFailure(): String = handle (
-                    raise Effect.fromException(Exception.new("host"))
+                    perform Effect.fromException(Exception.new("host"))
                 ) with {
                     case Effect -> "wrapped";
                 };
@@ -141,7 +141,7 @@ public final class EffectSubtypingTest {
                 effect First {}
                 effect Second {}
                 effect Both under First, Second {}
-                fn ambiguous(): Int = handle (raise Both.new()) with {
+                fn ambiguous(): Int = handle (perform Both.new()) with {
                     case First -> 1;
                     case Second -> 2;
                 };
@@ -164,7 +164,7 @@ public final class EffectSubtypingTest {
                     public property name: String;
                     public property code: Int;
                 }
-                public fn fail(): Int raises Child = raise Child.new("library", 8);
+                public fn fail(): Int performs Child = perform Child.new("library", 8);
                 """.formatted(libraryPackage));
         try {
             final var libraryCompiler = CompilationService.forCompilationUnits(List.of(library),
@@ -184,7 +184,7 @@ public final class EffectSubtypingTest {
                     package %s;
                     import %s.Parent;
                     import %s.fail;
-                    fn broaden(): Int raises Parent = fail();
+                    fn broaden(): Int performs Parent = fail();
                     fn handled(): Int = handle (fail()) with {
                         case Parent -> 1;
                     };
@@ -218,14 +218,14 @@ public final class EffectSubtypingTest {
                 package %s;
                 public effect First {}
                 public effect Second {}
-                public fn make(): Effect raises Effect = raise First.new();
+                public fn make(): Effect performs Effect = perform First.new();
                 """.formatted(libraryPackage));
         final var secondVersion = parse("Library.zn", """
                 package %s;
                 public effect First {}
                 public effect Second {}
                 public effect Both under First, Second {}
-                public fn make(): Effect raises Effect = raise Both.new();
+                public fn make(): Effect performs Effect = perform Both.new();
                 """.formatted(libraryPackage));
         try {
             final var v1Compiler = CompilationService.forCompilationUnits(List.of(firstVersion),
@@ -239,7 +239,7 @@ public final class EffectSubtypingTest {
                     import %s.First;
                     import %s.Second;
                     import %s.make;
-                    fn dispatch(): Int raises Effect = handle (raise make()) with {
+                    fn dispatch(): Int performs Effect = handle (perform make()) with {
                         case First -> 1;
                         case Second -> 2;
                     };

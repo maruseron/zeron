@@ -481,7 +481,7 @@ final class LambdaCompilationPlan {
                     }
                 }
             }
-            case Expr.Raise raise -> collectLambdaShapes(raise.effect);
+            case Expr.Raise perform -> collectLambdaShapes(perform.effect);
             case Expr.Unsafe unsafe -> collectLambdaShapes(unsafe.expression);
             case Expr.Handle handle -> {
                 collectLambdaShapes(handle.expression);
@@ -825,7 +825,7 @@ final class LambdaCompilationPlan {
                 }
             }
             case Expr.SumCaseTest test -> collectCapturedVariables(test.value, localNames, captured, seen);
-            case Expr.Raise raise -> collectCapturedVariables(raise.effect, localNames, captured, seen);
+            case Expr.Raise perform -> collectCapturedVariables(perform.effect, localNames, captured, seen);
             case Expr.Unsafe unsafe ->
                     collectCapturedVariables(unsafe.expression, localNames, captured, seen);
             case Expr.Handle handle -> {

@@ -27,7 +27,7 @@ public class PropertyId deriving Eq, Hashable {
 /// Two references are equal (`==`) when they denote the same declaration, which makes a reference
 /// usable as a key. `get` reads the property from an owner value, and `name`, `identity`, and `id`
 /// describe the declaration.
-public class PropertyRef<T: nullable + mut, V: nullable + mut> is Eq<PropertyRef<T, V>> {
+public class PropertyRef<T admits nullable + mutable, V admits nullable + mutable> is Eq<PropertyRef<T, V>> {
     private property reader: (T) -> V;
     /// The property's source name, without its owner type.
     public property name: String;

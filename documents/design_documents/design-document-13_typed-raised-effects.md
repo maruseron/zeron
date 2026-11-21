@@ -8,17 +8,17 @@ value that callers inspect, while a raised effect transfers control to a matchin
 caller.
 
 The implementation supports nominal `effect` declarations, including generic effect payloads with
-closed applied identity; `raises` clauses on
+closed applied identity; `performs` clauses on
 functions, class methods, extension methods, named constructors, and function type annotations;
-`raise` expressions; inline expression handlers; named reusable handlers; and first-class structural
+`perform` expressions; inline expression handlers; named reusable handlers; and first-class structural
 handler types. Effects and handler shapes are checked by the resolver and represented in
 compiled-library API metadata. Handler cases use the existing named-pattern syntax, can bind the
 whole payload with `as`, and can include Boolean guards.
 
 [ZEP-0118](../zeps/ZEP-0118.md) adds response-typed effects and tail-resumptive handlers. An effect
-may declare `responds R`; `raise` then produces `R` instead of `Never`, and an inline handler case
+may declare `responds R`; `perform` then produces `R` instead of `Never`, and an inline handler case
 may bind a resume token with `case Effect(...), k -> k.resume(value);`. The response is delivered
-synchronously to the raise site and the protected computation continues. Continuation capture,
+synchronously to the perform site and the protected computation continues. Continuation capture,
 storage, and resumption after the handler returns remain outside this implementation and belong to
 [ZEP-0119](../zeps/ZEP-0119.md).
 
@@ -52,7 +52,7 @@ public effect NotFound {
 }
 ```
 
-An effect may also declare the type its handler returns to the raise site. `responds` follows the
+An effect may also declare the type its handler returns to the perform site. `responds` follows the
 optional `is`, `under`, and `deriving` clauses:
 
 ```zeron
@@ -67,11 +67,11 @@ Effects use class construction syntax. A payload can be raised directly, and cal
 effects that can escape:
 
 ```zeron
-fn read(path: String): String raises NotFound =
-    raise NotFound.new(path);
+fn read(path: String): String performs NotFound =
+    perform NotFound.new(path);
 
 class Store {
-    public load(key: String): String raises NotFound {
+    public load(key: String): String performs NotFound {
         return read(key);
     }
 }
@@ -81,12 +81,12 @@ fn readOrEmpty(path: String): String = handle (read(path)) with {
 };
 ```
 
-The `raises` list follows a callable's return type (or the closing parameter list for a named
+The `performs` list follows a callable's return type (or the closing parameter list for a named
 constructor) and contains one or more effect types. The same clause may appear after a function type
 annotation's return type:
 
 ```zeron
-fn loadFunction(): (String) -> String raises NotFound = read;
+fn loadFunction(): (String) -> String performs NotFound = read;
 ```
 
 A handler protects exactly one parenthesized expression. Each `case` begins with a concrete effect
@@ -108,7 +108,7 @@ A case for a responding effect may bind a resume token after the pattern and any
 suppressed binding, separated by a comma:
 
 ```zeron
-fn answered(): String = handle (raise Ask<String>()) with {
+fn answered(): String = handle (perform Ask<String>()) with {
     case Ask<String>, k -> k.resume("Ada");
 };
 ```
@@ -134,10 +134,10 @@ fn readOrEmpty(path: String): String = handle (read(path)) with EmptyText;
 
 An anonymous `handler { ... }` expression can be stored, passed, or returned where a handler type
 is expected. It may capture immutable locals by value, following lambda capture rules. Handler types
-use the form `R ~> {E1, E2} [raises {G1}]`: `R` is the protected computation's normal result type,
-the first finite set is the set of exact effects completely handled, and the optional `raises` set
-contains effects that handler cases may raise. Omitting it means the handler cases raise no effects;
-the explicit `raises {}` spelling has the same meaning. Both sets may be empty; effect types in
+use the form `R ~> {E1, E2} [performs {G1}]`: `R` is the protected computation's normal result type,
+the first finite set is the set of exact effects completely handled, and the optional `performs` set
+contains effects that handler cases may perform. Omitting it means the handler cases perform no effects;
+the explicit `performs {}` spelling has the same meaning. Both sets may be empty; effect types in
 either set must be concrete.
 
 ```zeron
@@ -167,7 +167,7 @@ effect class itself is exported as an ordinary class record plus an effect marke
 index, and methods, contract conformances, named constructors, and non-public payload state
 round-trip through that record without a schema change.
 
-Effect types in `raises` clauses and handler cases must resolve to a declared effect, either a
+Effect types in `performs` clauses and handler cases must resolve to a declared effect, either a
 non-generic name or a fully applied closed generic effect. Ordinary classes, contracts, raw generic
 types, nullable types, and mutable-reference types are not effect types. Applications are
 invariant and exact: `Failure<Int>` and `Failure<String>` are different identities. Effect identity
@@ -189,7 +189,7 @@ The library top `Effect` is an ordinary stateless effect value. `Effect.fromExce
 ordinary values: they can be stored, passed, and raised again, and raising a value of static type
 `Effect` adds `Effect` to the raised set.
 
-A subeffect satisfies a broader `raises` requirement, and a handler case for a super-effect matches
+A subeffect satisfies a broader `performs` requirement, and a handler case for a super-effect matches
 its subeffects. Handler payloads retain the case's declared static type, so a parent-typed case
 exposes inherited payload but not subtype-only members. Coverage removes every raised element that
 is a subtype of a fully handled case, while a broader element remains.
@@ -197,9 +197,9 @@ is a subtype of a fully handled case, while a broader element remains.
 ### Responses and resumption
 
 A response type is part of the effect declaration and is resolved in the effect's type-parameter
-scope. `raise` on a responding effect produces the response type after substituting the applied
-effect's arguments; on an effect without `responds` it stays `Never`. A responding `raise` is a
-normal expression, so the statements after it remain reachable, while an abortive `raise` still
+scope. `perform` on a responding effect produces the response type after substituting the applied
+effect's arguments; on an effect without `responds` it stays `Never`. A responding `perform` is a
+normal expression, so the statements after it remain reachable, while an abortive `perform` still
 makes the rest of the block unreachable. The response type is not a second effect and never appears
 in the raised row.
 
@@ -212,7 +212,7 @@ cannot currently contain one, because its implementation is compiled without the
 frame; this is a scoped limitation, not a different typing rule.
 
 The runtime answer needs no continuation object and no stack capture. Only concrete or applied
-effects can be resumed: generic code that raises through an `effect` or `effect...` parameter has no
+effects can be resumed: generic code that performs through an `effect` or `effect...` parameter has no
 known response, so it must forward the effect instead. Generic libraries can still declare and
 export responding effects, and clients substitute concrete response types.
 
@@ -221,7 +221,7 @@ export responding effects, and clients substitute concrete response types.
 A generic parameter bounded by `effect...` denotes a finite effect row, which may be empty; the
 existing `effect` bound still denotes exactly one nominal effect. A single `effect` value can be
 used as a singleton row, but a row cannot instantiate an `effect` parameter. Explicit row arguments
-use set syntax such as `{}` or `{MissingUser}`. In `raises` clauses, an `effect...` parameter
+use set syntax such as `{}` or `{MissingUser}`. In `performs` clauses, an `effect...` parameter
 expands to its members, and at most one row variable may occur in a clause.
 
 Row inference collects inclusion constraints and chooses the union of lower bounds as the minimal
@@ -238,20 +238,20 @@ leaves the unknown row unchanged. Row variables cannot be named by handler cases
 
 ### Effect propagation and callable checking
 
-`raise expression` resolves its operand as an effect payload, contributes that nominal effect to the
+`perform expression` resolves its operand as an effect payload, contributes that nominal effect to the
 current effect set, and has type `Never`. A call contributes the effects declared by the resolved
 callable signature. This applies uniformly to top-level functions, class and contract methods,
 extension methods, named constructors, and function values. Effects in any resolved match arm or
 other expression branch contribute naturally to the containing expression's effect set.
 
 At the end of each callable body, every inferred escaping effect must be present in that callable's
-declared `raises` list. A caller in turn must handle or declare the effects in the callee's signature.
-Duplicate entries are rejected. An implementation may raise fewer effects than the function type it
+declared `performs` list. A caller in turn must handle or declare the effects in the callee's signature.
+Duplicate entries are rejected. An implementation may perform fewer effects than the function type it
 is assigned to, but not more; effects are checked separately from the generated JVM function-shape
 identity.
 
 The entry-point `main` function may declare raised effects like any other callable. Effects not
-handled within `main` must appear in its `raises` clause. Top-level value initializers cannot raise
+handled within `main` must appear in its `performs` clause. Top-level value initializers cannot perform
 effects because there is no enclosing callable or entry-point boundary to receive them. Java
 exceptions are not translated by default. External-class methods and constructors, plus external
 functions backed by configured Java bindings with class-file metadata, can explicitly map declared
@@ -284,7 +284,7 @@ invalid when checked exceptions are declared unless they resolve through one of 
 declarations; call-site mapping syntax is not provided. Generic Java `throws` type variables are
 rejected rather than inferred from erased bounds.
 
-The callable's Zeron `raises` set is derived from its mappings. At runtime, only the Java invocation
+The callable's Zeron `performs` set is derived from its mappings. At runtime, only the Java invocation
 is covered by the translation handler: receiver and argument evaluation failures are not remapped.
 `RuntimeException` descendants and `Error`s bypass translation even when a broad mapping names
 `Exception` or `Throwable`; they continue to the host unchanged. The original Java exception is
@@ -298,7 +298,7 @@ irrefutable pattern for that effect. In particular, guarded or refutable pattern
 coverage; a set of refutable cases is not combined to infer exhaustiveness. An unmatched payload,
 including one for a listed but incompletely handled effect, remains in the escaping set and must be
 declared or handled by an outer scope. A super-effect case covers its subeffects, and an unguarded,
-irrefutable `case Effect` covers the complete raised set. Inline handler arms and guards are resolved in the enclosing effect scope, so effects they raise
+irrefutable `case Effect` covers the complete raised set. Inline handler arms and guards are resolved in the enclosing effect scope, so effects they perform
 are not removed by that same handler. A first-class handler records its case-raised set in its
 structural type. Applying it removes only its complete handled set from the protected computation
 and adds the recorded case-raised set:
@@ -349,7 +349,7 @@ exception mappings safely.
 ## Runtime model
 
 The compiler emits a final `zeron.runtime.RaisedEffect` runtime exception with an opaque payload.
-`raise` evaluates the payload once, constructs this carrier, and throws it. The generated runtime
+`perform` evaluates the payload once, constructs this carrier, and throws it. The generated runtime
 support class is emitted alongside compiled classes.
 
 A handler compiles its protected expression into a JVM exception-table region catching only
@@ -359,12 +359,12 @@ and guard succeed. If no case matches, the same carrier is rethrown. Ordinary Ja
 by effect handlers; only an explicit external-facade mapping translates the declared checked
 exception at its Java call site.
 
-A responding `raise` compiles differently. The compiler emits a call to
+A responding `perform` compiles differently. The compiler emits a call to
 `zeron.runtime.EffectSupport.perform(payload)` instead of throwing, and an inline handler installs a
 synchronous thread-local frame around its protected expression. `perform` invokes the innermost
 frame's synthesized handler with the carrier, temporarily removing that frame while the handler
 runs. A matching resuming arm evaluates `k.resume(value)` as `value`, so the frame returns the
-response and the raise site continues. A non-matching handler rethrows the same carrier, `perform`
+response and the perform site continues. A non-matching handler rethrows the same carrier, `perform`
 continues outward, and the frame is not restored. Effects raised while evaluating the response see
 the next enclosing frame. The frame is restored on normal return and removed on every exceptional
 exit, so no handler leaks past its protected expression. This is a direct call plus a handler stack;
@@ -406,13 +406,13 @@ Other follow-up areas:
    opt-in boundary and do not alter ordinary Java exception propagation.
 6. [Effect-row polymorphism](../zeps/ZEP-0086.md) is implemented with declaration-level row
    quantification; higher-rank row-polymorphic function values remain unsupported.
-7. Observable I/O remains outside the raised-effect system. `raises` describes typed control-flow
+7. Observable I/O remains outside the raised-effect system. `performs` describes typed control-flow
    effects, not purity or the absence of observable side effects, so `println` can have no declared
    raised effects without being pure. [ZEP-0050](../zeps/ZEP-0050.md) settles
    the implemented interop trust boundary: curated facades carry reviewed effect signatures, direct Java access
    requires an explicit `unsafe` expression, and no implicit `IO` effect is introduced.
    [ZEP-0148](../zeps/ZEP-0148.md) implements contextual Java SAM conversion; a converted lambda or
-   top-level function reference must have an empty `raises` row, so a `zeron.runtime.RaisedEffect`
+   top-level function reference must have an empty `performs` row, so a `zeron.runtime.RaisedEffect`
    never crosses into Java. A general purity or IO effect would apply to the whole language and
    remains a separate design; `main` may declare such effects and let them escape to the host
    boundary if one is adopted.
@@ -420,7 +420,7 @@ Other follow-up areas:
    handlers and first-class structural handler types. These remain abortive and preserve `match` for
    ordinary value inspection; resumable continuations are a separate design question.
 9. [ZEP-0118](../zeps/ZEP-0118.md) implements response-typed effects and tail-resumptive handlers.
-   `raise` on a responding effect produces the response type, and an inline handler case can resume
+   `perform` on a responding effect produces the response type, and an inline handler case can resume
    synchronously with `k.resume(value)` through a thread-local handler frame. This adds no
    continuation and does not change abortive effects. [ZEP-0119](../zeps/ZEP-0119.md) covers general
    one-shot continuations, deep handlers, and cancellation; [ZEP-0120](../zeps/ZEP-0120.md) covers the

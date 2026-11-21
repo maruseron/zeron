@@ -5,5 +5,5 @@ public effect DisposeFailure {
 }
 
 public contract Disposable {
-    mut dispose(): Unit raises DisposeFailure;
+    mut dispose(): Unit performs DisposeFailure;
 }

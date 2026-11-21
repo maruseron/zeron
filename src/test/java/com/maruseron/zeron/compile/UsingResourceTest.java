@@ -31,15 +31,15 @@ public final class UsingResourceTest {
                     id: Int;
                     fail: Boolean;
                     public readId(): Int = this.id;
-                    public mut dispose(): Unit raises DisposeFailure {
+                    public mut dispose(): Unit performs DisposeFailure {
                         this.state[this.state[0] + 1] = this.id;
                         this.state[0] = this.state[0] + 1;
                         if (this.fail) {
-                            raise DisposeFailure.new(this.id);
+                            perform DisposeFailure.new(this.id);
                         }
                     }
                 }
-                fn reverseOrder(): Int raises DisposeFailure {
+                fn reverseOrder(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0, 0];
                     using (
                         let first: &Recorder = Recorder.new(state, 1, false),
@@ -47,12 +47,12 @@ public final class UsingResourceTest {
                     ) {}
                     return state[0] * 100 + state[1] * 10 + state[2];
                 }
-                fn returnFromUsing(state: &Array<Int>): Int raises DisposeFailure {
+                fn returnFromUsing(state: &Array<Int>): Int performs DisposeFailure {
                     using (let resource: &Recorder = Recorder.new(state, 7, false)) {
                         return 42;
                     }
                 }
-                fn breakFromUsing(): Int raises DisposeFailure {
+                fn breakFromUsing(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
                     while (true) {
                         using (let resource: &Recorder = Recorder.new(state, 9, false)) {
@@ -61,7 +61,7 @@ public final class UsingResourceTest {
                     }
                     return state[0] * 10 + state[1];
                 }
-                fn continueFromUsing(): Int raises DisposeFailure {
+                fn continueFromUsing(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0, 0];
                     while (state[0] < 2) {
                         using (let resource: &Recorder = Recorder.new(state, state[0] + 1, false)) {
@@ -70,7 +70,7 @@ public final class UsingResourceTest {
                     }
                     return state[0] * 100 + state[1] * 10 + state[2];
                 }
-                fn outerUsingAroundBreak(): Int raises DisposeFailure {
+                fn outerUsingAroundBreak(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0, 0, 0];
                     using (let outer: &Recorder = Recorder.new(state, 1, false)) {
                         while (true) {
@@ -82,21 +82,21 @@ public final class UsingResourceTest {
                     }
                     return state[3] * 1000 + state[1] * 100 + state[2] * 10 + state[0];
                 }
-                fn lambdaCapturesResource(): Int raises DisposeFailure {
+                fn lambdaCapturesResource(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
                     using (let resource: &Recorder = Recorder.new(state, 4, false)) {
                         let read: () -> Int = () -> resource.readId();
                         return read();
                     }
                 }
-                fn uncheckedBody(state: &Array<Int>): Unit raises DisposeFailure {
+                fn uncheckedBody(state: &Array<Int>): Unit performs DisposeFailure {
                     using (let resource: &Recorder = Recorder.new(state, 5, true)) {
                         state[99];
                     }
                 }
-                fn failAcquire(): &Recorder raises AcquireFailure =
-                    raise AcquireFailure.new();
-                fn partialAcquire(): Int raises AcquireFailure, DisposeFailure {
+                fn failAcquire(): &Recorder performs AcquireFailure =
+                    perform AcquireFailure.new();
+                fn partialAcquire(): Int performs AcquireFailure, DisposeFailure {
                     let state: &Array<Int> = [0, 0];
                     using (
                         let acquired: &Recorder = Recorder.new(state, 3, true),
@@ -104,16 +104,16 @@ public final class UsingResourceTest {
                     ) {}
                     return state[0];
                 }
-                fn bodyFails(state: &Array<Int>): Int raises BodyFailure, DisposeFailure {
+                fn bodyFails(state: &Array<Int>): Int performs BodyFailure, DisposeFailure {
                     using (
                         let first: &Recorder = Recorder.new(state, 1, true),
                         let second: &Recorder = Recorder.new(state, 2, true)
                     ) {
-                        raise BodyFailure.new();
+                        perform BodyFailure.new();
                     }
                     return 0;
                 }
-                fn cleanupFails(state: &Array<Int>): Int raises DisposeFailure {
+                fn cleanupFails(state: &Array<Int>): Int performs DisposeFailure {
                     using (
                         let first: &Recorder = Recorder.new(state, 1, true),
                         let second: &Recorder = Recorder.new(state, 2, true)
@@ -162,7 +162,7 @@ public final class UsingResourceTest {
 
                 try {
                     main.getMethod("partialAcquire").invoke(null);
-                    throw new AssertionError("The second resource initializer should raise an effect.");
+                    throw new AssertionError("The second resource initializer should perform an effect.");
                 } catch (final InvocationTargetException exception) {
                     final var carrier = exception.getCause();
                     assertEquals("zeron.runtime.RaisedEffect", carrier.getClass().getName());

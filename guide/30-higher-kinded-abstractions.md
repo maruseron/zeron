@@ -12,7 +12,7 @@ container.
 
 ```zeron
 contract Mapper<F<_>> {
-    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
 }
 ```
 
@@ -20,13 +20,13 @@ The underscore marks the slot that will vary. An implementation declares the app
 and supplies the required operation:
 
 ```zeron
-class Box<T: mut> is Mapper<Box<_>> {
+class Box<T admits mutable> is Mapper<Box<_>> {
     value: T;
 
     public constructor new;
 
     implementation Mapper<Box<_>> {
-        fn map<A: mut, B: mut>(
+        fn map<A admits mutable, B admits mutable>(
             this: Box<A>,
             transform: (A) -> B
         ): Box<B> = Box.new(transform(this.value));
@@ -43,7 +43,7 @@ into forwarding it:
 
 ```zeron
 class Box<T> is Mapper<Box<_>> {
-    public map<R: mut>(transform: (T) -> R): Box<R> =
+    public map<R admits mutable>(transform: (T) -> R): Box<R> =
         Box<R>.new(transform(this.value));
 
     delegating implementation Mapper<Box<_>> {}
@@ -65,7 +65,7 @@ block that declares `map` is rejected because `Functor` owns `map`.
 
 The target method does not need to repeat the contract signature exactly. Its parameters may accept
 broader types and its return type may be narrower, provided the method remains assignable to the
-required operation and does not raise effects outside those allowed by the contract.
+required operation and does not perform effects outside those allowed by the contract.
 
 ## Abstract over a type family
 
@@ -92,7 +92,7 @@ Higher-kinded capabilities also describe construction and mutation for a generic
 ```zeron
 import zeron.collections.CollectionBuilder;
 
-fn emptyCollection<C<_>: CollectionBuilder<C>, T: nullable + mut>(): &C<T> =
+fn emptyCollection<C<_>: CollectionBuilder<C>, T admits nullable + mutable>(): &C<T> =
     C.empty<T>();
 ```
 

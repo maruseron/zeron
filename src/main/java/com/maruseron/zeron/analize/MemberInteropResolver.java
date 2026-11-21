@@ -2706,7 +2706,7 @@ final class MemberInteropResolver {
                         || !resolvedFunction.raisedEffects().isEmpty()) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE, call.name,
-                            "A converted Java callback must have an empty raises row; handle or map "
+                            "A converted Java callback must have an empty performs row; handle or map "
                                     + "its effects before the conversion."));
                 }
                 continue;
@@ -3555,7 +3555,7 @@ final class MemberInteropResolver {
         if (converted instanceof FunctionDescriptor function
                 && function.raisedEffects().isEmpty()) return;
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                where, "A converted Java callback must have an empty raises row; handle or map "
+                where, "A converted Java callback must have an empty performs row; handle or map "
                         + "its effects before the conversion."));
     }
 

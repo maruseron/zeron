@@ -167,7 +167,7 @@ Generic data-class patterns may spell the complete applied type or omit it. Omis
 scrutinee's applied type; partial type-argument lists and wildcards are not accepted:
 
 ```zeron
-data class Box<A: mut>(value: A) {}
+data class Box<A admits mutable>(value: A) {}
 
 fn classify(box: Box<Int>): String = match (box) {
     case Box<Int>(0) -> "zero";
@@ -193,7 +193,7 @@ class Box<T> {
     public constructor new;
 }
 
-fn classify<T: reified>(box: Box<T>): String = match (box) {
+fn classify<reified T>(box: Box<T>): String = match (box) {
     case Box<Int> as boxed -> "integer: " + boxed.value;
     case Box<String>(value) -> "string: " + value;
     case _ -> "other box";

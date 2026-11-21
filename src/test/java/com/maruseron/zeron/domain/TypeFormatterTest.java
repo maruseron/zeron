@@ -49,7 +49,7 @@ public final class TypeFormatterTest {
         final var function = new FunctionDescriptor("", parameter, List.of(parameter),
                 List.of(parameter));
 
-        assertEquals("<T: mut>(T) -> T", TypeFormatter.format(function));
+        assertEquals("<T admits mutable>(T) -> T", TypeFormatter.format(function));
     }
 
     @Test
@@ -69,7 +69,7 @@ public final class TypeFormatterTest {
         final var reordered = TypeDescriptor.handlerOf(TypeDescriptor.ofString(),
                 List.of(audit, failure), List.of(audit));
 
-        assertEquals("String ~> {effects.Audit, effects.Failure} raises {effects.Audit}",
+        assertEquals("String ~> {effects.Audit, effects.Failure} performs {effects.Audit}",
                 TypeFormatter.format(first));
         assertEquals("String ~> {effects.Failure}",
                 TypeFormatter.format(TypeDescriptor.handlerOf(TypeDescriptor.ofString(),

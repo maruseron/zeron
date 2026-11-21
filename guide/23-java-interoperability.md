@@ -116,7 +116,7 @@ itself does not require `unsafe`; a direct Java call still does.
 
 Lowering reuses `LambdaMetafactory` with the Java interface as the call-site return type, so it adds
 no runtime class, generated interface, or API-index field. A converted callback may not carry a
-non-empty `raises` row; handle or map the effect inside the callback. Java reference types keep their
+non-empty `performs` row; handle or map the effect inside the callback. Java reference types keep their
 ordinary nullability mapping, so a callback parameter may receive `null` even when written as a
 non-null Zeron reference. Java may retain the callback and invoke it later or on another thread; this
 slice makes no lifetime, identity, serialization, or thread-safety promise. Only an inline lambda or

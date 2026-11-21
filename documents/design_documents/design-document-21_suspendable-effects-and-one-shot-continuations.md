@@ -51,7 +51,7 @@ An effect in Zeron is an **immutable, transparent carrier of data**. It is close
 - It only declares immutable properties and non-mutating methods.
 - It can implement contracts.
 - It has no variants: an "error ADT" is modeled as several small effects (`Timeout`, `Conflict`), and the union lives in the row.
-- Its methods must have an empty row. If a carrier's method could raise effects, it would stop being transparent: they would fire inside a `match` or a `toString`.
+- Its methods must have an empty row. If a carrier's method could perform effects, it would stop being transparent: they would fire inside a `match` or a `toString`.
 
 Because the carrier is data, it can be copied, stored or escape its handler without risk.
 
@@ -60,9 +60,9 @@ Because the carrier is data, it can be copied, stored or escape its handler with
 A function's row is a **set of nominal carrier types**:
 
 ```zeron
-fn f(): R raises E                 // concrete E or row variable
-fn g<E: effect...>(): R raises E   // row-polymorphic
-contract C<E: effect> { ... }      // contracts parameterized by a row
+fn f(): R performs E                 // concrete E or row variable
+fn g<E admits effect...>(): R performs E   // row-polymorphic
+contract C<E admits effect> { ... }      // contracts parameterized by a row
 ```
 
 Row subtraction operates at the type level. A contract without a row parameter means an empty row by default, which gives `pure` for free and leaves `C<E>` as an opt-in.
@@ -72,25 +72,25 @@ Row subtraction operates at the type level. A contract without a row parameter m
 A named handler is a declaration with a set of `case`s. Its type is `T ~> { E1, E2, E3 }`, where `T` is the type of the handled expression and `{E...}` are the effects it consumes.
 
 ```zeron
-handle (doSomeWork())     // doSomeWork(): T raises E1 + E2 + F
+handle (doSomeWork())     // doSomeWork(): T performs E1 + E2 + F
     with myHandler;       // myHandler: T ~> { E1, E2 }
-                          // whole expression: T raises F + G
+                          // whole expression: T performs F + G
 ```
 
 Typing rule:
 
 ```
-e : T raises (E1 + E2 + F)
-h : T ~> { E1, E2 }       // cases return T and may raise G
+e : T performs (E1 + E2 + F)
+h : T ~> { E1, E2 }       // cases return T and may perform G
 -----------------------------------------------
-handle (e) with h : T raises (F + G)
+handle (e) with h : T performs (F + G)
 ```
 
 Fixed properties:
 
 - **T to T.** The handler does not change the type of the success value. There is no return clause. Abortive `case`s replace the whole expression with a `T`.
 - **Unhandled effects propagate.** Any carrier the handler does not consume stays in the row (`F`).
-- **Cases are outside the handler's scope.** Whatever a `case` raises escapes, as in a `catch`. Its row is added to the result (`G`).
+- **Cases are outside the handler's scope.** Whatever a `case` performs escapes, as in a `catch`. Its row is added to the result (`G`).
 - **Dispatch by type.** Thanks to reified generics, the handler finds the carrier with a runtime type test. Carriers can implement contracts, so a `case` can handle by contract (`case e: Retryable`). Comparable cases are tried most-specific first, independent of source order, with a warning for unreachable cases.
 - **Generic and configurable handlers.** A singleton cannot carry state or parameters. Generic handlers (`catchAll<T, E>`) and configurable ones (`Retry(3)`) are factories. The singleton is a particular case.
 
@@ -130,7 +130,7 @@ It is more powerful than `async/await` (it works for any monad), but it reinvent
 ### 3.2 Second idea: async as a row element
 
 ```zeron
-fn doAsync<T>(callback: () -> T): T raises Async = ...
+fn doAsync<T>(callback: () -> T): T performs Async = ...
 ```
 
 Here the color becomes a **row element**: it is inferred, abstracted over and subtracted by a handler. But `Async.wrap()` as a handler that turns `T` into `Future<T>` breaks the rule that handlers are T to T. The type transformation lives in an ordinary function.
@@ -144,17 +144,17 @@ Two different things must be separated:
 2. **`Future<T>` as a value:** "this computation is in flight and I can wait for it later". It is only needed for concurrency, not for sequencing.
 
 ```zeron
-public effect Await<T, E: effect...> responds T {   // ZEP-0118; ZEP-0120 owns exact typing
+public effect Await<T, E admits effect...> responds T {   // ZEP-0118; ZEP-0120 owns exact typing
     public property future: Future<T, E>;
 }
 
-fn await<T, E: effect...>(f: Future<T, E>): T raises Await<T, E> + E
+fn await<T, E admits effect...>(f: Future<T, E>): T performs Await<T, E> + E
     // the "reflect": raising the carrier
 
-fn spawn<T, E: effect...>(scope: Scope, f: () -> T raises E): Future<T, E>
+fn spawn<T, E admits effect...>(scope: Scope, f: () -> T performs E): Future<T, E>
     // the "reify": start a task in a ZEP-0112 scope
 
-fn main() raises Await<Int, {}> {                    // Async is shorthand; see ZEP-0120
+fn main() performs Await<Int, {}> {                    // Async is shorthand; see ZEP-0120
     using (scope = Scope.open()) {
         let f = spawn(scope, () -> doAsync(op));
         let i = await(f);
@@ -170,7 +170,7 @@ typing; an effect declaration with a row parameter is still an open question the
 - `spawn` wraps the success value inside the handled expression, just like `toResult`:
 
 ```zeron
-fn toResult<A, E: effect>(f: () -> A raises E): Result<A, E> =
+fn toResult<A, E admits effect>(f: () -> A performs E): Result<A, E> =
     handle (Ok(f())) with catchAll<Result<A, E>>
 ```
 
@@ -185,7 +185,7 @@ With a responding `Await` carrier and tail-resumptive handlers, the source has t
 a continuation instead. The immediate gain is not convenience but **polymorphism and uniformity**,
 and it is static:
 
-- `map<E>(f: A -> B raises E): ... raises E` works for pure, failing and asynchronous functions.
+- `map<E>(f: A -> B performs E): ... performs E` works for pure, failing and asynchronous functions.
   There is no `mapAsync`.
 - The async carrier is not a special case: it is a row element like `Timeout` or `NotFound`, with
   the same inference, subtraction and rules in contracts.
@@ -232,33 +232,33 @@ contract that a class or a foreign type can implement. The alternative `effect A
 surface is recorded as rejected in ZEP-0118 because it makes a library contract part of the
 declaration mechanism and invites fictitious conformance.
 
-The `raise` site becomes an expression of type `R`, taken from the declaration. A carrier without it
+The `perform` site becomes an expression of type `R`, taken from the declaration. A carrier without it
 responds `Never`, which preserves typed early return. In a handler, a `case` over a responding
 carrier receives a continuation: at level 2 it is a restricted tail-only token (§6.1), and at level 3
-it has type `Cont<R, T>` ([ZEP-0119](../zeps/ZEP-0119.md)). For an abortive carrier, `raise` remains
-`Never` and the surrounding code is unreachable; for a responding carrier, `raise` may return, so
+it has type `Cont<R, T>` ([ZEP-0119](../zeps/ZEP-0119.md)). For an abortive carrier, `perform` remains
+`Never` and the surrounding code is unreachable; for a responding carrier, `perform` may return, so
 subsequent statements are reachable. This is a flow-analysis change, not only a type change.
 
 Rules for response declarations:
 
 - An effect declares at most one response. Two declarations are a compile error.
-- The response is invariant in `R`: the handler produces `R` and the `raise` site consumes it.
+- The response is invariant in `R`: the handler produces `R` and the `perform` site consumes it.
 - `Responds<R>` has no members, so carriers stay immutable data and their methods keep an empty row.
   It is compiler-known and cannot be implemented explicitly by a class or a Java-library type.
 - Handlers by contract work for patterns derived from the declaration: `case e: Responds<Unit>`
   handles every carrier that answers `Unit`, with `k: Cont<Unit, T>`.
 - Only carriers declared in Zeron can be resumable. A response cannot be attached afterwards to a
   carrier from a Java library.
-- A `raise` on a row variable `E` has no known response type, so raising is limited to concrete
-  carriers unless a bound on a single effect such as `E: effect + Responds<R>` is allowed. A row-level
-  version such as `E: effect... + Responds<R>` would wrongly claim that every carrier in the row has
+- A `perform` on a row variable `E` has no known response type, so raising is limited to concrete
+  carriers unless a bound on a single effect such as `E: Responds<R> admits effect` is allowed. A row-level
+  version such as `E: Responds<R> admits effect...` would wrongly claim that every carrier in the row has
   the same response; it needs a different form. This is an open question, not a solved part of the
   design. ZEP-0118 records that generic code can still call and forward effectful functions without
-  performing a responding `raise` itself.
+  performing a responding `perform` itself.
 
 ### 6.1 Three levels of handler
 
-1. **Abortive.** Already exist. On the JVM, an abortive `raise` is a stackless exception and `handle` is a `catch` with a reified type test.
+1. **Abortive.** Already exist. On the JVM, an abortive `perform` is a stackless exception and `handle` is a `catch` with a reified type test.
 2. **Tail-resumptive.** The `case` ends with the resumption in tail position: exactly one `resume`,
    no later work, and no stored continuation. It covers `Yield`, `Ask`, `Log`, blocking `Await`, and
    most practical uses. It compiles to a direct call or a loop, **without capturing continuations**.
@@ -278,7 +278,7 @@ expression's row can gain `DisposeFailure` when it cancels pending continuations
 | View | Who is in control | In Zeron |
 | --- | --- | --- |
 | Pull (external iterator) | the consumer calls `next()` | repeated `Option<T>` |
-| Push (internal iteration) | the producer emits | `raise Yield(v)` + collector |
+| Push (internal iteration) | the producer emits | `perform Yield(v)` + collector |
 
 Turning pull into push is a `while` loop that calls `next()`. Turning push into pull is a **generator**
 and requires suspending between elements, that is, general resumability. That is why pull generators
@@ -329,7 +329,7 @@ Rules:
   claiming to be complete. A continuation stored in a field or captured by a lambda cannot be checked
   locally.
 - **Deep handler semantics for the continuation:** what is resumed stays inside the `handle`, so its
-  subsequent `raise` calls are caught by the same handler. The `case` body itself remains outside the
+  subsequent `perform` calls are caught by the same handler. The `case` body itself remains outside the
   handler: an effect raised by the case escapes unless an outer handler catches it.
 - A handler that stores `k` is a per-`handle` state machine; its state must survive across
   suspension. A named singleton handler that captures `k` is not stateless.
@@ -345,9 +345,9 @@ public effect Yield<T> responds Unit {
     public property value: T;
 }
 
-fn numbers(): Unit raises Yield<Int> {
+fn numbers(): Unit performs Yield<Int> {
     for (i in 0..3) {
-        raise Yield.new(i);
+        perform Yield.new(i);
     }
 }
 ```
@@ -386,13 +386,13 @@ interception but would not run Java cleanup, which is worse for interop.
 
 ### 8.2 Synchronous cancellation
 
-Because `dispose(): Unit raises DisposeFailure` cannot contain a general resumable effect (level 3), no `using` suspends during unwinding. A tail-resumptive level-2 effect in `dispose` is synchronous and does not violate this. `k.cancel()` unwinds and returns with no scheduler in between. Blocking a virtual thread directly in `dispose` is a separate library choice, not a handler suspension, and should still be avoided. This restriction on the `Disposable` contract matters.
+Because `dispose(): Unit performs DisposeFailure` cannot contain a general resumable effect (level 3), no `using` suspends during unwinding. A tail-resumptive level-2 effect in `dispose` is synchronous and does not violate this. `k.cancel()` unwinds and returns with no scheduler in between. Blocking a virtual thread directly in `dispose` is a separate library choice, not a handler suspension, and should still be avoided. This restriction on the `Disposable` contract matters.
 
 ### 8.3 Where suppressions go
 
 | Situation | What happens to `dispose` failures |
 | --- | --- |
-| Abortive `raise` on the live stack | The `using` blocks between the `raise` and the `handle` unwind **before** the `case` runs. Their suppressions are available in `with suppressed as s`. |
+| Abortive `perform` on the live stack | The `using` blocks between the `perform` and the `handle` unwind **before** the `case` runs. Their suppressions are available in `with suppressed as s`. |
 | Pending continuations when the `handle` ends | They are cancelled **after** the `case` has produced its `T`. The `case` can no longer see them: they leave through the `handle`'s row as `DisposeFailure` (the first one, with the rest suppressed). |
 | Case has suspended the computation | The computation stays suspended with its resources open. Nothing has been unwound. |
 | `case` aborts and a `dispose` also fails | The cause wins and cleanup failures accumulate as suppressed. |
@@ -407,11 +407,11 @@ cancellation-report hook or wrapping the `handle` in a `using` scope.
 
 ### 8.4 `using` as a statement
 
-- It has no value, so there is no result a failed `dispose` could replace. If the body does `return x`, `x` is evaluated, the `dispose` calls run, and then it returns. If a `dispose` raises `DisposeFailure`, that failure replaces the `return`, as in try-with-resources.
+- It has no value, so there is no result a failed `dispose` could replace. If the body does `return x`, `x` is evaluated, the `dispose` calls run, and then it returns. If a `dispose` performs `DisposeFailure`, that failure replaces the `return`, as in try-with-resources.
 - `break`, `continue` and `return` go through the `dispose` calls. This should be tested with the `for` `break`s.
 - A `using` adds `DisposeFailure` to its function's row, unless a `handle` inside handles it.
 - With several resources (`using (a = open(), b = open())`), order is LIFO and suppressions accumulate.
-- **Lint:** a `using` kept open across a `raise` whose handler suspends (level 3) keeps the resource
+- **Lint:** a `using` kept open across a `perform` whose handler suspends (level 3) keeps the resource
   alive during suspension. A tail-resumptive level-2 handler resumes immediately and does not. The
   compiler can detect the level-3 case when the body's row contains a carrier whose handler stores
   `k`; this is a lint, not a prohibition.
@@ -420,9 +420,9 @@ cancellation-report hook or wrapping the `handle` in a `using` scope.
 
 ### 9.1 Abortive effects
 
-An abortive `raise` is a stackless exception (`writableStackTrace=false`) wrapping the carrier.
+An abortive `perform` is a stackless exception (`writableStackTrace=false`) wrapping the carrier.
 `handle` is a `catch` with a reified type test, and `using` is a `try/finally` with suppression
-accumulation. JVM unwinding gives cleanup for free. A responding `raise` at level 2 is a direct
+accumulation. JVM unwinding gives cleanup for free. A responding `perform` at level 2 is a direct
 handler call instead; it does not throw.
 
 ### 9.2 Resumable effects
@@ -431,7 +431,7 @@ There are two strategies:
 
 **A. Loom delimited continuations.** `jdk.internal.vm.Continuation` is a one-shot continuation, but
 it is **not implicit delimited control**. Suspending requires an explicit `yield(scope)` with the
-right `ContinuationScope`; the raise site must still resolve which handler scope owns the carrier, so
+right `ContinuationScope`; the perform site must still resolve which handler scope owns the carrier, so
 a handler stack or evidence-passing mechanism remains. `run()` executes on the calling thread, so a
 continuation cannot be resumed freely from an arbitrary callback thread without an explicit handoff.
 Real stacks keep stack traces intact and the descriptor does not change, but that does not make the
@@ -450,7 +450,7 @@ broken stack traces and tail calls, and it changes descriptors for separate comp
 Recommendation: **use A only as a prototype to falsify the semantics**, not as the production
 backend. Use B, or a public continuation API if one exists, for any shipping decision. The source
 language and the `Cont` contract must be identical under both, so the backend remains an
-implementation choice. The prototype must answer: can the raise site resolve the handler scope
+implementation choice. The prototype must answer: can the perform site resolve the handler scope
 without an ABI change; can handler state survive a callback-thread handoff; does cancellation run
 `using` and Java `finally` cleanup; and what happens across monitors, native frames, and unaware Java
 callbacks.
@@ -491,7 +491,7 @@ are synchronous and remain allowed. That is a new type-system feature and is lef
 
 1. A `responds R` clause on effect declarations, with a compiler-synthesized `Responds<R>` marker
    for handler patterns (`effect Await<T> responds T {}`). Carriers without it respond `Never`.
-2. `raise` as an expression of type `R` (or wrapper functions such as `await(f)`).
+2. `perform` as an expression of type `R` (or wrapper functions such as `await(f)`).
 3. A continuation received by the `case`: a restricted tail-only token at level 2, and `Cont<R, T>`
    with `resume` and `cancel` at level 3, with a one-shot check at runtime.
 4. Deep-handler semantics for what is resumed.
@@ -500,7 +500,7 @@ are synchronous and remain allowed. That is a new type-system feature and is lef
 
 **Unchanged:**
 
-- Function signatures (`f(): R raises E`). Effect declarations gain a response, but calls do not gain
+- Function signatures (`f(): R performs E`). Effect declarations gain a response, but calls do not gain
   a wrapper or a `suspend` modifier.
 - `T ~> {...}`. The handler type does not change between levels; at level 3 the `handle` expression's
   row can gain `DisposeFailure` when it cancels continuations.
@@ -518,7 +518,7 @@ ZEP is authoritative.
 
 ## 11. Suggested implementation order
 
-1. Response-typed carriers (`responds R`, `Never` by default) and `raise` as an expression
+1. Response-typed carriers (`responds R`, `Never` by default) and `perform` as an expression
    ([ZEP-0118](../zeps/ZEP-0118.md)).
 2. Rows with extension and subtraction, and handlers with type `T ~> {...}`.
 3. Tail-resumptive handlers (`Yield`, `Ask`, `Log`) without continuation capture. Do not rewrite
@@ -532,7 +532,7 @@ ZEP is authoritative.
 
 ## 12. Open decisions
 
-- The final syntax of `responds`, `k` in the `case`, and `raise` as an expression. ZEP-0118 owns the
+- The final syntax of `responds`, `k` in the `case`, and `perform` as an expression. ZEP-0118 owns the
   response syntax; this document uses `responds` and keeps `is Responds<R>` only as a rejected
   alternative.
 - How a response bound on a single effect or on a row variable is written, and whether it requires a

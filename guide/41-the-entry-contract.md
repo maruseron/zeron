@@ -12,7 +12,7 @@ those curious, it looks like this:
 
 ```zeron
 public contract Main<A> {
-    static run(value: A): Unit raises Effect;
+    static run(value: A): Unit performs Effect;
 }
 ```
 
@@ -36,11 +36,11 @@ Your own types can opt in with a witness:
 ```zeron
 class Job {
     public constructor new;
-    public start(): Unit raises IoFailure = println("started");
+    public start(): Unit performs IoFailure = println("started");
 }
 
 public witness JobMain: Main<Job> for Job {
-    static fn run(value: Job): Unit raises IoFailure = value.start();
+    static fn run(value: Job): Unit performs IoFailure = value.start();
 }
 
 fn main(): Job = Job.new();
@@ -51,7 +51,7 @@ launcher has the usual `public static void main(String[])` shape, and effects ra
 or interpreting the entry value escape at that boundary.
 
 The return type may be inferred from the body. Entry selection uses the resolved type, so a short
-program can omit the annotation and the launcher's `raises` row:
+program can omit the annotation and the launcher's `performs` row:
 
 ```zeron
 fn main() = println("hello");
@@ -60,12 +60,12 @@ fn main() = println("hello");
 ## Standard input and output
 
 The `zeron.io` helpers are ordinary functions with an explicit effect, not wrappers around an
-action monad. `print`, `println`, `readln`, and `prompt` all raise `IoFailure`, so an ordinary
+action monad. `print`, `println`, `readln`, and `prompt` all perform `IoFailure`, so an ordinary
 caller declares that effect in turn. An inferred `main` is the host boundary and may leave the
 effect implicit:
 
 ```zeron
-fn main(): Unit raises IoFailure {
+fn main(): Unit performs IoFailure {
     println("hello");
 }
 ```

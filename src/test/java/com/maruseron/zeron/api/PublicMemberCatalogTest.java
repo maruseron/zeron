@@ -31,7 +31,7 @@ public final class PublicMemberCatalogTest {
                     public constructor new;
                     public value(): T = this.item;
                     public mut reset(): Unit {}
-                    public identity<U: Named<Int>>(item: U): U raises Failure = item;
+                    public identity<U: Named<Int>>(item: U): U performs Failure = item;
                     private hidden(): Unit {}
                 }
                 public contract Labelled {

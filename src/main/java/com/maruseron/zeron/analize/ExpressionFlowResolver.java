@@ -897,14 +897,14 @@ final class ExpressionFlowResolver {
             case Expr.Do doExpression -> resolveDo(context, doExpression);
             case Expr.Match match -> resolveMatch(context, match);
             case Expr.SumCaseTest test -> resolveSumCaseTest(context, test);
-            case Expr.Raise raise -> {
-                final var effectType = resolve(context, raise.effect);
+            case Expr.Raise perform -> {
+                final var effectType = resolve(context, perform.effect);
                 final var nominalType = effectType instanceof ReferenceDescriptor reference
                         ? reference.baseType() : effectType;
-                TypeResolver.requireEffectType(context, nominalType, raise.keyword);
-                RaisedEffectFlow.add(context, nominalType, raise.keyword);
+                TypeResolver.requireEffectType(context, nominalType, perform.keyword);
+                RaisedEffectFlow.add(context, nominalType, perform.keyword);
                 final var responseType = EffectResponses.responseOf(context, nominalType);
-                raise.setType(responseType);
+                perform.setType(responseType);
                 yield responseType;
             }
             case Expr.Handle handle -> resolveHandle(context, handle);

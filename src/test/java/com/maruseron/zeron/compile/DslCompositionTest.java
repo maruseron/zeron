@@ -34,7 +34,7 @@ public final class DslCompositionTest {
                 public constructor new;
             }
 
-            public contract SqlModel<T: nullable + mut> requires Model<T> {
+            public contract SqlModel<T admits nullable + mutable> requires Model<T> {
                 property tableName: String;
             }
 
@@ -72,7 +72,7 @@ public final class DslCompositionTest {
                 case _ -> "?";
             };
 
-            fn translatePredicate<T: nullable + mut>(
+            fn translatePredicate<T admits nullable + mutable>(
                 predicate: CodeModel<(T) -> Boolean>, model: Model<T>
             ): String = match (predicate.body.shape) {
                 case CodeShape.ComparisonNode(comparison, left, right) ->
@@ -90,7 +90,7 @@ public final class DslCompositionTest {
                 case _ -> "unsupported";
             };
 
-            public class QueryScope<T: nullable + mut> {
+            public class QueryScope<T admits nullable + mutable> {
                 public property model: SqlModel<T>;
                 public mut property clause: String;
                 public mut property ordering: String;
@@ -101,7 +101,7 @@ public final class DslCompositionTest {
                     this.clause = translatePredicate<T>(predicate, this.model);
                 }
 
-                public mut orderBy<V: nullable + mut>(selector: CodeModel<(T) -> V>): Unit {
+                public mut orderBy<V admits nullable + mutable>(selector: CodeModel<(T) -> V>): Unit {
                     let selected = selectedProperty(selector);
                     if (selected == null) {
                         this.ordering = "unselected";
@@ -114,7 +114,7 @@ public final class DslCompositionTest {
                 }
             }
 
-            public class QueryResult<T: nullable + mut> {
+            public class QueryResult<T admits nullable + mutable> {
                 public property clause: String;
                 public property ordering: String;
 
@@ -124,7 +124,7 @@ public final class DslCompositionTest {
             public class Database {
                 public constructor new;
 
-                public query<T: nullable + mut>(
+                public query<T admits nullable + mutable>(
                     model: SqlModel<T>, body: &QueryScope<T>.() -> Unit
                 ): QueryResult<T> {
                     let scope = QueryScope<T>.new(model, "", "");

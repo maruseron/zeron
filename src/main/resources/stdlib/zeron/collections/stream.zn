@@ -6,7 +6,7 @@ import zeron.control.Functor;
 import zeron.control.Applicative;
 import zeron.control.Monad;
 
-class ArrayStream<T: mut> is Iterable<T> {
+class ArrayStream<T admits mutable> is Iterable<T> {
     values: Array<T>;
 
     public iterator(): &Iterator<T> {
@@ -24,7 +24,7 @@ class ArrayStream<T: mut> is Iterable<T> {
     }
 }
 
-class ConcatStream<T: mut> is Iterable<T> {
+class ConcatStream<T admits mutable> is Iterable<T> {
     left: Iterable<T>;
     right: Iterable<T>;
 
@@ -52,7 +52,7 @@ class ConcatStream<T: mut> is Iterable<T> {
     }
 }
 
-class MappedStream<T: mut, R: mut> is Iterable<R> {
+class MappedStream<T admits mutable, R admits mutable> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> R;
 
@@ -73,7 +73,7 @@ class MappedStream<T: mut, R: mut> is Iterable<R> {
     }
 }
 
-class FlatMappedStream<T: mut, R: mut> is Iterable<R> {
+class FlatMappedStream<T admits mutable, R admits mutable> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Iterable<R>;
 
@@ -104,7 +104,7 @@ class FlatMappedStream<T: mut, R: mut> is Iterable<R> {
     }
 }
 
-class MonadFlatMappedStream<T: mut, R: mut> is Iterable<R> {
+class MonadFlatMappedStream<T admits mutable, R admits mutable> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Stream<R>;
 
@@ -135,7 +135,7 @@ class MonadFlatMappedStream<T: mut, R: mut> is Iterable<R> {
     }
 }
 
-class AppliedStream<A: mut, B: mut> is Iterable<B> {
+class AppliedStream<A admits mutable, B admits mutable> is Iterable<B> {
     values: Iterable<A>;
     functions: Iterable<(A) -> B>;
 
@@ -167,7 +167,7 @@ class AppliedStream<A: mut, B: mut> is Iterable<B> {
     }
 }
 
-class FilteredStream<T: mut> is Iterable<T> {
+class FilteredStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -194,7 +194,7 @@ class FilteredStream<T: mut> is Iterable<T> {
     }
 }
 
-class TakenStream<T: mut> is Iterable<T> {
+class TakenStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -214,7 +214,7 @@ class TakenStream<T: mut> is Iterable<T> {
     }
 }
 
-class DroppedStream<T: mut> is Iterable<T> {
+class DroppedStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -245,7 +245,7 @@ class DroppedStream<T: mut> is Iterable<T> {
     }
 }
 
-class DroppedWhileStream<T: mut> is Iterable<T> {
+class DroppedWhileStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -275,7 +275,7 @@ class DroppedWhileStream<T: mut> is Iterable<T> {
     }
 }
 
-class TakenWhileStream<T: mut> is Iterable<T> {
+class TakenWhileStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -307,7 +307,7 @@ class TakenWhileStream<T: mut> is Iterable<T> {
     }
 }
 
-class SortedByStream<T: mut> is Iterable<T> {
+class SortedByStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     compare: (T, T) -> Ordering;
 
@@ -343,7 +343,7 @@ class SortedByStream<T: mut> is Iterable<T> {
     }
 }
 
-fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
+fn streamMonadAp<A admits mutable, B admits mutable>(values: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
     Stream<B>.from(AppliedStream<A, B>.new(values, functions));
 
 /// A lazily evaluated sequence of values.
@@ -355,7 +355,7 @@ fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>)
 ///
 /// The terminal operations `fold`, `collect`, `collectWith`, `count`, `any`, `all`, and `toList`
 /// consume the traversal they start, and `any`/`all` stop at the first decisive element.
-public class Stream<T: mut> 
+public class Stream<T admits mutable>
     is Iterable<T>, 
        Functor<Stream<_>>, 
        Applicative<Stream<_>>,
@@ -382,11 +382,11 @@ public class Stream<T: mut>
     public iterator(): &Iterator<T> = source.iterator();
 
     /// Returns a stream of the results of `transform` applied to each element.
-    public map<R: mut>(transform: (T) -> R): Stream<R> =
+    public map<R admits mutable>(transform: (T) -> R): Stream<R> =
         Stream<R>.new(MappedStream<T, R>.new(source, transform));
 
     /// Returns a stream of the elements of every sequence produced by `transform`.
-    public flatMap<R: mut>(transform: (T) -> Iterable<R>): Stream<R> =
+    public flatMap<R admits mutable>(transform: (T) -> Iterable<R>): Stream<R> =
         Stream<R>.new(FlatMappedStream<T, R>.new(source, transform));
 
     /// Returns a stream of the elements accepted by `predicate`.
@@ -394,10 +394,10 @@ public class Stream<T: mut>
         Stream<T>.new(FilteredStream<T>.new(source, predicate));
 
     /// Combines the elements from left to right into a single value.
-    public fold<R: mut, E: effect...>(
+    public fold<R admits mutable, E admits effect...>(
         initial: R,
-        accumulator: (R, T) -> R raises E
-    ): R raises E {
+        accumulator: (R, T) -> R performs E
+    ): R performs E {
         let mut result = initial;
         for (let item in this) result = accumulator(result, item);
         return result;
@@ -442,7 +442,7 @@ public class Stream<T: mut>
     /// `initial` starts the accumulation, `add` combines the accumulator with an element, and
     /// `finish` produces the result. The operations are handed to `Collector.of`, so the same
     /// three arguments can be built once as a collector and passed to `collectWith` instead.
-    public collect<R: mut, S: mut>(initial: S, add: (S, T) -> S, finish: (S) -> R): R =
+    public collect<R admits mutable, S admits mutable>(initial: S, add: (S, T) -> S, finish: (S) -> R): R =
         this.collectWith(Collector.of<S, T, R>(initial, add, finish));
 
     /// Adds every element to an already-built `collector` and returns its result.
@@ -451,13 +451,13 @@ public class Stream<T: mut>
     /// decides how items accumulate, and its `finish` produces the value. `StringJoiner`,
     /// `Collector.toArrayList`, and `Collector.summing` are such collectors, so a join, a list
     /// build, or a sum needs no intermediate collection and no per-call folding function.
-    public collectWith<R: mut>(collector: &Collector<T, R>): R {
+    public collectWith<R admits mutable>(collector: &Collector<T, R>): R {
         for (let item in this) if (not collector.add(item)) break;
         return collector.finish();
     }
 
     /// Whether any element is accepted by `predicate`, stopping at the first acceptance.
-    public any<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+    public any<E admits effect...>(predicate: (T) -> Boolean performs E): Boolean performs E {
         for (let item in this) if (predicate(item)) return true;
         return false;
     }
@@ -465,7 +465,7 @@ public class Stream<T: mut>
     /// Whether every element is accepted by `predicate`, stopping at the first rejection.
     ///
     /// An empty stream satisfies `all` for any predicate.
-    public all<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+    public all<E admits effect...>(predicate: (T) -> Boolean performs E): Boolean performs E {
         for (let item in this) if (not predicate(item)) return false;
         return true;
     }

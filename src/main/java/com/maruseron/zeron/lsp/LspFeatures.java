@@ -56,7 +56,7 @@ final class LspFeatures {
             "default", "else", "effect", "extension", "external", "false", "fn", "for",
             "handle", "if", "implement", "import", "in", "is", "let", "loop",
             "match", "mut", "namespace", "newtype", "not", "null", "object", "or",
-            "package", "pattern", "property", "public", "raise", "return", "sealed",
+            "package", "pattern", "property", "public", "perform", "performs", "return", "sealed",
             "super", "this", "throw", "true", "try", "type", "unsafe", "using", "var", "while",
             "witness");
     private LspFeatures() {}
@@ -659,7 +659,7 @@ final class LspFeatures {
                     .collect(java.util.stream.Collectors.joining(", ", "(", ") -> "))
                     + formatType(function.returnType());
             case PublicMemberCatalog.HandlerType handler -> formatType(handler.returnType()) + " ~> "
-                    + formatTypeSet(handler.handledEffects()) + " raises "
+                    + formatTypeSet(handler.handledEffects()) + " performs "
                     + formatTypeSet(handler.raisedEffects());
             case PublicMemberCatalog.RowType row -> java.util.stream.Stream.concat(
                             row.effects().stream(), row.variables().stream())
@@ -920,16 +920,19 @@ final class LspFeatures {
     }
 
     private static String typeParameterDetail(final TypeParameterDescriptor parameter) {
-        final var constraints = new ArrayList<String>();
-        if (parameter.admitsNullableArguments()) constraints.add("nullable");
-        if (parameter.isEffectKind()) constraints.add("effect");
-        if (parameter.isEffectRowKind()) constraints.add("effect...");
-        if (parameter.admitsMutableArguments()) constraints.add("mut");
-        parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
+        final var bounds = new ArrayList<String>();
+        parameter.bounds().stream().map(TypeFormatter::format).forEach(bounds::add);
+        final var markers = new ArrayList<String>();
+        if (parameter.admitsNullableArguments()) markers.add("nullable");
+        if (parameter.admitsMutableArguments()) markers.add("mutable");
+        if (parameter.isEffectKind()) markers.add("effect");
+        if (parameter.isEffectRowKind()) markers.add("effect...");
         final var variance = parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT
                 ? "out " : "";
-        return "type parameter " + variance + parameter.name()
-                + (constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints));
+        return "type parameter " + variance
+                + (parameter.isReified() ? "reified " : "") + parameter.name()
+                + (bounds.isEmpty() ? "" : ": " + String.join(" + ", bounds))
+                + (markers.isEmpty() ? "" : " admits " + String.join(" + ", markers));
     }
 
     private static List<String> typeParameterDetails(final TypeDescriptor type) {
@@ -2141,14 +2144,16 @@ final class LspFeatures {
                 final List<PublicMemberCatalog.TypeParameter> parameters) {
             if (parameters.isEmpty()) return "";
             return parameters.stream().map(parameter -> {
-                final var constraints = new ArrayList<String>();
-                if (parameter.admitsNullableArguments()) constraints.add("nullable");
-                if (parameter.effectKind()) constraints.add("effect");
-                if (parameter.effectRowKind()) constraints.add("effect...");
-                if (parameter.admitsMutableArguments()) constraints.add("mut");
-                parameter.bounds().stream().map(LspFeatures::formatType).forEach(constraints::add);
-                return parameter.name() + (constraints.isEmpty() ? ""
-                        : ": " + String.join(" + ", constraints));
+                final var bounds = new ArrayList<String>();
+                parameter.bounds().stream().map(LspFeatures::formatType).forEach(bounds::add);
+                final var markers = new ArrayList<String>();
+                if (parameter.admitsNullableArguments()) markers.add("nullable");
+                if (parameter.admitsMutableArguments()) markers.add("mutable");
+                if (parameter.effectKind()) markers.add("effect");
+                if (parameter.effectRowKind()) markers.add("effect...");
+                return parameter.name()
+                        + (bounds.isEmpty() ? "" : ": " + String.join(" + ", bounds))
+                        + (markers.isEmpty() ? "" : " admits " + String.join(" + ", markers));
             }).collect(java.util.stream.Collectors.joining(", ", "<", ">"));
         }
 
@@ -2762,20 +2767,23 @@ final class LspFeatures {
             return parameters.stream()
                     .map(parameter -> (parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT
                                     ? "out " : "")
+                            + (parameter.isReified() ? "reified " : "")
                             + parameter.name() + (parameter.isHigherKinded() ? "<_>" : "")
                             + typeParameterConstraints(parameter))
                     .collect(java.util.stream.Collectors.joining(", ", "<", ">"));
         }
 
         private static String typeParameterConstraints(final TypeParameterDescriptor parameter) {
-            final var constraints = new ArrayList<String>();
-            if (parameter.admitsNullableArguments()) constraints.add("nullable");
-            if (parameter.isEffectKind()) constraints.add("effect");
-        if (parameter.isEffectRowKind()) constraints.add("effect...");
-            if (parameter.admitsMutableArguments()) constraints.add("mut");
+            final var bounds = new ArrayList<String>();
             parameter.bounds().stream().map(TypeFormatter::format)
-                    .map(LspFeatures::shortTypeNames).forEach(constraints::add);
-            return constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints);
+                    .map(LspFeatures::shortTypeNames).forEach(bounds::add);
+            final var markers = new ArrayList<String>();
+            if (parameter.admitsNullableArguments()) markers.add("nullable");
+            if (parameter.admitsMutableArguments()) markers.add("mutable");
+            if (parameter.isEffectKind()) markers.add("effect");
+            if (parameter.isEffectRowKind()) markers.add("effect...");
+            return (bounds.isEmpty() ? "" : ": " + String.join(" + ", bounds))
+                    + (markers.isEmpty() ? "" : " admits " + String.join(" + ", markers));
         }
 
         private String formatContractUse(final Stmt.ContractUse contractUse,
@@ -3377,9 +3385,9 @@ final class LspFeatures {
 
         private static String signature(final String name, final FunctionDescriptor descriptor,
                                         final List<String> parameterNames) {
-            final var raises = descriptor.raisedEffects().isEmpty() ? ""
+            final var performs = descriptor.raisedEffects().isEmpty() ? ""
                     : descriptor.raisedEffects().stream().map(TypeFormatter::format).sorted()
-                            .collect(java.util.stream.Collectors.joining(", ", " raises {", "}"));
+                            .collect(java.util.stream.Collectors.joining(", ", " performs {", "}"));
             final var names = parameterNames.size() == descriptor.parameters().size()
                     ? parameterNames : List.<String>of();
             final var parameters = new ArrayList<String>();
@@ -3395,7 +3403,7 @@ final class LspFeatures {
             final var signature = unqualifyTypeNames("fn " + receiver + name
                     + formatTypeParameters(descriptor.typeParameters())
                     + "(" + parameterList + ")"
-                    + " -> " + TypeFormatter.format(descriptor.returnType()) + raises);
+                    + " -> " + TypeFormatter.format(descriptor.returnType()) + performs);
             return signature.length() <= SIGNATURE_HOVER_LINE_LIMIT
                     ? signature : wrapDelimited(signature, signature.indexOf('('));
         }

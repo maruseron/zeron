@@ -24,7 +24,7 @@ public final class ExistentialGenericsTest {
     public void starProjectionReadsAnUnknownArgument() throws Exception {
         assertCompiledResult("star", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -166,7 +166,7 @@ public final class ExistentialGenericsTest {
                     public constructor new;
                 }
                 public class Holder {
-                    public property box: Box<: reified>;
+                    public property box: Box<reified _:>;
                     public constructor new;
                 }
                 fn use(): Boolean {
@@ -181,13 +181,13 @@ public final class ExistentialGenericsTest {
     public void markerOnlyStoredExistentialIsErased() throws Exception {
         assertCompiledResult("storedErased", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
                 fn use(): Any? {
                     let concrete: Box<String> = Box.new("value");
-                    let box: Box<: nullable> = concrete;
+                    let box: Box<: admits nullable> = concrete;
                     return box.value;
                 }
                 """, "use", "value");
@@ -205,7 +205,7 @@ public final class ExistentialGenericsTest {
                     public constructor new;
                 }
                 public fn describe(box: Box<: Marker>): Any? = box.value;
-                public fn isIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
+                public fn isIntBox(box: Box<reified _:>): Boolean = box is Box<Int>;
                 """.formatted(packageName));
         try {
             final var compiler = CompilationService.forCompilationUnits(
@@ -252,7 +252,7 @@ public final class ExistentialGenericsTest {
                     public constructor new;
                 }
                 public class Holder {
-                    public property box: Box<: reified + Render>;
+                    public property box: Box<reified _: Render>;
                     public constructor new;
                 }
                 fn use(): String {
@@ -290,7 +290,7 @@ public final class ExistentialGenericsTest {
                     public constructor new;
                 }
                 public class Holder {
-                    public property box: Box<: reified + A + B + C>;
+                    public property box: Box<reified _: A + B + C>;
                     public constructor new;
                 }
                 fn use(): String {
@@ -645,7 +645,7 @@ public final class ExistentialGenericsTest {
                     public constructor new;
                 }
                 public class Holder {
-                    public property box: Box<: reified>;
+                    public property box: Box<reified _:>;
                     public constructor new;
                 }
                 """.formatted(packageName));
@@ -712,7 +712,7 @@ public final class ExistentialGenericsTest {
                     public property value: T;
                     public constructor new;
                 }
-                fn isIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
+                fn isIntBox(box: Box<reified _:>): Boolean = box is Box<Int>;
                 fn useInt(): Boolean = isIntBox(Box.new(7));
                 fn useString(): Boolean = isIntBox(Box.new("value"));
                 """, "useInt", true);
@@ -726,7 +726,7 @@ public final class ExistentialGenericsTest {
                     public property value: T;
                     public constructor new;
                 }
-                fn isIntBox<T: reified>(value: T): Boolean = value is Box<Int>;
+                fn isIntBox<reified T>(value: T): Boolean = value is Box<Int>;
                 fn useInt(): Boolean = isIntBox(Box.new(7));
                 fn useString(): Boolean = isIntBox("value");
                 """, "useInt", true);
@@ -751,7 +751,7 @@ public final class ExistentialGenericsTest {
                     public property value: T;
                     public constructor new;
                 }
-                fn isIntBox<T: reified>(value: T): Boolean = value is Box<Int>;
+                fn isIntBox<reified T>(value: T): Boolean = value is Box<Int>;
                 fn useString(): Boolean = isIntBox(Box.new("value"));
                 """, "useString", false);
     }
@@ -760,7 +760,7 @@ public final class ExistentialGenericsTest {
     public void exactArrayTestsUseTheElementDescriptor() throws Exception {
         assertCompiledResult("reifiedArray", """
                 package %s;
-                fn isIntRange<T: reified>(value: T): Boolean = value is Array<Int>;
+                fn isIntRange<reified T>(value: T): Boolean = value is Array<Int>;
                 fn useRange(): Boolean {
                     let values: Array<Int> = [1, 2, 3];
                     return isIntRange(values);

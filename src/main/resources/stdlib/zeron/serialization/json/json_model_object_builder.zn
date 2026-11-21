@@ -8,7 +8,7 @@ import zeron.serialization.EncodeError;
 import zeron.serialization.Decode;
 import zeron.serialization.DecodeError;
 
-public class JsonModelObjectBuilder<T: nullable + mut> {
+public class JsonModelObjectBuilder<T admits nullable + mutable> {
     model: Model<T>;
     owner: T;
     inner: &JsonObjectBuilder;

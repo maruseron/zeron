@@ -129,20 +129,21 @@ array, for example, can be folded into a string by choosing `R` as `String`.
 ## Mutable-reference type arguments
 
 Generic parameters admit read-only, non-null types by default. A mutable reference such as `&Box`
-is rejected unless the parameter opts in with `mut`:
+is rejected unless the parameter opts in with an `admits` clause:
 
 ```zeron
 fn inspect<T>(value: T): Unit = ();
-fn preserveMutableView<T: mut>(value: T): T = value;
+fn preserveMutableView<T admits mutable>(value: T): T = value;
 ```
 
-The `mut` marker controls which type arguments are admissible; it does not give the generic
+The `mutable` marker controls which type arguments are admissible; it does not give the generic
 function permission to mutate its value. Mutation still requires a mutable reference and an
 operation that supports mutation. The `nullable` marker independently permits nullable arguments,
-so `T: nullable + mut` accepts both nullable types and mutable-reference types.
+so `T admits nullable + mutable` accepts both nullable types and mutable-reference types. Ordinary
+contract bounds stay in the `:` list, so `T: Render admits nullable` combines both.
 
-Effect-kinded parameters use the exclusive `effect` marker to accept effect types for generic
-propagation. For the marker rules and nested generic boundaries, see the
+Effect-kinded parameters use the exclusive `effect` marker after `admits` to accept effect types
+for generic propagation. For the marker rules and nested generic boundaries, see the
 [generic type-system design](../documents/design_documents/design-document-19_generic-type-system.md).
 
 ## Covariant declarations
@@ -176,7 +177,7 @@ argument as a separate runtime class. This is called **type erasure**. For examp
 as an array of JVM references.
 
 As a result, generic code cannot ask at runtime which concrete type was used for `T` unless the
-declaration opts in with the `reified` marker. The type parameter preserves type relationships
+declaration opts in with a leading `reified` capability. The type parameter preserves type relationships
 while Zeron checks the program, but it does not give the program a runtime type value to inspect.
 Also, writing `T` alone does not say which operations are available on values of that type; a
 generic function can only use operations justified by its declaration. Later chapters explain how
@@ -189,7 +190,7 @@ A star view is a read-only view of an unknown type argument. `Box<*>` is exactly
 admit the `Any?` projection argument, just as it would for the explicit projection:
 
 ```zeron
-public class Box<T: nullable> {
+public class Box<T admits nullable> {
     public property value: T;
     public constructor new;
 }
@@ -227,12 +228,12 @@ parameters. `Array<*>` is also rejected because arrays do not accept projections
 API is unchanged; `AnyField`, `Model`, and property references do not expose stored existential
 fields directly.
 
-Add `reified` when the hidden argument needs a runtime descriptor. Reified type parameters and
+Add a leading `reified` when the hidden argument needs a runtime descriptor. Reified type parameters and
 hidden arguments support exact applied-type tests:
 
 ```zeron
-fn isIntBox<T: reified>(value: T): Boolean = value is Box<Int>;
-fn isReifiedIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
+fn isIntBox<reified T>(value: T): Boolean = value is Box<Int>;
+fn isReifiedIntBox(box: Box<reified _:>): Boolean = box is Box<Int>;
 ```
 
 An exact test compares applied type descriptors, including array elements and nullable or mutable
@@ -274,17 +275,17 @@ result-position existentials, and variance are tracked in ZEP-0116.
 
 ## Runtime type descriptors
 
-A type parameter marked `reified` receives a runtime descriptor for its type argument. A reified
+A type parameter declared `reified` receives a runtime descriptor for its type argument. A reified
 parameter can be forwarded to another declaration that requires runtime identity:
 
 ```zeron
-public fn identity<T: reified>(value: T): T = value;
-public fn relay<T: reified>(value: T): T = identity(value);
+public fn identity<reified T>(value: T): T = value;
+public fn relay<reified T>(value: T): T = identity(value);
 ```
 
-The marker is part of the declaration's ABI. Exported declarations must state it explicitly, so a
+The capability is part of the declaration's ABI. Exported declarations must state it explicitly, so a
 signature always determines which hidden descriptor arguments its implementation receives.
-Private and local declarations infer the marker transitively from calls that require a descriptor.
+Private and local declarations infer the capability transitively from calls that require a descriptor.
 At a call site with concrete types the compiler passes an interned constant; when the argument is
 another reified type parameter it forwards the descriptor directly. Nested applications, arrays,
 and nullability or mutability markers compose into a descriptor at the call site.

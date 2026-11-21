@@ -13,23 +13,23 @@ before it.
 
 ## Functions that pass effects through
 
-A higher-order function takes a function from its caller. If that function can raise an effect,
+A higher-order function takes a function from its caller. If that function can perform an effect,
 the higher-order function must allow it to escape, and if the function cannot, the caller should not
-have to declare anything. A parameter `E: effect...` stands for whatever effects the function
-argument raises, and the result carries the same set:
+have to declare anything. A parameter `E admits effect...` stands for whatever effects the function
+argument performs, and the result carries the same set:
 
 ```zeron
-fn applyTwice<E: effect...>(value: Int, transform: (Int) -> Int raises E): Int raises E =
+fn applyTwice<E admits effect...>(value: Int, transform: (Int) -> Int performs E): Int performs E =
     transform(transform(value));
 ```
 
-With a pure function, `E` is empty and `applyTwice` raises nothing:
+With a pure function, `E` is empty and `applyTwice` performs nothing:
 
 ```zeron
 let five = applyTwice(3, number -> number + 1);
 ```
 
-With a function that raises, `E` is that function's effects, so `applyTwice` raises them too:
+With a function that performs, `E` is that function's effects, so `applyTwice` performs them too:
 
 ```zeron
 public effect Overflow {
@@ -37,12 +37,12 @@ public effect Overflow {
     public constructor new;
 }
 
-fn checkedDouble(value: Int): Int raises Overflow =
-    if (value > 1000) then raise Overflow.new(value)
+fn checkedDouble(value: Int): Int performs Overflow =
+    if (value > 1000) then perform Overflow.new(value)
     else value * 2;
 ```
 
-`raise` has type `Never`: an expression of that type never produces a value, so it can stand in
+`perform` has type `Never`: an expression of that type never produces a value, so it can stand in
 the `then` branch where an `Int` is expected. Calling `applyTwice(100, checkedDouble)` returns
 `400`, but the call must now be handled or declared, because `Overflow` may escape. A named handler,
 from [Raised effects](22-raised-effects.md), handles it once and reuses the policy:
@@ -55,9 +55,9 @@ handler ZeroOnOverflow {
 let result = handle (applyTwice(600, checkedDouble)) with ZeroOnOverflow;
 ```
 
-The first call returns `1200`; the second call raises `Overflow`, and the handler turns the whole
+The first call returns `1200`; the second call performs `Overflow`, and the handler turns the whole
 expression into `0`. This is how the standard library defines operations such as `Stream.fold` and
-`any`: their callback may raise, and the effects become part of the caller's row.
+`any`: their callback may perform, and the effects become part of the caller's row.
 
 ## Describing behavior with contracts
 
@@ -65,11 +65,11 @@ A contract names a capability, and a generic bound requires it. The standard lib
 `Semigroup` and `Monoid` contracts describe values that can be combined:
 
 ```zeron
-public contract Semigroup<A: mut> {
+public contract Semigroup<A admits mutable> {
     combine(other: A): A;
 }
 
-public contract Monoid<A: mut> requires Semigroup<A> {
+public contract Monoid<A admits mutable> requires Semigroup<A> {
     static empty(): A;
 }
 ```
@@ -82,7 +82,7 @@ capability:
 import zeron.collections.Iterable;
 import zeron.control.Monoid;
 
-fn combineAll<A: mut + Monoid<A>>(values: Iterable<A>): A =
+fn combineAll<A: Monoid<A> admits mutable>(values: Iterable<A>): A =
     values.fold(A.empty(), (total, value) -> total.combine(value));
 ```
 
@@ -100,7 +100,7 @@ slot, as introduced in chapter 30:
 
 ```zeron
 public contract Functor<F<_>> {
-    map<A: mut, B: mut>(this: F<A>, transform: A -> B): F<B>;
+    map<A admits mutable, B admits mutable>(this: F<A>, transform: A -> B): F<B>;
 }
 ```
 
@@ -223,7 +223,7 @@ fn report(values: Iterable<Int>): String =
     "Total: " + total(values).toString();
 
 // Shell: the only code that touches the outside world.
-fn main(): Unit raises IoFailure = println(report([8, 10, 9]));
+fn main(): Unit performs IoFailure = println(report([8, 10, 9]));
 ```
 
 The core can be tested by calling it with values and checking what it returns. It never needs a
@@ -234,7 +234,7 @@ side channel.
 
 ## Practice
 
-1. Write `mapTwice<E: effect...>(values: Iterable<Int>, transform: Int -> Int raises E)` that
+1. Write `mapTwice<E admits effect...>(values: Iterable<Int>, transform: Int -> Int performs E)` that
    returns a `Stream<Int>`, and check that it needs no handler for a pure `transform`.
 2. Write a `Monoid` witness for a type of your own, and use `combineAll` with it.
 3. Use `mapAll` with `Option`, then with `Stream`. What does it return in each case?

@@ -37,7 +37,7 @@ formatter preserves documentation comments.
 Hover shows a declaration's documentation, type, and signature. Signatures carry parameter names from
 the source declaration, including declarations loaded from compiled libraries. Type parameters show
 their constraints at their declaration and at uses, for
-example `type parameter T: nullable + Comparable<T>`; a value whose type mentions a type parameter
+example `type parameter T: Comparable<T> admits nullable`; a value whose type mentions a type parameter
 lists the same information after its type. A model value is described by its declared contract, for
 example `model UserSql: SqlModel<User>`, followed by its contract assignments and property mappings;
 the compiler-generated implementation class is hidden because its name is not usable in source.

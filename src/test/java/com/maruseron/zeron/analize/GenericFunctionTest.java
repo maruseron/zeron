@@ -51,7 +51,7 @@ public final class GenericFunctionTest {
     public void nullableAdmissibilityDefaultsToNonNullAndCanBeOptedInto() {
         new ResolutionService().resolve(parse("""
                 fn identity<T>(value: T): T = value;
-                fn preserve<T: nullable>(value: T): T = value;
+                fn preserve<T admits nullable>(value: T): T = value;
                 fn useNullable(value: String?): String? = preserve(value);
                 """));
 
@@ -65,8 +65,8 @@ public final class GenericFunctionTest {
     public void mutableAdmissibilityDefaultsToReadOnlyAndCanBeOptedInto() {
                 new ResolutionService().resolve(parse("""
                         class Widget { public constructor new; }
-                        fn carry<T: mut>(value: T): T = value;
-                        fn nullableAndMutable<T: nullable + mut>(value: T): T = value;
+                        fn carry<T admits mutable>(value: T): T = value;
+                        fn nullableAndMutable<T admits nullable + mutable>(value: T): T = value;
                         fn useMutable(value: &Widget): &Widget = carry(value);
                         fn useNullable(value: Widget?): Widget? = nullableAndMutable(value);
                         """));
@@ -76,7 +76,7 @@ public final class GenericFunctionTest {
                                 + "fn identity<T>(value: T): T = value; "
                                 + "fn invalid(value: &Widget): &Widget = identity(value);",
                         "fn identity<T>(value: T): T = value; "
-                                + "fn forward<T: mut>(value: T): T = identity(value);")) {
+                                + "fn forward<T admits mutable>(value: T): T = identity(value);")) {
                     assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
                 }
     }
@@ -110,7 +110,7 @@ public final class GenericFunctionTest {
     @Test
     public void effectAdmissibilityRequiresEffectTypeArguments() {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
-                fn relay<E: effect>(value: E): E raises E = value;
+                fn relay<E admits effect>(value: E): E performs E = value;
                 fn invalid(): String = relay<String>("not an effect");
                 """)));
     }
@@ -118,7 +118,7 @@ public final class GenericFunctionTest {
     @Test
     public void nullableMarkersApplyToClassesMethodsAndFunctionReferences() {
         new ResolutionService().resolve(parse("""
-                class NullableBox<T: nullable> {
+                class NullableBox<T admits nullable> {
                     value: T;
                     public constructor from(value: T) {
                         let box = NullableBox<T>.new(value);
@@ -127,9 +127,9 @@ public final class GenericFunctionTest {
                 }
                 class Operations {
                     public constructor new;
-                    public preserve<T: nullable>(value: T): T = value;
+                    public preserve<T admits nullable>(value: T): T = value;
                 }
-                fn identity<T: nullable>(value: T): T = value;
+                fn identity<T admits nullable>(value: T): T = value;
                 let nullableIdentity: (String?) -> String? = identity;
                 fn construct(value: String?): NullableBox<String?> = NullableBox<String?>.from(value);
                 fn invoke(value: String?): String? = Operations.new().preserve(value);
@@ -281,10 +281,10 @@ public final class GenericFunctionTest {
                     public name(): String = this.value;
                 }
                 fn readName(value: Named): String = value.name();
-                fn display<T: mut + Named>(value: T): String = value.name();
+                fn display<T: Named admits mutable>(value: T): String = value.name();
                 fn inferred(): String = display(Person.new("Ada"));
                 fn explicit(): String = display<Person>(Person.new("Grace"));
-                fn passesBound<T: mut + Named>(value: T): String = readName(value);
+                fn passesBound<T: Named admits mutable>(value: T): String = readName(value);
                 fn passThrough(): String = passesBound(Person.new("Lin"));
                 """);
         final var compiler = new CompilationService(source, className);
@@ -321,7 +321,7 @@ public final class GenericFunctionTest {
                     encode(): String;
                 }
                 public contract Formatter {
-                    format<T: mut + Named + Encodable>(value: T): String;
+                    format<T: Named + Encodable admits mutable>(value: T): String;
                 }
                 public class MultiBoundItem is Named, Encodable {
                     label: String;
@@ -331,10 +331,10 @@ public final class GenericFunctionTest {
                 }
                 public class FormatterImpl is Formatter {
                     public constructor new;
-                    public format<T: mut + Named + Encodable>(value: T): String =
+                    public format<T: Named + Encodable admits mutable>(value: T): String =
                         value.name() + value.encode();
                 }
-                fn combine<T: mut + Named + Encodable>(value: T): String =
+                fn combine<T: Named + Encodable admits mutable>(value: T): String =
                     value.name() + value.encode();
                 fn inferredFunctionCall(): String = combine(MultiBoundItem.new("A"));
                 fn explicitFunctionCall(): String = combine<MultiBoundItem>(MultiBoundItem.new("B"));
@@ -616,8 +616,8 @@ public final class GenericFunctionTest {
                     public constructor new;
                     public name(): String = this.label;
                 }
-                fn display<T: mut + Named>(value: T): String = value.name();
-                fn apply<T: mut + Named>(value: T, operation: (T) -> String): String = operation(value);
+                fn display<T: Named admits mutable>(value: T): String = value.name();
+                fn apply<T: Named admits mutable>(value: T, operation: (T) -> String): String = operation(value);
                 fn directMembers(): String {
                     let readName: (Named) -> String = value -> value.name();
                     let person = readName(Person.new("Ada"));

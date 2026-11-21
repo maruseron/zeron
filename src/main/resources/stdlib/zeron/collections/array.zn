@@ -5,7 +5,7 @@ import zeron.internal.generateArray;
 import zeron.lang.Eq;
 
 /// Folding and streaming over intrinsic arrays.
-public extension<T: nullable + mut> Array<T> {
+public extension<T admits nullable + mutable> Array<T> {
     /// Creates a copy of this array with `element` added at the end.
     ///
     /// Arrays are fixed-length, so this method is always O(n) in both time and memory complexity.
@@ -18,20 +18,20 @@ public extension<T: nullable + mut> Array<T> {
     ///
     /// `combine` receives the accumulated value and the next element, starting from `initial`.
     /// An empty array returns `initial`.
-    public fn foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+    public fn foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = combine(result, item);
         return result;
     }
 
     /// Alias of `foldLeft`; arrays combine from the left only.
-    public fn fold<R: mut>(initial: R, accumulator: (R, T) -> R): R {
+    public fn fold<R admits mutable>(initial: R, accumulator: (R, T) -> R): R {
         return this.foldLeft(initial, accumulator);
     }
 }
 
 /// Streaming over arrays.
-public extension<T: mut> Array<T> {
+public extension<T admits mutable> Array<T> {
     /// Returns a stream over this array's elements, in index order.
     public fn stream(): Stream<T> {
         return Stream.fromArray(this);
@@ -46,7 +46,7 @@ public witness ArrayFoldable: Foldable<Array<_>> for Array<_> {
 }
 
 /// Searching arrays of comparable elements.
-public extension<T: nullable + mut + Eq<T>> Array<T> {
+public extension<T: Eq<T> admits nullable + mutable> Array<T> {
     /// Whether `item` occurs in this array.
     public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
 

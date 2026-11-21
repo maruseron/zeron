@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Date | 2026-11-20 |
+| Date | 2026-11-21 |
 | Scope | Current release state in `documents/zeps/ZEP.md` and near-term sequencing |
 | Purpose | Planning companion for bundle contents, acceptance gates, and backlog order |
 
@@ -26,7 +26,7 @@ tentative model-metadata, scoped-type, and resource-handling bundle.
 | `0.6.0` | Stabilization of already implemented work | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0119, ZEP-0120, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
@@ -141,9 +141,9 @@ intended target rather than an approved scope; ZEP-0000 requires acceptance befo
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
-| ZEP-0118 | Response-Typed Effects and Tail-Resumptive Handlers | Implemented / `Candidate` | Headline: a `raise` returns a handler-supplied value |
-| ZEP-0147 | Replace `raise` and `raises` with `perform` and `performs` | Draft / `Candidate` | Hard-drop the exception-oriented keywords; use neutral effect-operation vocabulary |
-| ZEP-0123 | Admissibility Clauses and Explicit Effect Responses | Draft / `Candidate` | `admits` clause and `effect<R>` markers; depends on ZEP-0118 |
+| ZEP-0118 | Response-Typed Effects and Tail-Resumptive Handlers | Implemented / `Candidate` | Headline: a `perform` returns a handler-supplied value |
+| ZEP-0147 | Replace `raise` and `raises` with `perform` and `performs` | Implemented / `Candidate` | Hard-drop the exception-oriented keywords; use neutral effect-operation vocabulary |
+| ZEP-0123 | Admissibility Clauses and Leading Reification | Implemented / `Candidate` | `admits` clause (`nullable`, `mutable`, `effect`, `effect...`) and leading `reified`; response constraints stay `Responds<R>` |
 | ZEP-0112 | Structured Concurrency on Virtual Threads | Draft / `Candidate` | Library-only `Scope`, `Task`, cancellation, timeouts |
 | ZEP-0120 | Async as an Effect and the Future/Task Surface | Draft / `Candidate` | Async surface; depends on ZEP-0118 and ZEP-0112 |
 | ZEP-0119 | One-Shot Continuations, Deep Handlers, and Cancellation | Draft / `Candidate` | Prototype-gated continuation work; acceptance waits on the backend prototype |
@@ -166,9 +166,10 @@ intended target rather than an approved scope; ZEP-0000 requires acceptance befo
    continuation capture remain follow-up scope owned by ZEP-0119.
 2. **Accept ZEP-0147 as the effect-operation rename.** It changes spellings, not effect semantics,
    and removes `raise`/`raises` rather than introducing aliases.
-3. **Accept the dependent rows after their prerequisites.** ZEP-0123 needs ZEP-0118's response form,
-   ZEP-0120 needs ZEP-0118 and ZEP-0112, and ZEP-0119 needs its backend prototype and continuation
-   ABI answers. ZEP-0112 can be reviewed independently of response typing.
+3. **Accept the dependent rows after their prerequisites.** ZEP-0123 is a syntax-only change and
+   does not depend on response typing; it keeps `Responds<R>` as ZEP-0118's response bound. ZEP-0120
+   needs ZEP-0118 and ZEP-0112, and ZEP-0119 needs its backend prototype and continuation ABI
+   answers. ZEP-0112 can be reviewed independently of response typing.
 4. **Mark the accepted rows `Planned` for `0.9.0`**, not before; the thirteen unimplemented rows hold
    `Candidate` while their designs remain `Draft`.
 5. **ZEP-0111 shipped in `0.7.0`.** It is notation-only and is not part of the `0.9.0` candidate
@@ -260,9 +261,9 @@ would combine an effect-runtime ABI change with a purely compile-time annotation
 - ZEP-0126 implementation details are settled: `Result` failures print `error.toString()` to
   `System.err` and exit `1`, `main` visibility stays unconstrained, and the `zeron.io` helpers are
   ordinary `raises IoFailure` functions.
-- Resolve ZEP-0118's response syntax, generic response bounds, catch-all interaction, and carrier
-  policy before proceeding with the `0.9.0` candidate set; accept ZEP-0147 before implementing the
-  hard keyword drop.
+- Implement ZEP-0118's `Responds<R>` generic response bound, and resolve catch-all interaction and
+  carrier policy, before proceeding with the `0.9.0` candidate set; accept ZEP-0147 before
+  implementing the hard keyword drop.
 - Decide whether the ZEP-0112 scope/task spike is complete enough to schedule independently.
 
 ## Backlog after the planned bundles
@@ -497,7 +498,7 @@ These decisions shape the current plan. Details live in each ZEP.
 - **ZEP-0147:** hard-drop `raise` and `raises` in favor of `perform` and `performs`. The operation
   spelling and effect-row clause change, while effect identity, response typing, handler behavior,
   and the runtime carrier remain unchanged. `raise` becomes an ordinary identifier and can name an
-  effect constructor. Draft, with a proposed `0.9.0` target.
+  effect constructor. Implemented for the proposed `0.9.0` target.
 
 ## Planning rules
 
@@ -505,14 +506,17 @@ These decisions shape the current plan. Details live in each ZEP.
   `Unscheduled`; that is not an error by itself.
 - A ZEP normally cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design
   first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16, and ZEP-0146 and
-  ZEP-0151 were accepted and implemented on 2026-11-20. ZEP-0112, ZEP-0118, ZEP-0119, ZEP-0120,   ZEP-0123, and ZEP-0147 remain draft targets, as do ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157;
-   treat their `Candidate` rows as proposed until their design reviews are complete. ZEP-0118 is
-   implemented but stays `Candidate` until the bundle ships.
+  ZEP-0151 were accepted and implemented on 2026-11-20. ZEP-0123 and ZEP-0147 were accepted and
+  implemented on 2026-11-21. ZEP-0112, ZEP-0119, and ZEP-0120 remain draft targets, as do ZEP-0066,
+  ZEP-0067, and ZEP-0152–ZEP-0157; treat their `Candidate` rows as proposed until their design
+  reviews are complete. ZEP-0118, ZEP-0123, and ZEP-0147 are implemented but stay `Candidate`
+  until the bundle ships.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
   description shipped on 2026-11-20 with twenty-five rows; its acceptance queue is closed. The
-  `0.9.0` description has fourteen draft candidates (ZEP-0066, ZEP-0067, ZEP-0112, ZEP-0118,
-  ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, and ZEP-0152–ZEP-0157) and remains a planning record.
+  `0.9.0` description has fourteen candidates (ZEP-0066, ZEP-0067, ZEP-0112, ZEP-0118, ZEP-0119,
+  ZEP-0120, ZEP-0123, ZEP-0147, and ZEP-0152–ZEP-0157); ZEP-0118, ZEP-0123, and ZEP-0147 are
+  implemented, and the rest remain draft targets.
   The `0.10.0` description has two accepted candidates, ZEP-0091 and ZEP-0097, three tentative draft
   candidates, ZEP-0158, ZEP-0160, and ZEP-0161, plus three draft model proposals that cannot become
   candidates until accepted. ZEP-0162 is `Draft` / `Unscheduled` and owns the future generic

@@ -8,7 +8,7 @@ import java.lang.System;
 /// `Main<A>` evidence value for a non-`Unit` `main` return type.
 public contract Main<A> {
     /// Consumes the entry value and ends the program normally or by exiting.
-    static run(value: A): Unit raises Effect;
+    static run(value: A): Unit performs Effect;
 }
 
 /// Entry behavior for a `Unit` value: the program ends normally.

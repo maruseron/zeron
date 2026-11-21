@@ -28,7 +28,7 @@ final class RaisedEffectFlow {
         }
         if (!missing.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    where, "Undeclared raised effects: " + missing.stream().map(TypeDescriptor::name).collect(Collectors.joining(", ")) + ". Add them to the raises clause or handle them."));
+                    where, "Undeclared raised effects: " + missing.stream().map(TypeDescriptor::name).collect(Collectors.joining(", ")) + ". Add them to the performs clause or handle them."));
         }
     }
 

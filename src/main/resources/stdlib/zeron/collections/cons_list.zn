@@ -3,7 +3,7 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.internal.unwrapSome;
 
-class ConsNode<T: mut> {
+class ConsNode<T admits mutable> {
     storedHead: T;
     storedTail: ConsNode<T>?;
 
@@ -17,7 +17,7 @@ class ConsNode<T: mut> {
     public tail(): ConsNode<T>? = this.storedTail;
 }
 
-class ConsListIterator<T: mut> is Iterator<T> {
+class ConsListIterator<T admits mutable> is Iterator<T> {
     current: ConsNode<T>?;
 
     private constructor new;
@@ -37,7 +37,7 @@ class ConsListIterator<T: mut> is Iterator<T> {
 /// A `ConsList` shares its tail between values, so `prepend` is constant time and never changes the
 /// receiver. The length is cached in each header, so `size` is constant time even though `last`
 /// walks the spine. A cons list is a `List` but does not declare any mutation capability.
-public class ConsList<T: mut>
+public class ConsList<T admits mutable>
     is List<T>,
        Sequenced<T>,
        Reversible<ConsList<_>>,
@@ -102,7 +102,7 @@ public class ConsList<T: mut>
     }
 
     /// Combines the elements from left to right into a single value.
-    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+    public foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut node = this.node;
         while (node is not null) {
@@ -130,7 +130,7 @@ public class ConsList<T: mut>
 
 /// A `ConsList` is persistent, so only the copying `Sortable` capability applies.
 default witness Sortable<ConsList<_>> for ConsList<_> {
-    fn sortedBy<A: mut>(
+    fn sortedBy<A admits mutable>(
         this: ConsList<A>,
         compare: (A, A) -> Ordering
     ): ConsList<A> {

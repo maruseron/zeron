@@ -143,7 +143,7 @@ processes. Do not persist them as identifiers.
 
 The `zeron.serialization` package defines streaming codecs. `Encode<T, E>` writes a value,
 `Decode<T, E>` reads one, and `Codec<T, E>` combines both. The `E` parameter is an effect row, so a
-codec whose body raises effects declares them in the contract rather than hiding them.
+codec whose body performs effects declares them in the contract rather than hiding them.
 
 `deriving Codec` is equivalent to `deriving Encode, Decode`. Listing `Codec` fills in whichever
 direction is not listed explicitly, and a type that derives both directions also receives the

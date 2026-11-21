@@ -22,8 +22,8 @@ import static org.junit.Assert.assertTrue;
 public final class NullableTypeParameterBodyTest {
     private static final String CONTRACTS = """
             contract Printable { text(): String; }
-            contract Ranked<T: mut> { rank(other: T): Int; }
-            class Box<T: nullable> {
+            contract Ranked<T admits mutable> { rank(other: T): Int; }
+            class Box<T admits nullable> {
                 value: T;
                 public constructor new;
             }
@@ -32,9 +32,9 @@ public final class NullableTypeParameterBodyTest {
     @Test
     public void rejectsUncheckedUsesOfNullableTypeParameterValues() {
         final var memberAccess = CONTRACTS
-                + "fn describe<T: nullable + Printable>(value: T): String = value.text();";
+                + "fn describe<T: Printable admits nullable>(value: T): String = value.text();";
         final var useBeforeCheck = CONTRACTS + """
-                fn checkedTooLate<T: nullable + Printable>(value: T): String {
+                fn checkedTooLate<T: Printable admits nullable>(value: T): String {
                     let text = value.text();
                     if (value == null) return "null";
                     return text;
@@ -42,14 +42,14 @@ public final class NullableTypeParameterBodyTest {
                 """;
         final var leakedArgument = CONTRACTS + """
                 fn takesAny(value: Any): String = "ok";
-                fn leak<T: nullable>(value: T): String = takesAny(value);
+                fn leak<T admits nullable>(value: T): String = takesAny(value);
                 """;
         final var boundOperation = CONTRACTS + """
-                fn order<T: nullable + mut + Ranked<T>>(left: T, right: T): Int =
+                fn order<T: Ranked<T> admits nullable + mutable>(left: T, right: T): Int =
                     left.rank(right);
                 """;
         final var invalidatedRefinement = CONTRACTS + """
-                fn reassigned<T: nullable + Printable>(value: T, replacement: T): String {
+                fn reassigned<T: Printable admits nullable>(value: T, replacement: T): String {
                     let mut current = value;
                     if (current == null) return "null";
                     current = replacement;
@@ -70,31 +70,31 @@ public final class NullableTypeParameterBodyTest {
     public void acceptsRefinedSafeAndMovingUses() {
         final var accepted = List.of(
                 """
-                fn describeBranch<T: nullable + Printable>(value: T): String =
+                fn describeBranch<T: Printable admits nullable>(value: T): String =
                     if (value != null) then value.text() else "null";
                 """,
                 """
-                fn describeEarly<T: nullable + Printable>(value: T): String {
+                fn describeEarly<T: Printable admits nullable>(value: T): String {
                     if (value == null) return "null";
                     return value.text();
                 }
                 """,
-                "fn identityOf<T: nullable>(value: T): T = value;",
-                "fn wrap<T: nullable>(value: T): Box<T> = Box<T>.new(value);",
-                "fn safeText<T: nullable + Printable>(value: T): String? = value?.text();",
-                "fn asserted<T: nullable + Printable>(value: T): String = value!!.text();",
+                "fn identityOf<T admits nullable>(value: T): T = value;",
+                "fn wrap<T admits nullable>(value: T): Box<T> = Box<T>.new(value);",
+                "fn safeText<T: Printable admits nullable>(value: T): String? = value?.text();",
+                "fn asserted<T: Printable admits nullable>(value: T): String = value!!.text();",
                 """
                 fn takesAny(value: Any): String = "ok";
                 fn takesAnyOrNull(value: Any?): String = "ok";
-                fn pass<T: nullable>(value: T): String = takesAnyOrNull(value);
+                fn pass<T admits nullable>(value: T): String = takesAnyOrNull(value);
                 """,
                 """
                 fn takesAny(value: Any): String = "ok";
-                fn passChecked<T: nullable>(value: T): String =
+                fn passChecked<T admits nullable>(value: T): String =
                     if (value != null) then takesAny(value) else "null";
                 """,
                 """
-                fn orderChecked<T: nullable + mut + Ranked<T>>(left: T, right: T): Int {
+                fn orderChecked<T: Ranked<T> admits nullable + mutable>(left: T, right: T): Int {
                     if (left == null or right == null) return 0;
                     let ordering = left.rank(right);
                     return 1;
@@ -115,19 +115,19 @@ public final class NullableTypeParameterBodyTest {
     @Test
     public void keepsCallSiteSubstitutionUnchanged() {
         new ResolutionService().resolve(parse("""
-                fn firstOf<T: nullable>(values: Array<T>): T = values[0];
-                fn identityOf<T: nullable>(value: T): T = value;
-                fn only<A: mut>(value: A): A = value;
+                fn firstOf<T admits nullable>(values: Array<T>): T = values[0];
+                fn identityOf<T admits nullable>(value: T): T = value;
+                fn only<A admits mutable>(value: A): A = value;
                 let name: String = firstOf(["Ada"]);
                 let accepted = identityOf<String?>(null);
                 """));
 
         for (final var source : List.of(
-                "fn firstOf<T: nullable>(values: Array<T>): T = values[0]; "
+                "fn firstOf<T admits nullable>(values: Array<T>): T = values[0]; "
                         + "let nullableNames: Array<String?> = [\"Ada\", null]; "
                         + "let bad: String = firstOf(nullableNames);",
-                "fn only<A: mut>(value: A): A = value; let rejected = only(null);",
-                "fn firstOf<T: nullable>(values: Array<T>): T = values[0]; "
+                "fn only<A admits mutable>(value: A): A = value; let rejected = only(null);",
+                "fn firstOf<T admits nullable>(values: Array<T>): T = values[0]; "
                         + "let nulls: Array<String?> = [null]; "
                         + "let bad: String = firstOf(nulls);")) {
             assertThrows(source, ResolutionError.class,
@@ -141,7 +141,7 @@ public final class NullableTypeParameterBodyTest {
                 + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var source = parse("""
-                fn identityOf<T: nullable>(value: T): T = value;
+                fn identityOf<T admits nullable>(value: T): T = value;
                 fn describeNull(): String? = identityOf<String?>(null);
                 fn describeText(): String = identityOf("text");
                 fn isNull(): Boolean = identityOf<String?>(null) == null;

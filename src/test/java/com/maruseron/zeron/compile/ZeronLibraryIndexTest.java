@@ -245,9 +245,9 @@ public final class ZeronLibraryIndexTest {
         final var unit = parse("Library.zn", """
                 package %s;
                 public effect Failure {}
-                public fn nullable<T: nullable>(value: T): T = value;
-                public fn raised<E: effect>(value: E): E raises E = value;
-                public fn mutable<T: mut>(value: T): T = value;
+                public fn nullable<T admits nullable>(value: T): T = value;
+                public fn raised<E admits effect>(value: E): E performs E = value;
+                public fn mutable<T admits mutable>(value: T): T = value;
                 """.formatted(packageName));
         try {
             final var compiler = CompilationService.forCompilationUnits(List.of(unit),
@@ -463,7 +463,7 @@ public final class ZeronLibraryIndexTest {
         final var client = parse("Main.zn", """
                 package %s;
                 import %s.*;
-                fn stringify<T: mut + Display>(value: T): String = value.toString();
+                fn stringify<T: Display admits mutable>(value: T): String = value.toString();
                 fn run(): String = stringify(Box.new());
                 """.formatted(clientPackage, libraryPackage));
         try {
@@ -526,7 +526,7 @@ public final class ZeronLibraryIndexTest {
                 package %s;
                 import %s.*;
                 import zeron.numeric.Numeric;
-                fn subtract<T: mut + Numeric<T>>(left: T, right: T): T = left - right;
+                fn subtract<T: Numeric<T> admits mutable>(left: T, right: T): T = left - right;
                 fn run(): Int = subtract(Vector.new(5), Vector.new(2)).value;
                 """.formatted(clientPackage, libraryPackage));
         try {
@@ -567,7 +567,7 @@ public final class ZeronLibraryIndexTest {
         final var library = parse("Library.zn", """
                 package %s;
                 import zeron.control.Functor;
-                public class Box<T: mut> is Functor<Box<_>> {
+                public class Box<T admits mutable> is Functor<Box<_>> {
                     public property value: T;
                     implementation Functor<Box<_>> {
                         fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> =
@@ -631,17 +631,17 @@ public final class ZeronLibraryIndexTest {
         final var library = parse("Library.zn", """
                 package %s;
                 public contract Foldable<F<_>> {
-                    foldLeft<A: mut, B: mut>(
+                    foldLeft<A admits mutable, B admits mutable>(
                         this: F<A>, initial: B, combine: (B, A) -> B
                     ): B;
-                    default count<A: mut>(this: F<A>): Int =
+                    default count<A admits mutable>(this: F<A>): Int =
                         this.foldLeft(0, (count, _) -> count + 1);
                 }
-                public class Box<T: mut> is Foldable<Box<_>> {
+                public class Box<T admits mutable> is Foldable<Box<_>> {
                     public property value: T;
                     public constructor new;
                     implementation Foldable<Box<_>> {
-                        fn foldLeft<A: mut, B: mut>(
+                        fn foldLeft<A admits mutable, B admits mutable>(
                             this: Box<A>, initial: B, combine: (B, A) -> B
                         ): B = combine(initial, this.value);
                     }
@@ -651,7 +651,7 @@ public final class ZeronLibraryIndexTest {
                 package %s;
                 import %s.Box;
                 import %s.Foldable;
-                fn countItems<F<_>: Foldable<F>, A: mut>(source: F<A>): Int =
+                fn countItems<F<_>: Foldable<F>, A admits mutable>(source: F<A>): Int =
                     source.count();
                 fn run(): Int = countItems<Box<_>, Int>(Box<Int>.new(42));
                 """.formatted(clientPackage, libraryPackage, libraryPackage));
@@ -697,14 +697,14 @@ public final class ZeronLibraryIndexTest {
                     public constructor new;
                     public name(): String = this.value;
                 }
-                public class Box<T: mut> {
+                public class Box<T admits mutable> {
                     public property value: T;
                     public constructor new;
                 }
-                witness<T: mut + Named> zeron.lang.Display for Box<T> {
+                witness<T: Named admits mutable> zeron.lang.Display for Box<T> {
                     fn toString(): String = this.value.name();
                 }
-                public fn render<T: mut + zeron.lang.Display>(value: T): String = "value=" + value;
+                public fn render<T: zeron.lang.Display admits mutable>(value: T): String = "value=" + value;
                 """.formatted(libraryPackage));
         final var client = parse("Main.zn", """
                 package %s;
@@ -1306,7 +1306,7 @@ public final class ZeronLibraryIndexTest {
                 public contract Named { name(): String; }
                 public contract Encodable { encode(): String; }
                 public contract Renderer {
-                    render<T: mut + Named + Encodable>(value: T): String;
+                    render<T: Named + Encodable admits mutable>(value: T): String;
                 }
                 public class Item is Named, Encodable {
                     label: String;
@@ -1316,10 +1316,10 @@ public final class ZeronLibraryIndexTest {
                 }
                 public class LibraryRenderer is Renderer {
                     public constructor new;
-                    public render<T: mut + Named + Encodable>(value: T): String =
+                    public render<T: Named + Encodable admits mutable>(value: T): String =
                         value.name() + value.encode();
                 }
-                public fn describe<T: mut + Named + Encodable>(value: T): String =
+                public fn describe<T: Named + Encodable admits mutable>(value: T): String =
                     value.name() + value.encode();
                 """.formatted(libraryPackage));
         final var client = parse("Client.zn", """
@@ -1690,7 +1690,7 @@ public final class ZeronLibraryIndexTest {
                     public constructor ofMessage(message: String) = RetryFailure.new(message, 2);
                     public retryDelay(): Int = this.attempts;
                 }
-                public fn fail(): Int raises RetryFailure = raise RetryFailure.ofMessage("library");
+                public fn fail(): Int performs RetryFailure = perform RetryFailure.ofMessage("library");
                 """.formatted(libraryPackage));
         final var client = parse("Main.zn", """
                 package %s;
@@ -1701,10 +1701,10 @@ public final class ZeronLibraryIndexTest {
                     case RetryFailure as failure -> failure.retryDelay();
                 };
                 fn retryDelay<T: Retryable>(value: T): Int = value.retryDelay();
-                fn delayThroughBound(): Int = handle (raise RetryFailure.ofMessage("bound")) with {
+                fn delayThroughBound(): Int = handle (perform RetryFailure.ofMessage("bound")) with {
                     case RetryFailure as failure -> retryDelay(failure);
                 };
-                fn namedPayload(): String = handle (raise RetryFailure.ofMessage("named")) with {
+                fn namedPayload(): String = handle (perform RetryFailure.ofMessage("named")) with {
                     case RetryFailure as failure -> failure.message;
                 };
                 """.formatted(clientPackage, libraryPackage, libraryPackage, libraryPackage));
@@ -1758,7 +1758,7 @@ public final class ZeronLibraryIndexTest {
                     package %s;
                     import %s.Retryable;
                     import %s.fail;
-                    fn invalid(): Unit raises Retryable = fail();
+                    fn invalid(): Unit performs Retryable = fail();
                     """.formatted(clientPackage, libraryPackage, libraryPackage));
             final var invalidRaisesCompiler = CompilationService.forCompilationUnits(
                     List.of(contractRaised), clientPackage + ".InvalidRaises", clientPackage,

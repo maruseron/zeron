@@ -5,31 +5,31 @@ package zeron.collections;
 /// Implementations return a fresh iterator from `iterator()` on each call, so separate traversals
 /// do not interfere. The default members build on that single operation: `forEach` visits every
 /// element in order, and `stream` exposes the same elements as a `Stream`.
-public contract Iterable<T: mut> {
+public contract Iterable<T admits mutable> {
     /// Returns a new iterator positioned before the first element.
     iterator(): &Iterator<T>;
 
     /// Applies `consumer` to every element, in order, and discards the results.
     ///
     /// The callback runs during the call, so its effect row propagates to the caller.
-    default forEach<E: effect...>(consumer: (T) -> Unit raises E): Unit raises E {
+    default forEach<E admits effect...>(consumer: (T) -> Unit performs E): Unit performs E {
         for (let element in this) consumer(element);
     }
 
     /// Combines the elements from left to right into a single value.
     ///
     /// The accumulator runs during the call, so its effect row propagates to the caller.
-    default fold<R: mut, E: effect...>(
+    default fold<R admits mutable, E admits effect...>(
         initial: R,
-        accumulator: (R, T) -> R raises E
-    ): R raises E {
+        accumulator: (R, T) -> R performs E
+    ): R performs E {
         let mut result = initial;
         for (let item in this) result = accumulator(result, item);
         return result;
     }
 
     /// Whether any element is accepted by `predicate`, stopping at the first acceptance.
-    default any<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+    default any<E admits effect...>(predicate: (T) -> Boolean performs E): Boolean performs E {
         for (let item in this) if (predicate(item)) return true;
         return false;
     }
@@ -37,7 +37,7 @@ public contract Iterable<T: mut> {
     /// Whether every element is accepted by `predicate`, stopping at the first rejection.
     ///
     /// An empty sequence satisfies `all` for any predicate.
-    default all<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+    default all<E admits effect...>(predicate: (T) -> Boolean performs E): Boolean performs E {
         for (let item in this) if (not predicate(item)) return false;
         return true;
     }

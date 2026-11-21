@@ -16,7 +16,7 @@ public class User {
     public constructor new;
 }
 
-public contract SqlModel<T: nullable + mut> requires zeron.lang.Model<T> {
+public contract SqlModel<T admits nullable + mutable> requires zeron.lang.Model<T> {
     property tableName: String;
 }
 

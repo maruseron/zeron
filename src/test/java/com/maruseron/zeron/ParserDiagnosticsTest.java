@@ -4,11 +4,13 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.GenericDescriptor;
+import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public final class ParserDiagnosticsTest {
     @Test
@@ -53,12 +55,12 @@ public final class ParserDiagnosticsTest {
     @Test
     public void rejectsMutableAdmissibilityForEffectAndHigherKindedParameters() {
         final var effectResult = Parser.of(Scanner.from(
-                "fn invalid<E: effect + mut>(value: E): E raises E = value;").scanWithDiagnostics())
+                "fn invalid<E admits effect + mutable>(value: E): E performs E = value;").scanWithDiagnostics())
                 .parseCompilationUnitWithDiagnostics("effect-mut.zn");
         assertEquals("ZR1105", effectResult.diagnostics().getFirst().code().toString());
 
         final var higherKindedResult = Parser.of(Scanner.from(
-                "fn invalid<F<_>: mut>(value: Int): Int = value;").scanWithDiagnostics())
+                "fn invalid<F<_> admits mutable>(value: Int): Int = value;").scanWithDiagnostics())
                 .parseCompilationUnitWithDiagnostics("hkt-mut.zn");
         assertEquals("ZR1105", higherKindedResult.diagnostics().getFirst().code().toString());
     }
@@ -178,6 +180,102 @@ public final class ParserDiagnosticsTest {
                 .parseCompilationUnitWithDiagnostics("comprehension-soft-keywords.zn");
 
         assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+    }
+
+    @Test
+    public void reportsRemovedRaiseAndRaisesSpellings() {
+        final var raiseResult = Parser.of(Scanner.from(
+                "fn f(): Unit { raise Failure.new(); }")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("raise.zn");
+        assertFalse(raiseResult.diagnostics().isEmpty());
+        assertTrue(raiseResult.diagnostics().getFirst().message()
+                .contains("'raise' was removed; use 'perform'."));
+
+        final var raisesResult = Parser.of(Scanner.from(
+                "fn f(): Unit raises IoFailure {}")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("raises.zn");
+        assertFalse(raisesResult.diagnostics().isEmpty());
+        assertTrue(raisesResult.diagnostics().getFirst().message()
+                .contains("'raises' was removed; use 'performs'."));
+
+        final var memberResult = Parser.of(Scanner.from(
+                "fn f(): Unit = IoFailure.raise(\"message\");")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("member.zn");
+        assertEquals(memberResult.diagnostics().toString(), 0, memberResult.diagnostics().size());
+    }
+
+    @Test
+    public void parsesAdmitsClauseAndLeadingReifiedCapability() {
+        final var result = Parser.of(Scanner.from("""
+                fn reifiedBox<reified T: Render admits nullable>(value: T): T = value;
+                fn mutableBox<T: Render admits mutable>(value: T): T = value;
+                fn effectful<E: Responds<Never> admits effect...>(
+                    callback: () -> Unit performs E): Unit performs E = callback();
+                fn existential(box: Box<reified _: Render admits nullable>): Unit = ();
+                fn markerOnly(box: Box<: admits nullable>): Unit = ();
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("admits.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+        final var reified = (Stmt.Function) result.compilationUnit().declarations().get(0);
+        final var reifiedParameter = reified.typeDescriptor().typeParameters().getFirst();
+        assertTrue(reifiedParameter.isReified());
+        assertTrue(reifiedParameter.admitsNullableArguments());
+        assertEquals("Render", reifiedParameter.bound().name());
+
+        final var mutable = (Stmt.Function) result.compilationUnit().declarations().get(1);
+        assertTrue(mutable.typeDescriptor().typeParameters().getFirst().admitsMutableArguments());
+
+        final var effectful = (Stmt.Function) result.compilationUnit().declarations().get(2);
+        assertTrue(effectful.typeDescriptor().typeParameters().getFirst().isEffectRowKind());
+
+        final var existential = (Stmt.Function) result.compilationUnit().declarations().get(3);
+        final var existentialType = (GenericDescriptor) existential.typeDescriptor()
+                .parameters().getFirst();
+        final var anonymous = (TypeParameterDescriptor) existentialType.typeParameters().getFirst();
+        assertTrue(anonymous.isReified());
+        assertTrue(anonymous.admitsNullableArguments());
+
+        final var markerOnly = (Stmt.Function) result.compilationUnit().declarations().get(4);
+        final var markerOnlyType = (GenericDescriptor) markerOnly.typeDescriptor()
+                .parameters().getFirst();
+        assertTrue(((TypeParameterDescriptor) markerOnlyType.typeParameters().getFirst())
+                .admitsNullableArguments());
+    }
+
+    @Test
+    public void reportsLegacyTypeParameterAndExistentialMarkerSpellings() {
+        final var parameterResult = Parser.of(Scanner.from(
+                "fn old<T: nullable>(value: T): T = value;")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("legacy-parameter.zn");
+        assertFalse(parameterResult.diagnostics().isEmpty());
+        assertTrue(parameterResult.diagnostics().toString(),
+                parameterResult.diagnostics().getFirst().message()
+                        .contains("write 'T admits nullable'"));
+
+        final var existentialResult = Parser.of(Scanner.from(
+                "fn old(box: Box<: reified>): Unit = ();")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("legacy-existential.zn");
+        assertFalse(existentialResult.diagnostics().isEmpty());
+        assertTrue(existentialResult.diagnostics().getFirst().message()
+                .contains("'reified' is a leading capability"));
+    }
+
+    @Test
+    public void rejectsResponseIndexedEffectMarker() {
+        final var result = Parser.of(Scanner.from(
+                "fn old<E: Responds<Never> admits effect<Never>>(): Unit = ();")
+                .scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("effect-response.zn");
+
+        assertFalse(result.diagnostics().isEmpty());
+        assertTrue(result.diagnostics().getFirst().message()
+                .contains("use 'Responds<R>' in the bound list"));
     }
 
     @Test

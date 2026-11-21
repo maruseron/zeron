@@ -10,7 +10,7 @@ package zeron.lang;
 /// Mappings are metadata: reading one does not wrap or change the mapped type, and a mapped field
 /// exposes a writer only when the property has an accessible setter. A model never constructs the
 /// target.
-public contract Model<T: nullable + mut> {
+public contract Model<T admits nullable + mutable> {
     /// The mapped fields, in the order the model declaration lists them.
     property fields: Array<AnyField<T>>;
 
@@ -18,7 +18,7 @@ public contract Model<T: nullable + mut> {
     ///
     /// The lookup uses property identity: a reference to a contract property does not find a
     /// mapping of a class property with the same name, because they are different declarations.
-    default field<V: nullable + mut>(source: PropertyRef<T, V>): Option<Field<T, V>> {
+    default field<V admits nullable + mutable>(source: PropertyRef<T, V>): Option<Field<T, V>> {
         for (let candidate in this.fields) {
             if (candidate.sourceId == source.id) {
                 return Option<Field<T, V>>.Some(Field<T, V>.new(
@@ -46,7 +46,7 @@ public contract Model<T: nullable + mut> {
 /// `Model.fields` enumerates mappings through this class, so a consumer can read every external
 /// name without knowing the value types. A typed view of one mapping is a `Field`. A model
 /// declaration creates the `AnyField` instances it exposes.
-public class AnyField<T: nullable + mut> {
+public class AnyField<T admits nullable + mutable> {
     /// The name this field has in the external representation.
     public property externalName: String;
 
@@ -60,7 +60,7 @@ public class AnyField<T: nullable + mut> {
 ///
 /// `source` is the mapped property reference, so `get` reads the property without a cast and
 /// without runtime type information, and `sourceId` equals `source.id`.
-public class Field<T: nullable + mut, V: nullable + mut> {
+public class Field<T admits nullable + mutable, V admits nullable + mutable> {
     /// The name this field has in the external representation.
     public property externalName: String;
 

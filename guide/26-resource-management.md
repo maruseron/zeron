@@ -2,7 +2,7 @@
 
 Use a lexical `using` scope for a resource that must be disposed when control leaves a block. A
 resource implements `zeron.resource.Disposable`; the bundled contract declares a mutating
-`dispose(): Unit raises DisposeFailure` operation.
+`dispose(): Unit performs DisposeFailure` operation.
 
 ```zeron
 using (let file: &File = File.open(path)) {
@@ -12,7 +12,7 @@ using (let file: &File = File.open(path)) {
 
 `using` is a statement, not an expression: it has no block result. Functions that need to return a
 value use an explicit `return`. Effects from resource initializers, the body, and disposal remain in
-the enclosing callable's effect set, so they must be handled or declared with `raises`.
+the enclosing callable's effect set, so they must be handled or declared with `performs`.
 
 ## Mutable resource views
 

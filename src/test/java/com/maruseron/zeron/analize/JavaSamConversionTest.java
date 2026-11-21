@@ -134,7 +134,7 @@ public final class JavaSamConversionTest {
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaSamFixture;
                 public effect Failure {}
-                fn boom(): String raises Failure = raise Failure.new();
+                fn boom(): String performs Failure = perform Failure.new();
                 fn invalid(value: String): String =
                     unsafe JavaSamFixture.applyFunction((text) -> boom(), value);
                 """);
@@ -144,7 +144,7 @@ public final class JavaSamConversionTest {
                 effectfulCompiler::resolve);
         assertTrue(effectFailure.getMessage(),
                 effectFailure.getMessage().contains("raised effects")
-                        || effectFailure.getMessage().contains("raises row"));
+                        || effectFailure.getMessage().contains("performs row"));
 
         final var ambiguous = parse("AmbiguousSam.zn", """
                 package interop;
@@ -164,7 +164,7 @@ public final class JavaSamConversionTest {
                 import java.util.function.Function;
                 import com.maruseron.zeron.fixtures.JavaSamFixture;
                 public effect Failure {}
-                fn boom(): String raises Failure = raise Failure.new();
+                fn boom(): String performs Failure = perform Failure.new();
                 fn invoke(function: Function<String?, String?>, value: String): String? =
                     unsafe JavaSamFixture.applyFunction(function, value);
                 fn invalid(value: String): String? = invoke((text) -> boom(), value);
@@ -176,13 +176,13 @@ public final class JavaSamConversionTest {
                 zeronParameterCompiler::resolve);
         assertTrue(zeronEffectFailure.getMessage(),
                 zeronEffectFailure.getMessage().contains("raised effects")
-                        || zeronEffectFailure.getMessage().contains("raises row"));
+                        || zeronEffectFailure.getMessage().contains("performs row"));
 
         final var effectfulReference = parse("EffectfulSamReference.zn", """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaSamFixture;
                 public effect Failure {}
-                fn boom(text: String?): String? raises Failure = raise Failure.new();
+                fn boom(text: String?): String? performs Failure = perform Failure.new();
                 fn invalid(value: String): String =
                     unsafe JavaSamFixture.applyFunction(boom, value);
                 """);
@@ -193,7 +193,7 @@ public final class JavaSamConversionTest {
                 referenceCompiler::resolve);
         assertTrue(referenceFailure.getMessage(),
                 referenceFailure.getMessage().contains("raised effects")
-                        || referenceFailure.getMessage().contains("raises row"));
+                        || referenceFailure.getMessage().contains("performs row"));
     }
 
     private static CompilationUnit parse(final String sourceName, final String source) {

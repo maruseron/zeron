@@ -53,7 +53,7 @@ public final class SerializationEmissionTest {
                 public fn readTag(decoder: &Decoder): Result<Tag, DecodeError> =
                     decode<{}, Tag>(decoder);
 
-                fn requireShape<T: mut + Shape<T>>(value: T): ValueKind = T.shape();
+                fn requireShape<T: Shape<T> admits mutable>(value: T): ValueKind = T.shape();
 
                 public fn pointShape(): ValueKind = requireShape(Point.new(1, 2));
                 """.formatted(packageName));

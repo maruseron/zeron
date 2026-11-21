@@ -128,9 +128,9 @@ dataClassMember = { annotationApplication },
                     ( initializerBlock | fieldDecl | propertyDecl | methodDecl
                     | patternDecl | suffixDeclaration | hktImplementationDecl ) ;
 
-(* [NEW] ZEP-0069: constructor-style initializer block; the IDENTIFIER must be the enclosing data class name (semantic check). Its raises set contributes to the canonical constructor. *)
+(* [NEW] ZEP-0069: constructor-style initializer block; the IDENTIFIER must be the enclosing data class name (semantic check). Its performs set contributes to the canonical constructor. *)
 
-initializerBlock = IDENTIFIER, [ raisesClause ], block ;
+initializerBlock = IDENTIFIER, [ performsClause ], block ;
 publicDataClassDecl = "public", dataClassDecl ;
 sealedContractDecl = "sealed", contractDecl ;
 typeDecl = "type", IDENTIFIER, [ typeParameters ], [ derivingClause ], "=",
@@ -154,8 +154,8 @@ sumPayload = IDENTIFIER, ":", type ;
 declaration = varDecl | funDecl | handlerDecl | statement ;
 varDecl = "let", [ "mut" ], IDENTIFIER, [ ":", type ], [ "=", expression ], ";" ;
 funDecl = "fn", IDENTIFIER, [ typeParameters ], "(", parameters, ")", [ ":", type ],
-            [ raisesClause ], ( "=", expression, ";" | block ) ;
-raisesClause = "raises", type, { ",", type } ;
+            [ performsClause ], ( "=", expression, ";" | block ) ;
+performsClause = "performs", type, { ",", type } ;
 
 (* [CHANGED] design-document-13: checked Java exceptions are mapped to effects with throws clauses. *)
 
@@ -189,12 +189,15 @@ externalClassMember = { annotationApplication }, [ "public" ], [ "mut" ],
    sum parameters accept marker constraints only; newtype parameters are invariant, so `out` is
    rejected on a newtype. *)
 typeParameters = "<", typeParameter, { ",", typeParameter }, ">" ;
-typeParameter = [ 'out' ], IDENTIFIER, [ "<", '_', ">" ],
-                  [ ":", typeParameterConstraint, { "+", typeParameterConstraint } ] ;
-(* [CHANGED] ZEP-0015: `reified` is an admissibility marker on callable type parameters. It
-   cannot be combined with higher-kinded or effect-row parameters, and class/contract type
-   parameters cannot be reified. *)
-typeParameterConstraint = type | 'nullable' | "mut" | "reified" | "effect", [ "..." ] ;
+typeParameter = [ 'out' ], [ 'reified' ], IDENTIFIER, [ "<", '_', ">" ],
+                  [ ":", type, { "+", type } ],
+                  [ "admits", admissibilityMarker, { "+", admissibilityMarker } ] ;
+(* [CHANGED] ZEP-0123: ordinary contract bounds stay in the `:` list, while `admits` carries
+   admissibility markers. `reified` is a leading capability on callable type parameters. It
+   cannot be combined with `out`, higher-kinded or effect-row parameters, and class/contract
+   type parameters cannot be reified. `effect` does not take a response type; write a
+   `Responds<R>` bound instead. *)
+admissibilityMarker = 'nullable' | 'mutable' | "effect", [ "..." ] ;
 parameters = [ parameter, { ",", parameter } ] ;
 
 (* [CHANGED] Annotations: parameters are annotation targets (e.g. @Entity in ZEP-0031).
@@ -222,7 +225,7 @@ extensionMember = extensionProperty | extensionMethod ;
 extensionProperty = { annotationApplication }, [ "public" ], "property", IDENTIFIER, ":", type,
                       "{", propertyAccessor, { propertyAccessor }, "}" ;
 extensionMethod = { annotationApplication }, [ "public" ], [ "mut" ], "fn", memberName,
-                    [ typeParameters ], "(", methodParameters, ")", ":", type, [ raisesClause ],
+                    [ typeParameters ], "(", methodParameters, ")", ":", type, [ performsClause ],
                     ( "=", expression, ";" | block ) ;
 contractUse = qualifiedName, [ typeArguments ] ;
 
@@ -235,13 +238,13 @@ classMember = { annotationApplication },
    function has no receiver or `this`, cannot capture the class's type parameters, and may
    declare its own type parameters. Effects, data classes, and contracts are not covered. *)
 staticFunctionDecl = [ visibility ], "static", "fn", memberName, [ typeParameters ],
-                       "(", staticFunctionParameters, ")", ":", type, [ raisesClause ],
+                       "(", staticFunctionParameters, ")", ":", type, [ performsClause ],
                        ( "=", expression, ";" | block ) ;
 staticFunctionParameters = [ parameter, { ",", parameter } ] ;
 hktImplementationDecl = [ 'delegating' ], 'implementation', contractUse, "{",
                           { hktImplementationMethod }, "}" ;
 hktImplementationMethod = "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
-                            ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+                            ":", type, [ performsClause ], ( "=", expression, ";" | block ) ;
 
 (* [NEW] Methods may declare an explicit receiver parameter, used by HKT contract/implementation
    methods and witnesses. The receiver must be the first parameter and cannot be variadic or
@@ -262,14 +265,14 @@ propertyAccessor = 'get', ( "=", expression, ";" | block )
                  | 'set', "(", IDENTIFIER, ")", ( "=", expression, ";" | block ) ;
 constructorDecl = visibility, "constructor", "new", ";" ;
 namedConstructorDecl = visibility, "constructor", IDENTIFIER, "(", namedConstructorParameters, ")",
-                         [ raisesClause ], ( "=", expression, ";" | block ) ;
+                         [ performsClause ], ( "=", expression, ";" | block ) ;
 namedConstructorParameters = [ namedConstructorParameter, { ",", namedConstructorParameter } ] ;
 
 (* [CHANGED] Annotations: parameters are annotation targets. *)
 
 namedConstructorParameter = { annotationApplication }, IDENTIFIER, ":", type, [ "..." ] ;
 methodDecl = [ visibility ], [ "mut" ], memberName, [ typeParameters ], "(", methodParameters, ")",
-               ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+               ":", type, [ performsClause ], ( "=", expression, ";" | block ) ;
 patternDecl = visibility, "pattern", IDENTIFIER, "(", [ patternOutput, { ",", patternOutput } ],
                 ")", [ 'when', expression ], block ;
 patternOutput = IDENTIFIER, ":", type ;
@@ -281,14 +284,14 @@ witnessDecl = [ "default" ], [ 'delegating' ], "witness",
               [ IDENTIFIER, [ typeParameters ], ":" ],
               [ typeParameters ], type, "for", type, "{", { witnessMethod }, "}" ;
 witnessMethod = [ "static" ], "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
-                  ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+                  ":", type, [ performsClause ], ( "=", expression, ";" | block ) ;
 
 (* [CHANGED] Annotations: optional, stackable applications on every contract member. *)
 
 contractMember = { annotationApplication }, ( contractProperty | contractMethod ) ;
 contractProperty = [ "mut" ], "property", IDENTIFIER, ":", type, ";" ;
 contractMethod = [ "default" ], [ "mut" ], [ "static" ], memberName, [ typeParameters ],
-                   "(", methodParameters, ")", ":", type, [ raisesClause ],
+                   "(", methodParameters, ")", ":", type, [ performsClause ],
                    ( ";" | "=", expression, ";" | block ) ;
 (* A static contract method cannot be mutating, and only `default` methods declare a body. *)
 visibility = "public" | "private" ;
@@ -404,34 +407,36 @@ type = effectSet | [ "&" ], compoundType | polymorphicFunctionType ;
    same type-parameter grammar as declarations. A polymorphic function type used as a type argument
    is parenthesized, as in `List<(<T> (T) -> T)>`. *)
 polymorphicFunctionType = "<", typeParameter, { ",", typeParameter }, ">",
-                          "(", [ type, { ",", type } ], ")", "->", type, [ raisesClause ] ;
+                          "(", [ type, { ",", type } ], ")", "->", type, [ performsClause ] ;
 compoundType = receiverFunctionType
              | typeAtom,
-               [ "~>", effectSet, [ "raises", effectSet ] ],
+               [ "~>", effectSet, [ "performs", effectSet ] ],
                [ "?" ],
                [ "->", type ] ;
 
 (* [CHANGED] ZEP-0082: a generic receiver such as Validator<T>.(T) -> Validation<T> needs type arguments. *)
 
 receiverFunctionType = typeAtom, ".", "(", [ type, { ",", type } ], ")", "->", type,
-                        [ raisesClause ] ;
+                        [ performsClause ] ;
 effectSet = "{", [ type, { ",", type } ], "}" ;
 typeAtom = qualifiedName, [ "<", typeArgumentsBody, ">" ]
-         | "(", ")", "->", type, [ raisesClause ]
-         | "(", type, ")", [ "->", type, [ raisesClause ] ]
-         | "(", type, ",", type, { ",", type }, ")", "->", type, [ raisesClause ] ;
+         | "(", ")", "->", type, [ performsClause ]
+         | "(", type, ")", [ "->", type, [ performsClause ] ]
+         | "(", type, ",", type, { ",", type }, ")", "->", type, [ performsClause ] ;
 typeArgumentsBody = projectedTypeArgument, { ",", projectedTypeArgument } ;
 
 (* [NEW] ZEP-0104: `*` is the universal read-only projection `out Any?`. An anonymous
-   existential `: bounds + markers` is accepted only as a direct argument of the outermost
-   applied type in a declared function, method, or contract-method parameter. The grammar
-   leaves the position restriction to resolution. *)
+   existential `[reified _]: bounds admits markers` is accepted only as a direct argument of
+   the outermost applied type in a declared function, method, or contract-method parameter.
+   The grammar leaves the position restriction to resolution. At least one bound, marker, or
+   a leading `reified _` is required. *)
 projectedTypeArgument = [ 'out' | "in" ], ( type | '_' )
                      | starProjection
                      | anonymousExistential ;
 starProjection = "*" ;
-anonymousExistential = ":", anonymousExistentialElement, { "+", anonymousExistentialElement } ;
-anonymousExistentialElement = type | 'nullable' | "mut" | "reified" | "effect", [ "..." ] ;
+anonymousExistential = [ "reified", "_" ], ":",
+                       [ type, { "+", type } ],
+                       [ "admits", admissibilityMarker, { "+", admissibilityMarker } ] ;
 primary = INT
         | LONG
         | DOUBLE
@@ -542,10 +547,11 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    - A wildcard import ends in `.*`, cannot have an alias, and cannot be a suffix import.
    - Namespace members are functions and immutable values; public mutable values remain unsupported.
    - `model` and `data` are soft keywords.
-   - A type parameter may use `nullable`, `mut`, `effect`, or `reified` as an admissibility marker
-   instead of ordinary contract bounds. `effect...` denotes an effect-row parameter. `reified`
-   passes a runtime applied-type descriptor and is permitted only on callable type parameters;
-   class and contract type parameters reject it.
+   - A type parameter lists ordinary contract bounds after `:` and admissibility markers after
+   `admits`. The markers are `nullable`, `mutable`, `effect`, and `effect...`; `effect...`
+   denotes an effect-row parameter. A leading `reified` passes a runtime applied-type descriptor
+   and is permitted only on callable type parameters; class and contract type parameters reject
+   it. An effect marker never takes a response type; use a `Responds<R>` bound instead.
    - The `out` prefix is allowed on class, contract, sum, and product type parameters. A
    higher-kinded parameter is written `F<_>` and cannot be covariant; class, contract, sum, and
    product covariance is checked for unsafe positions rather than trusted from the annotation.
@@ -636,7 +642,7 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    - An effect constructor named in a `throws` mapping (`Effect::factory`) must be a public named constructor of an effect that accepts one payload able to receive the mapped exception.
    - A data class declares its canonical components in a tuple-like header and is final and nominal. It has no explicit or named constructors; the canonical constructor takes every component and has no defaults. Components are immutable and exposed as read-only properties with the class's visibility. Initialization order: components, then direct field initializers in declaration order, then initializer blocks in source order. A direct initializer may call only functions with an empty raised-effect set; initializer blocks may raise effects, and their union is raised by construction. An auxiliary field set by a block must not also have a direct initializer. Blocks cannot assign components.
    - A property reference `T::p` requires an accessible getter for `p` on type T (or a contract property of contract T). It is read-only, its identity is `declaringQualifiedName#propertyName`, and it converts one-way to the function `(T) -> V`. Bound references (`value::p`) do not exist.
-   - A row variable `E: effect...` expands in `raises` lists by its declared kind; at most one row variable per list. A type argument for a row parameter is an effect set `{...}`; a single effect type is read as a singleton row.
+   - A row variable `E admits effect...` expands in `performs` lists by its declared kind; at most one row variable per list. A type argument for a row parameter is an effect set `{...}`; a single effect type is read as a singleton row.
    - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
    An explicit `private constructor new;` makes canonical construction private.
    - Fields and auto-properties may have initializers. Initialized members are omitted from canonical
@@ -718,7 +724,7 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    function types, and entry-point `main`, but not in external Java signatures or top-level
    initializers. Named `handler` declarations are immutable top-level or namespace values; anonymous
    `handler { ... }` expressions may capture immutable locals. Handler types use
-   `R ~> {HandledEffect, ...} [raises {HandlerEffect, ...}]` with finite concrete effect sets.
+   `R ~> {HandledEffect, ...} [performs {HandlerEffect, ...}]` with finite concrete effect sets.
    The optional raised-effect set defaults to empty.
    Applying a handler subtracts only completely handled effects and adds effects from its cases.
    Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards, and require their
@@ -757,7 +763,7 @@ hardKeyword  = "as" | "and" | "annotation" | "break" | "case" | "class" | "const
              | "external" | "false" | "fn" | "for" | "handle" | "if" | "implement" | "import"
              | "in" | "is" | "let" | "loop" | "match" | "mut" | "namespace" | "not" | "null"
              | "object" | "or" | "package" | "pattern" | "private" | "property" | "public"
-             | "raise" | "raises" | "return" | "sealed" | "static" | "then" | "this"
+             | "perform" | "performs" | "return" | "sealed" | "static" | "then" | "this"
              | "throws" | "true" | "type" | "typeof" | "until" | "using" | "while"
              | "witness" ;
 (* `implement` is reserved but no production uses it. *)

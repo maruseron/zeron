@@ -16,26 +16,26 @@ public class HttpResponseBody is Reader, Disposable {
 
     private constructor new;
 
-    public constructor from(response: Any?) raises HttpFailure {
+    public constructor from(response: Any?) performs HttpFailure {
         if (not httpIsResponseHandle(response)) {
-            raise HttpFailure.new(HttpFailureKind.Transport(),
+            perform HttpFailure.new(HttpFailureKind.Transport(),
                 "The HTTP runtime returned an invalid response handle.", null);
         }
         return HttpResponseBody.new(response);
     }
 
     public mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int>
-            raises IoFailure {
+            performs IoFailure {
         let count = httpResponseRead(this.response, buffer, offset, length);
         if (count == -2) {
-            raise IoFailure.fromIOException(httpResponseReadFailure(this.response));
+            perform IoFailure.fromIOException(httpResponseReadFailure(this.response));
         }
         if (count < 0) return Option<Int>.None();
         return Option.Some(count);
     }
 
-    public mut dispose(): Unit raises DisposeFailure {
+    public mut dispose(): Unit performs DisposeFailure {
         let failure = httpResponseDispose(this.response);
-        if (failure != null) raise DisposeFailure.new(failure);
+        if (failure != null) perform DisposeFailure.new(failure);
     }
 }

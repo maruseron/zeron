@@ -25,7 +25,7 @@ class ConsoleSink is LogSink {
         System.err?.flush();
     }
 
-    public mut dispose(): Unit raises DisposeFailure = ();
+    public mut dispose(): Unit performs DisposeFailure = ();
 }
 
 class FilteredSink is LogSink {
@@ -42,7 +42,7 @@ class FilteredSink is LogSink {
 
     public mut flush(): Unit = source.flush();
 
-    public mut dispose(): Unit raises DisposeFailure = source.dispose();
+    public mut dispose(): Unit performs DisposeFailure = source.dispose();
 }
 
 public contract LogSink requires Disposable {

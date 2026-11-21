@@ -19,7 +19,7 @@ public final class ResolutionDiagnosticsTest {
     @Test
     public void reportsSelfRecursiveIntrinsicHelperOutsideTheStandardLibrary() {
         final var unit = Parser.of(Scanner.from("""
-                fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+                fn allocateArray<T admits nullable + mutable>(size: Int): &Array<T> = allocateArray<T>(size);
                 """).scanTokens()).parseCompilationUnit("src/collectionbuilders.zn");
 
         final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
@@ -40,7 +40,7 @@ public final class ResolutionDiagnosticsTest {
         final var unit = Parser.of(Scanner.from("""
                 package zeron.collections;
 
-                fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+                fn allocateArray<T admits nullable + mutable>(size: Int): &Array<T> = allocateArray<T>(size);
                 """).scanTokens()).parseCompilationUnit("zeron/collections/array_list.zn");
 
         final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));

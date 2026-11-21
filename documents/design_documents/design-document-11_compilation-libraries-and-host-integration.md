@@ -341,7 +341,7 @@ compiled consumers do not need the compiler JAR at runtime.
 4. **Expand distribution and host integration deliberately.** Add each Java feature as a separately
    tested mapping rather than broadening metadata lookup implicitly. [ZEP-0050](../zeps/ZEP-0050.md)
    owns the implemented trust boundary: curated facades remain the typed tier, direct Java access
-   requires an explicit `unsafe` expression, and `raises` remains a control-flow channel rather than a
+   requires an explicit `unsafe` expression, and `performs` remains a control-flow channel rather than a
    purity effect. [ZEP-0148](../zeps/ZEP-0148.md) implements contextual Java SAM conversion
    for effect-free lambdas and top-level function references, using class-file SAM discovery and the
    existing `LambdaMetafactory` lowering. Intrinsic architecture is tracked in doc 12.

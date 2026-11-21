@@ -123,7 +123,7 @@ public final class PropertyReferenceTest {
                     public constructor new;
                 }
 
-                public class Box<T: nullable + mut> {
+                public class Box<T admits nullable + mutable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -272,7 +272,7 @@ public final class PropertyReferenceTest {
                     return maybeUser.map(User::name).getOrElse("none");
                 }
 
-                public fn pick<T: nullable + mut, R: nullable + mut>(value: T, select: (T) -> R): R =
+                public fn pick<T admits nullable + mutable, R admits nullable + mutable>(value: T, select: (T) -> R): R =
                     select(value);
 
                 public fn picked(): String = pick(User.new("Grace"), User::name);

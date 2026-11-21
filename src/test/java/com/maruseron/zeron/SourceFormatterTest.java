@@ -135,8 +135,8 @@ public final class SourceFormatterTest {
         final var style = CanonicalStyle.load();
         final var source = """
                 public handler Named{case Failure.message(_)->"";}
-                fn apply(value:String~>{Failure}):String=handle(raise Failure.new())with value;
-                fn inline(value:String):String=handle(raise Failure.new())with handler{case Failure.message(_)->value;};
+                fn apply(value:String~>{Failure}):String=handle(perform Failure.new())with value;
+                fn inline(value:String):String=handle(perform Failure.new())with handler{case Failure.message(_)->value;};
                 """;
 
         final var result = SourceFormatter.format(source, "Handler.zn", style);
@@ -379,7 +379,7 @@ public final class SourceFormatterTest {
                     public substringByCodePointsStrict(start: Int, end: Int): Result<Option<String>, UnicodeError> {}
                 }
                 public contract Reader {
-                    read(buffer: &Pair<Int, String>...): Option<Int> raises IoFailure;
+                    read(buffer: &Pair<Int, String>...): Option<Int> performs IoFailure;
                 }
                 """;
 
@@ -392,7 +392,7 @@ public final class SourceFormatterTest {
         assertTrue(formatted, formatted.contains("class Derived is Comparable<Derived> deriving Eq {"));
         assertTrue(formatted, formatted.contains("Pair<Int, String>?;"));
         assertTrue(formatted, formatted.contains("&Pair<Int, String>..."));
-        assertTrue(formatted, formatted.contains("Option<Int> raises IoFailure;"));
+        assertTrue(formatted, formatted.contains("Option<Int> performs IoFailure;"));
         assertTrue(formatted.lines().allMatch(line -> line.length() <= style.maximumLineLength()));
         assertEquals(formatted, SourceFormatter.format(formatted, "GenericFollowers.zn", style)
                 .formattedSource().orElseThrow());
@@ -402,7 +402,7 @@ public final class SourceFormatterTest {
     public void wrapsLongDeclarationClausesUnderTheirKeywords() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = """
-                public class LongList<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>, Reversible<LongList<_>>, Foldable<LongList<_>>, Collector<LongList<_>> {
+                public class LongList<T admits mutable> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>, Reversible<LongList<_>>, Foldable<LongList<_>>, Collector<LongList<_>> {
                 }
                 public sealed contract LongContract<T> requires FirstRequirement<T> + SecondRequirement<T> + ThirdRequirement<T> permits FirstPermittedClass, SecondPermittedClass {
                 }
@@ -414,7 +414,7 @@ public final class SourceFormatterTest {
         final var formatted = result.formattedSource().orElseThrow();
 
         assertTrue(formatted, formatted.contains(
-                "public class LongList<T: mut>\n"
+                "public class LongList<T admits mutable>\n"
                         + "    is Iterable<T>,\n"
                         + "       Sink<T>,\n"
                         + "       RandomAccess<T>,\n"
@@ -484,12 +484,12 @@ public final class SourceFormatterTest {
         final var style = CanonicalStyle.load();
         final var source = """
                 contract Mapper<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
-                class Box<T: mut> is Mapper<Box<_>> {
+                class Box<T admits mutable> is Mapper<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     delegating implementation Mapper<Box<_>> {}
                 }
@@ -509,14 +509,14 @@ public final class SourceFormatterTest {
     public void formatsDataClassInitializerBlocksAsClassMembers() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = """
-                data class Point(x:Int,y:Int){magnitude:Float;Point raises Failure{magnitude=1.0;}public value():Int=x;}
+                data class Point(x:Int,y:Int){magnitude:Float;Point performs Failure{magnitude=1.0;}public value():Int=x;}
                 """;
 
         final var formatted = SourceFormatter.format(source, "DataClassFormatter.zn", style)
                 .formattedSource().orElseThrow();
 
         assertTrue(formatted, formatted.contains("data class Point(x: Int, y: Int) {"));
-        assertTrue(formatted, formatted.contains("    Point raises Failure {\n        magnitude = 1.0;\n    }\n\n    public value()"));
+        assertTrue(formatted, formatted.contains("    Point performs Failure {\n        magnitude = 1.0;\n    }\n\n    public value()"));
         assertEquals(formatted, SourceFormatter.format(formatted, "DataClassFormatter.zn", style)
                 .formattedSource().orElseThrow());
     }
@@ -563,7 +563,7 @@ public final class SourceFormatterTest {
             if (path.getFileName().toString().equals("iterable.zn")) {
                 assertTrue(path + ": " + output,
                         output.replaceAll("\\s+", " ")
-                                .contains("public contract Iterable<T: mut> {"));
+                                .contains("public contract Iterable<T admits mutable> {"));
                 assertTrue(output.contains("iterator(): &Iterator<T>;"));
                 assertTrue(output.contains("default stream(): Stream<T> = Stream.from(this);"));
                 assertTrue(output.contains("for (let element in this) consumer(element);"));

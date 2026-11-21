@@ -190,7 +190,7 @@ final class LambdaCaptureValidator {
             }
 
             case Expr.SumCaseTest test -> walkCaptureUsage(test.value, localNames);
-            case Expr.Raise raise -> walkCaptureUsage(raise.effect, localNames);
+            case Expr.Raise perform -> walkCaptureUsage(perform.effect, localNames);
             case Expr.Unsafe unsafe -> walkCaptureUsage(unsafe.expression, localNames);
             case Expr.Handle handle -> {
                 walkCaptureUsage(handle.expression, localNames);

@@ -284,7 +284,7 @@ final class LambdaConstraintCollector {
                     }
                 }
             }
-            case Expr.Raise raise -> scan(raise.effect);
+            case Expr.Raise perform -> scan(perform.effect);
             case Expr.Unsafe unsafe -> scan(unsafe.expression);
             case Expr.Handle handle -> {
                 scan(handle.expression);

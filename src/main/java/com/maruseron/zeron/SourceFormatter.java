@@ -349,7 +349,14 @@ final class SourceFormatter {
             if (type == TokenType.COMMA) {
                 trimSpace();
                 append(token.lexeme());
-                if (declarationClauseActive && declarationHeaderWrapped
+                if (declarationHeaderWrapped && declarationHeaderDepth == braceDepth
+                        && parentheses.isEmpty() && bracketDepth == 0
+                        && isInsideGenericArguments(index)
+                        && lineLength + declarationHeaderRemainderLength(index, false)
+                                > style.maximumLineLength()) {
+                    newline();
+                    indentBy(blockIndent + style.indentWidth());
+                } else if (declarationClauseActive && declarationHeaderWrapped
                         && declarationHeaderDepth == braceDepth
                         && parentheses.isEmpty() && bracketDepth == 0
                         && !isInsideGenericArguments(index)) {
@@ -412,7 +419,7 @@ final class SourceFormatter {
                 functionBraceDepth = braceDepth;
                 functionParameterOpenIndex = findFunctionParameterOpenIndex(index);
             }
-            if ((type == TokenType.THROWS || type == TokenType.RAISES)
+            if ((type == TokenType.THROWS || type == TokenType.PERFORMS)
                     && isFunctionHeaderToken(index)
                     && lineLength + functionHeaderRemainderLength(index) > style.maximumLineLength()) {
                 newline();
@@ -540,7 +547,7 @@ final class SourceFormatter {
                     final var token = tokens.get(index);
                     final var type = token.type();
                     if (type.isComment()) continue;
-                    if (parametersClosed && (type == TokenType.RAISES || type == TokenType.THROWS
+                    if (parametersClosed && (type == TokenType.PERFORMS || type == TokenType.THROWS
                             || type == TokenType.EQUAL || type == TokenType.LEFT_BRACE
                             || type == TokenType.SEMICOLON || type == TokenType.RIGHT_BRACE)) {
                         if (type == TokenType.EQUAL || type == TokenType.LEFT_BRACE
@@ -736,7 +743,7 @@ final class SourceFormatter {
                     || !tokens.get(nameIndex).lexeme().equals(dataClassBodies.peek().name())) return false;
             final var afterName = nextNonCommentIndex(tokens, nameIndex + 1);
             return afterName == braceIndex || afterName < braceIndex
-                    && tokens.get(afterName).type() == TokenType.RAISES;
+                    && tokens.get(afterName).type() == TokenType.PERFORMS;
         }
 
         private boolean isFunctionHeaderToken(final int index) {
@@ -763,7 +770,8 @@ final class SourceFormatter {
         }
 
         private static boolean isDeclarationStart(final TokenType type) {
-            return type == TokenType.CLASS || type == TokenType.CONTRACT || type == TokenType.TYPE;
+            return type == TokenType.CLASS || type == TokenType.CONTRACT || type == TokenType.TYPE
+                    || type == TokenType.WITNESS;
         }
 
         private void beginDeclarationHeader(final int index, final boolean stopAtEquals) {
@@ -1050,7 +1058,7 @@ final class SourceFormatter {
                         AMPERSAND, AMPERSAND_EQUAL, PIPE, PIPE_EQUAL, CARET, CARET_EQUAL, SHIFT_LEFT,
                         SHIFT_LEFT_EQUAL, SHIFT_RIGHT, SHIFT_RIGHT_EQUAL, UNSIGNED_SHIFT_RIGHT,
                         UNSIGNED_SHIFT_RIGHT_EQUAL, ARROW, HUH_HUH, HUH_HUH_EQUAL, AND, OR, IN, IS, AS,
-                        RAISES, THROWS -> true;
+                        PERFORMS, THROWS -> true;
                 default -> false;
             };
         }
@@ -1076,7 +1084,7 @@ final class SourceFormatter {
             return previousType == TokenType.EOF || previousType == TokenType.LEFT_PAREN
                     || previousType == TokenType.LEFT_BRACKET || previousType == TokenType.COMMA
                     || previousType == TokenType.COLON || previousType == TokenType.EQUAL
-                    || previousType == TokenType.RETURN || previousType == TokenType.RAISE
+                    || previousType == TokenType.RETURN || previousType == TokenType.PERFORM
                     || previousType == TokenType.THEN || previousType == TokenType.ELSE
                     || previousType == TokenType.NOT || previousType == TokenType.TYPEOF
                     || isBinaryOperator(previousType);
@@ -1150,7 +1158,7 @@ final class SourceFormatter {
                 while (previous >= 0 && tokens.get(previous).type().isComment()) previous--;
                 if (previous < 0) continue;
                 final var previousType = tokens.get(previous).type();
-                final var isHandlerSet = previousType == TokenType.RAISES
+                final var isHandlerSet = previousType == TokenType.PERFORMS
                         || previousType == TokenType.GREATER
                         && previousNonCommentType(tokens, previous) == TokenType.TILDE;
                 if (!isHandlerSet) continue;
@@ -1219,7 +1227,7 @@ final class SourceFormatter {
                     || type == TokenType.RIGHT_BRACKET || type == TokenType.SEMICOLON || type == TokenType.COLON
                     || type == TokenType.EQUAL || type == TokenType.ARROW || type == TokenType.HUH
                     || type == TokenType.IS || type == TokenType.FOR || type == TokenType.GREATER
-                    || type == TokenType.RAISES || type == TokenType.THROWS || type == TokenType.ELLIPSIS
+                    || type == TokenType.PERFORMS || type == TokenType.THROWS || type == TokenType.ELLIPSIS
                     || type == TokenType.PLUS || type == TokenType.EOF;
         }
 

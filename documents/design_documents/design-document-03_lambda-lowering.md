@@ -152,7 +152,7 @@ The hidden-slot ABI is implemented for lambda values, function references, and c
 
 Remaining rank-2 work is separate from the hidden-slot ABI:
 
-- Fixed `raises` clauses are checked on polymorphic function types, but binder-dependent effect
+- Fixed `performs` clauses are checked on polymorphic function types, but binder-dependent effect
   rows and generic effect evidence are not part of this slice.
 - Generic SAM implementations, mutable polymorphic bindings, nested schemes, and rank-3 values are
   still unsupported.

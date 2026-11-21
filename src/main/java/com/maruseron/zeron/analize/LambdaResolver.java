@@ -605,7 +605,7 @@ final class LambdaResolver {
                     return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
                             || referencesAnyVariable(context, arm.expression(), armNames);
                 });
-            case Expr.Raise raise -> referencesAnyVariable(context, raise.effect, names);
+            case Expr.Raise perform -> referencesAnyVariable(context, perform.effect, names);
             case Expr.Unsafe unsafe -> referencesAnyVariable(context, unsafe.expression, names);
             case Expr.Handle handle -> referencesAnyVariable(context, handle.expression, names)
                 || handle.handler != null && referencesAnyVariable(context, handle.handler, names)

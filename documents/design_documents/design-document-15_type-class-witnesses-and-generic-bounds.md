@@ -46,7 +46,7 @@ generic family uses an HKT capability such as `CollectionBuilder<C<_>>`, not a b
 ```zeron
 import zeron.collections.CollectionBuilder;
 
-fn collectInto<E: nullable + mut, C<_>: CollectionBuilder<C>>(
+fn collectInto<E admits nullable + mutable, C<_>: CollectionBuilder<C>>(
     source: Iterable<E>
 ): &C<E> {
     let result = C.empty<E>();

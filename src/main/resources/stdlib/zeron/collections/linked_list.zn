@@ -2,7 +2,7 @@ package zeron.collections;
 
 import zeron.control.Foldable;
 
-class LinkedListNode<T: mut> {
+class LinkedListNode<T admits mutable> {
     storedValue: T;
     previousNode: &LinkedListNode<T>?;
     nextNode: &LinkedListNode<T>?;
@@ -34,7 +34,7 @@ class LinkedListNode<T: mut> {
     }
 }
 
-class LinkedListIterator<T: mut> is Iterator<T> {
+class LinkedListIterator<T admits mutable> is Iterator<T> {
     current: &LinkedListNode<T>?;
 
     private constructor new;
@@ -55,7 +55,7 @@ class LinkedListIterator<T: mut> is Iterator<T> {
 /// is constant time and indexing walks from the nearer end. The list is mutable and does not
 /// declare `PositionalEditor`, because editing the middle of a linked list has no index-based
 /// constant-time operation.
-public class LinkedList<T: mut>
+public class LinkedList<T admits mutable>
     is Deque<T>,
        Sink<T>,
        Clearable,
@@ -212,7 +212,7 @@ public class LinkedList<T: mut>
     }
 
     /// Combines the elements from left to right into a single value.
-    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+    public foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut node = this.head;
         while (node is not null) {
@@ -253,7 +253,7 @@ public class LinkedList<T: mut>
     }
 
     delegating implementation CollectionBuilder<LinkedList<_>> {
-        fn empty<A: mut>(): &LinkedList<A> = LinkedList<A>.empty();
+        fn empty<A admits mutable>(): &LinkedList<A> = LinkedList<A>.empty();
     }
 
     /// Returns an iterator over the elements, from first to last.
@@ -262,7 +262,7 @@ public class LinkedList<T: mut>
 
 /// A linked list is mutable, so it can produce a sorted copy and reorder itself in place.
 default witness Sortable<LinkedList<_>> for LinkedList<_> {
-    fn sortedBy<A: mut>(
+    fn sortedBy<A admits mutable>(
         this: LinkedList<A>,
         compare: (A, A) -> Ordering
     ): LinkedList<A> {
@@ -274,7 +274,7 @@ default witness Sortable<LinkedList<_>> for LinkedList<_> {
 }
 
 default witness InPlaceSortable<LinkedList<_>> for LinkedList<_> {
-    fn sortBy<A: mut>(
+    fn sortBy<A admits mutable>(
         this: &LinkedList<A>,
         compare: (A, A) -> Ordering
     ): Unit {

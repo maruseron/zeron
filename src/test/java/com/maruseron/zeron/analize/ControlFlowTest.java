@@ -465,13 +465,13 @@ public final class ControlFlowTest {
     public void allowsNonUnitBodiesThatEndInANonReturningExpression() {
         final var result = new ResolutionService().resolveWithDiagnostics(parse("""
                 effect Failure {}
-                fn fails(): Int raises Failure {
-                    raise Failure.new();
+                fn fails(): Int performs Failure {
+                    perform Failure.new();
                 }
-                fn callsFails(): Int raises Failure = fails();
-                fn failsFromBothBranches(flag: Boolean): Int raises Failure {
-                    if (flag) raise Failure.new();
-                    else raise Failure.new();
+                fn callsFails(): Int performs Failure = fails();
+                fn failsFromBothBranches(flag: Boolean): Int performs Failure {
+                    if (flag) perform Failure.new();
+                    else perform Failure.new();
                 }
                 """));
 

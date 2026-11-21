@@ -38,7 +38,7 @@ public final class SpreadArgumentTest {
                     return result;
                 }
 
-                fn firstOf<T: nullable>(fallback: T, values: T...): T =
+                fn firstOf<T admits nullable>(fallback: T, values: T...): T =
                     if (values.length > 0) then values[0] else fallback;
 
                 public class Summer {

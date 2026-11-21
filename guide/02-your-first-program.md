@@ -6,13 +6,13 @@ There is nothing between the braces in the `main` function right now, which mean
 program to execute. Let's change that - add the following code to your entry file:
 
 ```zeron
-fn main(): Unit raises IoFailure {
+fn main(): Unit performs IoFailure {
     println("Hello, world!");
 }
 ```
 
 You might have guessed just now that `println` stands for "print line"; you'd be correct. It can
-fail at the host boundary, so it raises `IoFailure`, and `main` passes that effect on. This program
+fail at the host boundary, so it performs `IoFailure`, and `main` passes that effect on. This program
 should print _Hello, world_ to the console once run. To run the project directly, use
 `zeron run`, which will build it before launching:
 

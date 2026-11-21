@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Operations on effect rows. Function {@code raises} clauses are kept as flat lists of fixed effect
+ * Operations on effect rows. Function {@code performs} clauses are kept as flat lists of fixed effect
  * labels and row variables; this class expands explicit {@link EffectRowDescriptor} values and
  * performs the set operations shared by resolution and inference.
  */

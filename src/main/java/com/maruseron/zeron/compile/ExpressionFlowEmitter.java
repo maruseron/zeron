@@ -946,19 +946,19 @@ final class ExpressionFlowEmitter {
         }
     }
 
-    static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise raise) {
-        emitExpr(context, composer, raise.effect);
+    static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise perform) {
+        emitExpr(context, composer, perform.effect);
         emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
-        if (raise.effect.getType() instanceof TypeParameterDescriptor parameter && parameter.isEffectKind()) {
+        if (perform.effect.getType() instanceof TypeParameterDescriptor parameter && parameter.isEffectKind()) {
             final var support = ClassDesc.of("zeron.runtime.EffectSupport");
             composer.invokestatic(support, "requireEffect",
                     MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
         }
-        if (hasResponse(context, raise.effect.getType())) {
+        if (hasResponse(context, perform.effect.getType())) {
             composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "perform",
                     MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
-            emitConversion(context, composer, TypeDescriptor.ofAny(), raise.getType());
-            context.lastEmittedType = raise.getType();
+            emitConversion(context, composer, TypeDescriptor.ofAny(), perform.getType());
+            context.lastEmittedType = perform.getType();
             return;
         }
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");

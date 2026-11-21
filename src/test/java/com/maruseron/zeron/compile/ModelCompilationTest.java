@@ -43,7 +43,7 @@ public final class ModelCompilationTest {
                 public constructor new;
             }
 
-            public class Box<T: nullable + mut> {
+            public class Box<T admits nullable + mutable> {
                 public property value: T;
                 public constructor new;
             }
@@ -57,7 +57,7 @@ public final class ModelCompilationTest {
                 }
             }
 
-            public contract SqlModel<T: nullable + mut> requires Model<T> {
+            public contract SqlModel<T admits nullable + mutable> requires Model<T> {
                 property tableName: String;
             }
 
@@ -68,7 +68,7 @@ public final class ModelCompilationTest {
                 age -> "user_age";
             }
 
-            public contract DocumentModel<T: nullable + mut> requires Model<T> {
+            public contract DocumentModel<T admits nullable + mutable> requires Model<T> {
                 property collection: String;
             }
 
@@ -242,7 +242,7 @@ public final class ModelCompilationTest {
                 return model.tableName;
             }
 
-            public fn acceptsAnyModel<T: nullable + mut>(model: Model<T>): Int {
+            public fn acceptsAnyModel<T admits nullable + mutable>(model: Model<T>): Int {
                 return model.fields.length;
             }
 
@@ -267,7 +267,7 @@ public final class ModelCompilationTest {
                 public constructor new;
             }
 
-            public contract SqlModel<T: nullable + mut> requires Model<T> {
+            public contract SqlModel<T admits nullable + mutable> requires Model<T> {
                 property tableName: String;
             }
 
@@ -325,7 +325,7 @@ public final class ModelCompilationTest {
 
             public fn passesModelAsContractValue(): String = tableNameOf(UserSql);
 
-            public fn acceptsAnyModel<T: nullable + mut>(model: Model<T>): Int {
+            public fn acceptsAnyModel<T admits nullable + mutable>(model: Model<T>): Int {
                 return model.fields.length;
             }
 
@@ -347,7 +347,7 @@ public final class ModelCompilationTest {
             import forgeintarget.Person;
             import zeron.lang.Model;
 
-            public contract PersonModel<T: nullable + mut> requires Model<T> {
+            public contract PersonModel<T admits nullable + mutable> requires Model<T> {
                 property tableName: String;
             }
 

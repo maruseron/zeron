@@ -45,13 +45,14 @@ public final class TypeFormatter {
                     format(function.returnType()) + " ~> "
                             + formatEffectSet(function.handledEffects())
                             + (function.raisedEffects().isEmpty() ? ""
-                                    : " raises " + formatEffectSet(function.raisedEffects()));
+                                    : " performs " + formatEffectSet(function.raisedEffects()));
             case FunctionDescriptor function -> (function.receiverType() == null ? ""
                     : format(function.receiverType()) + ".")
                     + (function.explicitTypeParameters().isEmpty() ? "" :
                     function.explicitTypeParameters().stream()
-                            .map(parameter -> parameter.name()
-                                            + typeParameterConstraints(parameter))
+                            .map(parameter -> (parameter.isReified() ? "reified " : "")
+                                    + parameter.name()
+                                    + typeParameterConstraints(parameter))
                             .collect(Collectors.joining(", ", "<", ">")))
                     + formatParameters(function)
                     + format(function.returnType());
@@ -85,26 +86,46 @@ public final class TypeFormatter {
 
     private static String formatTypeArgument(final TypeDescriptor type) {
         if (type instanceof TypeParameterDescriptor parameter && parameter.isAnonymousExistential()) {
-            final var constraints = new java.util.ArrayList<String>();
-            if (parameter.admitsNullableArguments()) constraints.add("nullable");
-            if (parameter.isReified()) constraints.add("reified");
-            if (parameter.isEffectKind()) constraints.add("effect");
-            if (parameter.isEffectRowKind()) constraints.add("effect...");
-            if (parameter.admitsMutableArguments()) constraints.add("mut");
-            parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
-            return ": " + String.join(" + ", constraints);
+            final var builder = new StringBuilder();
+            if (parameter.isReified()) builder.append("reified _");
+            builder.append(':');
+            if (!parameter.bounds().isEmpty()) {
+                builder.append(' ').append(parameter.bounds().stream()
+                        .map(TypeFormatter::format)
+                        .collect(Collectors.joining(" + ")));
+            }
+            final var markers = admissibilityMarkers(parameter);
+            if (!markers.isEmpty()) {
+                builder.append(" admits ").append(String.join(" + ", markers));
+            }
+            return builder.toString();
         }
         return format(type);
     }
 
     private static String typeParameterConstraints(final TypeParameterDescriptor parameter) {
         final var constraints = new java.util.ArrayList<String>();
-        if (parameter.admitsNullableArguments()) constraints.add("nullable");
-        if (parameter.isReified()) constraints.add("reified");
-        if (parameter.isEffectKind()) constraints.add("effect");
-        if (parameter.isEffectRowKind()) constraints.add("effect...");
-        if (parameter.admitsMutableArguments()) constraints.add("mut");
-        parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
-        return constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints);
+        if (!parameter.bounds().isEmpty()) {
+            parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
+        }
+        final var result = new StringBuilder();
+        if (!constraints.isEmpty()) {
+            result.append(": ").append(String.join(" + ", constraints));
+        }
+        final var markers = admissibilityMarkers(parameter);
+        if (!markers.isEmpty()) {
+            result.append(" admits ").append(String.join(" + ", markers));
+        }
+        return result.toString();
+    }
+
+    private static java.util.List<String> admissibilityMarkers(
+            final TypeParameterDescriptor parameter) {
+        final var markers = new java.util.ArrayList<String>();
+        if (parameter.admitsNullableArguments()) markers.add("nullable");
+        if (parameter.admitsMutableArguments()) markers.add("mutable");
+        if (parameter.isEffectKind()) markers.add("effect");
+        if (parameter.isEffectRowKind()) markers.add("effect...");
+        return markers;
     }
 }

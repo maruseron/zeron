@@ -127,7 +127,7 @@ public class LspWorkspaceTest {
                     public constructor new;
                 }
 
-                public contract SqlModel<T: nullable + mut> requires Model<T> {
+                public contract SqlModel<T admits nullable + mutable> requires Model<T> {
                     property tableName: String;
                 }
 
@@ -227,7 +227,7 @@ public class LspWorkspaceTest {
         final var hover = hoverAt(snapshot, project.entry(), source, "jsonModel");
 
         assertTrue("Unexpected jsonModel hover: " + hover,
-                hover.contains("fn jsonModel<T: nullable + mut>(\n    model: Model<T>,"));
+                hover.contains("fn jsonModel<T admits nullable + mutable>(\n    model: Model<T>,"));
         assertTrue("Missing owner parameter: " + hover,
                 hover.contains("owner: T,"));
         assertTrue("Missing block parameter: " + hover,
@@ -266,7 +266,7 @@ public class LspWorkspaceTest {
         Files.createDirectories(contractPath.getParent());
         final var contractSource = """
                 package contracts;
-                public contract Comparable<T: mut> {
+                public contract Comparable<T admits mutable> {
                     /// Evaluates the current instance against `other`.
                     compareTo(other: T): String;
                 }
@@ -342,7 +342,7 @@ public class LspWorkspaceTest {
         final var libraryRoot = Files.createDirectories(project.root().resolve("lib"));
         final var libraryUnit = Parser.of(Scanner.from("""
                 package %s;
-                public fn jsonModel<T: nullable + mut>(model: String, owner: T, block: String): String = model;
+                public fn jsonModel<T admits nullable + mutable>(model: String, owner: T, block: String): String = model;
                 """.formatted(packageName)).scanTokens()).parseCompilationUnit("Library.zn");
         final var compiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
                 packageName + ".Library", packageName, List.of(), true, List.of(), libraryRoot);
@@ -361,7 +361,7 @@ public class LspWorkspaceTest {
                 source.lastIndexOf("jsonModel") - source.indexOf("jsonModel"));
 
         assertTrue("Unexpected import hover: " + importHover,
-                importHover.contains("fn jsonModel<T: nullable + mut>("
+                importHover.contains("fn jsonModel<T admits nullable + mutable>("
                         + "model: String, owner: T, block: String) -> String"));
         assertTrue("Unexpected call hover: " + callHover, callHover.contains(
                 "fn jsonModel(model: String, owner: Int, block: String) -> String"));
@@ -756,8 +756,8 @@ public class LspWorkspaceTest {
         final var target = Path.of(java.net.URI.create(definition.getLeft().getFirst().getUri()));
         assertTrue(target.toString(), target.endsWith(Path.of("stdlib", "zeron", "lang", "option.zn")));
         final var targetSource = Files.readString(target);
-        assertTrue(targetSource.contains("public type Option<out T: nullable + mut>"));
-        final var mapDeclaration = targetSource.indexOf("public fn map<B: mut>");
+        assertTrue(targetSource.contains("public type Option<out T admits nullable + mutable>"));
+        final var mapDeclaration = targetSource.indexOf("public fn map<B admits mutable>");
         assertTrue(mapDeclaration >= 0);
         final var expectedPosition = DocumentCoordinates.positionAt(targetSource, mapDeclaration);
         assertEquals(expectedPosition.getLine(),
@@ -809,7 +809,7 @@ public class LspWorkspaceTest {
                 }
                 public class HandlerApi {
                     public constructor new;
-                    public apply(policy: String ~> {Failure} raises {}): Unit {}
+                    public apply(policy: String ~> {Failure} performs {}): Unit {}
                 }
                 fn main() {
                     let api = HandlerApi.new();
@@ -881,7 +881,7 @@ public class LspWorkspaceTest {
                     fn marker(): Int = 1;
                 }
                 fn keep<T: Tagged<T>>(value: T, box: Box<T>): T = value;
-                fn borrow<T: nullable + mut>(value: T): T = value;
+                fn borrow<T admits nullable + mutable>(value: T): T = value;
                 """;
         final var project = project(source);
         final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
@@ -905,7 +905,7 @@ public class LspWorkspaceTest {
         assertTrue(functionParameterHover,
                 functionParameterHover.contains("type parameter T: Tagged<T>"));
         assertTrue(markerParameterHover,
-                markerParameterHover.contains("type parameter T: nullable + mut"));
+                markerParameterHover.contains("type parameter T admits nullable + mutable"));
         assertTrue(parameterUseHover,
                 parameterUseHover.contains("type parameter T: Tagged<T>"));
         assertTrue(valueHover, valueHover.contains("value value: T"));
@@ -1297,8 +1297,8 @@ public class LspWorkspaceTest {
                 public class Box<T> {
                     value: T;
                     public constructor new;
-                    public constructor start() raises Failure = raise Failure.new("failed");
-                    public map<R>(transform: (T) -> R): Box<R> raises Failure =
+                    public constructor start() performs Failure = perform Failure.new("failed");
+                    public map<R>(transform: (T) -> R): Box<R> performs Failure =
                         Box<R>.new(transform(this.value));
                 }
                 external fn native(value: Int): Int;
@@ -1337,12 +1337,12 @@ public class LspWorkspaceTest {
         assertNotNull(constructorHover);
         assertTrue(constructorHover.getContents().getRight().getValue(),
                 constructorHover.getContents().getRight().getValue()
-                        .contains("constructor start() -> &Box<T> raises {Failure}"));
+                        .contains("constructor start() -> &Box<T> performs {Failure}"));
         assertNotNull(methodHover);
         assertTrue(methodHover.getContents().getRight().getValue()
                 .contains("fn map<R>"));
         assertTrue(methodHover.getContents().getRight().getValue()
-                .contains("raises {Failure}"));
+                .contains("performs {Failure}"));
         assertNotNull(functionHover);
         assertTrue(functionHover.getContents().getRight().getValue().contains("external fn native"));
         assertNotNull(externalClassHover);
@@ -1357,8 +1357,8 @@ public class LspWorkspaceTest {
     @Test
     public void hoverShowsSourceNameForRefinedSumCaseTypes() throws Exception {
         final var source = """
-                public type Option<T: nullable> = Some(value: T) | None;
-                fn inspect<T: nullable>(option: Option<T>): Option<T> {
+                public type Option<T admits nullable> = Some(value: T) | None;
+                fn inspect<T admits nullable>(option: Option<T>): Option<T> {
                     let new = option;
                     if (new matches Option.None()) { return new; }
                     return new;
@@ -1377,10 +1377,10 @@ public class LspWorkspaceTest {
         final var source = """
                 import zeron.lang.Hashable;
                 public contract Foldable<F<_>> {
-                    foldLeft<A: mut, B: mut>(
+                    foldLeft<A admits mutable, B admits mutable>(
                         this: F<A>, initial: B, combine: (B, A) -> B
                     ): B;
-                    default count<A: mut>(this: F<A>): Int =
+                    default count<A admits mutable>(this: F<A>): Int =
                         this.foldLeft(0, (count, _) -> count + 1);
                 }
                 fn hashKey<T: Hashable<T>>(key: T): Long = key.hash();
@@ -1551,11 +1551,11 @@ public class LspWorkspaceTest {
     /*@Test
     public void hoverPrefersAbstractContractMethodOverDelegatingWitnessSignature() throws Exception {
         final var source = """
-                public contract Contract1<T: nullable + mut> {
+                public contract Contract1<T admits nullable + mutable> {
                     eq(other: T): Boolean;
                 }
 
-                public contract Contract2<T: mut> requires Eq<T> {}
+                public contract Contract2<T admits mutable> requires Eq<T> {}
 
                 public class Implementer {
                     public eq(other: Implementer): Boolean = true;
@@ -2549,7 +2549,7 @@ public class LspWorkspaceTest {
         Files.createDirectories(source.getParent());
         Files.writeString(source, """
                 package zeron.lang;
-                public type Option<T: nullable> = Some(value: T) | None;
+                public type Option<T admits nullable> = Some(value: T) | None;
                 """);
         return source.toAbsolutePath().normalize();
     }

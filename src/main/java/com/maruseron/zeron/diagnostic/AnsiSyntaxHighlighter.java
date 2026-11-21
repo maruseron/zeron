@@ -70,7 +70,7 @@ public final class AnsiSyntaxHighlighter {
             case "integer", "decimal" -> followsSuffixCategory(tokens, index);
             case "string" -> followsSuffixStringInput(tokens, index);
             case "out" -> isTypeProjection(tokens, index);
-            case "nullable" -> isGenericAdmissibilityMarker(tokens, index);
+            case "nullable", "mutable" -> isGenericAdmissibilityMarker(tokens, index);
             case "where" -> followsNewtypeRepresentation(tokens, index);
             case "matches" -> isMatchesOperator(tokens, index);
             case "implementation" -> followsHigherKindedImplementation(tokens, index);
@@ -125,17 +125,33 @@ public final class AnsiSyntaxHighlighter {
     private static boolean isGenericAdmissibilityMarker(final List<Token> tokens, final int index) {
         final var previous = previousSignificantIndex(tokens, index);
         final var next = nextSignificantIndex(tokens, index);
-        if (previous < 0 || next < 0 || tokens.get(previous).type() != TokenType.COLON) {
-            return false;
-        }
+        if (previous < 0 || next < 0) return false;
         final var nextType = tokens.get(next).type();
         if (nextType != TokenType.PLUS && nextType != TokenType.COMMA
                 && nextType != TokenType.GREATER) {
             return false;
         }
 
+        var cursor = previous;
+        while (cursor >= 0) {
+            final var token = tokens.get(cursor);
+            if (token.type() == TokenType.IDENTIFIER && token.lexeme().equals("admits")) {
+                return insideTypeParameterList(tokens, cursor);
+            }
+            if (token.type() != TokenType.PLUS
+                    && !(token.type() == TokenType.IDENTIFIER
+                            && (token.lexeme().equals("nullable")
+                                    || token.lexeme().equals("mutable")))) {
+                return false;
+            }
+            cursor = previousSignificantIndex(tokens, cursor);
+        }
+        return false;
+    }
+
+    private static boolean insideTypeParameterList(final List<Token> tokens, final int index) {
         var nestedTypes = 0;
-        for (var cursor = previousSignificantIndex(tokens, previous); cursor >= 0;
+        for (var cursor = previousSignificantIndex(tokens, index); cursor >= 0;
              cursor = previousSignificantIndex(tokens, cursor)) {
             final var type = tokens.get(cursor).type();
             if (type == TokenType.GREATER) {
@@ -163,7 +179,7 @@ public final class AnsiSyntaxHighlighter {
         final var declaration = previousSignificantIndex(tokens, previous);
         if (declaration < 0) return false;
         return switch (tokens.get(declaration).type()) {
-            case CLASS, CONTRACT, EFFECT, FN, TYPE -> true;
+            case CLASS, CONTRACT, EFFECT, FN, TYPE, WITNESS -> true;
             default -> false;
         };
     }
@@ -354,7 +370,7 @@ public final class AnsiSyntaxHighlighter {
             case AND, ANNOTATION, AS, BREAK, CASE, CLASS, CONTRACT, CONSTRUCTOR, CONTINUE, DEFAULT, ELSE,
                     EFFECT, EXTENSION, EXTERNAL, FN, FOR, HANDLE, IF, IMPLEMENT, IMPORT,
                     IN, IS, LET, LOOP, MATCH, MUT, NOT, NAMESPACE, OR, PACKAGE, PATTERN,
-                    OBJECT, PRIVATE, PROPERTY, PUBLIC, RAISE, RAISES, RETURN, SEALED, STATIC,
+                    OBJECT, PRIVATE, PROPERTY, PUBLIC, PERFORM, PERFORMS, RETURN, SEALED, STATIC,
                     THEN, THIS, THROWS, TYPE, TYPEOF, UNTIL, UNDER, UNSAFE, USING, WITNESS, WHILE -> "35";
             case LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE, LEFT_BRACKET, RIGHT_BRACKET,
                     COMMA, SEMICOLON, TILDE, DOT, DOT_DOT, ELLIPSIS, COLON, COLON_COLON,

@@ -6,4 +6,4 @@ package zeron.collections;
 /// every call. An `Iterable` promises repeatable traversal but neither order nor finiteness; a
 /// `List` promises both, and `Sized` anchors finiteness in the signature. Indexing is not part of
 /// the contract, since a linked or fold-based list cannot offer constant-time access.
-public contract List<T: mut> requires Iterable<T> + Sized<T> { }
+public contract List<T admits mutable> requires Iterable<T> + Sized<T> { }

@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
  * A finite effect row: a set of fixed effect labels plus zero or more row variables.
  *
  * <p>Rows appear as explicit generic type arguments ({@code {}}, {@code {NotFound}}) and as
- * intermediate values during row inference. Function {@code raises} lists are normalized into
+ * intermediate values during row inference. Function {@code performs} lists are normalized into
  * individual labels and row variables so that handler cases can remove fixed labels without
  * inspecting unresolved rows.</p>
  */

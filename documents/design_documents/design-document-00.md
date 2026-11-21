@@ -54,7 +54,7 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
 - Nominal classes and contracts with private fields, declaration-ordered field initialization,
     canonical construction, methods, static conformance checking, and contract dispatch.
-- Nominal non-generic effect payload classes, declared `raises` sets, `raise` expressions, and
+- Nominal non-generic effect payload classes, declared `performs` sets, `perform` expressions, and
     typed expression handlers. Calls propagate effects until handled or declared; `Result` remains
     an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
 - Synchronous lexical `using` scopes over `zeron.resource.Disposable`, with reverse-order cleanup,
@@ -221,8 +221,8 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     and test doubles. Anonymous record values remain excluded because they would introduce
     structural typing.
 - **Planned — pattern assignment and derived creation.**
-- **Implemented with limits — typed raised effects:** callable `raises` clauses and function-type
-    annotations, `raise` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
+- **Implemented with limits — typed raised effects:** callable `performs` clauses and function-type
+    annotations, `perform` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
     Property patterns, catch-all cases, effect generics, effects in top-level initializers, and
     automatic Java-exception conversion remain unsupported. Entry-point `main` may declare effects
     like any other callable. See
@@ -232,10 +232,10 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     failure case, and all binds in the initial design use the same context and `Result` error type.
     The final expression must explicitly construct its `Option`/`Result` value; plain results are
     not implicitly lifted. This sequences value-level failures and does not handle declared
-    `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
+    `performs` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
 - **Implemented — generic admissibility markers:** parameters admit non-null, read-only arguments by
     default; `nullable` and `mut` opt in independently, while `effect` is exclusive and enables
-    exact generic effect propagation with runtime checks at generic raise sites. These markers do
+    exact generic effect propagation with runtime checks at generic perform sites. These markers do
     not enable handler cases on unresolved type parameters. Numeric operators use explicit
     `Numeric<T>` and `Fractional<T>` contract bounds as described in
     [ZEP-0071](../zeps/ZEP-0071.md); a closed-set `numeric` marker is not part of the design.
@@ -277,7 +277,7 @@ be written as ordinary declared types.
 
 | Type | Meaning | Current status |
 | --- | --- | --- |
-| `Never` | Bottom type: an expression that does not produce a value or return normally. | Supported; `raise` expressions have type `Never` and participate in branch joining, handling, and reachability analysis. |
+| `Never` | Bottom type: an expression that does not produce a value or return normally. | Supported; `perform` expressions have type `Never` and participate in branch joining, handling, and reachability analysis. |
 | `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
 | `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type; the `()` literal is distinct from `Never` and has a shared non-null runtime singleton. |
 | `Int` | Integer values. | Supported. |
@@ -791,25 +791,25 @@ fn growPerson(person: &Person): Unit {
 ### Typed raised effects
 
 An effect declaration names a nominal payload class. Functions, methods, extension methods, named
-constructors, and function types can declare the effects they may raise:
+constructors, and function types can declare the effects they may perform:
 
 ```zeron
 public effect NotFound {
     public property path: String;
 }
 
-fn read(path: String): String raises NotFound = raise NotFound.new(path);
+fn read(path: String): String performs NotFound = perform NotFound.new(path);
 
 fn readOrEmpty(path: String): String = handle (read(path)) with {
     case NotFound as failure -> "";
 };
 ```
 
-Every raised effect in a callable body must either appear in its `raises` clause or be handled by
+Every raised effect in a callable body must either appear in its `performs` clause or be handled by
 an enclosing expression handler. A handler catches only its listed payload types; unmatched raised
 effects are rethrown. Handler arms are expressions, and their raised effects remain visible to the
 enclosing callable. The handler's result type includes the protected expression's normal result and
-the arm results. `raise` has type `Never`. `Result<T, E>` remains an ordinary value and is not
+the arm results. `perform` has type `Never`. `Result<T, E>` remains an ordinary value and is not
 implicitly translated to or from raised effects. See
 [design-document-13](design-document-13_typed-raised-effects.md) for compatibility, runtime, and
 roadmap details.

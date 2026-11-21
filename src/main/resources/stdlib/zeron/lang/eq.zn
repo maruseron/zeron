@@ -23,7 +23,7 @@ package zeron.lang;
 /// ```zeron
 /// (a != b) == not (a == b)
 /// ```
-public contract Eq<T: nullable + mut> {
+public contract Eq<T admits nullable + mutable> {
 
     /// Determines whether the current instance is equal to `other`.
     eq(other: T): Boolean;

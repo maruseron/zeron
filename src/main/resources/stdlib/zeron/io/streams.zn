@@ -11,13 +11,13 @@ import zeron.resource.Disposable;
 import zeron.resource.DisposeFailure;
 
 public contract Reader requires Disposable {
-    mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> raises IoFailure;
+    mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> performs IoFailure;
 }
 
 public contract Writer requires Disposable {
-    mut write(buffer: ByteArray, offset: Int, length: Int): Unit raises IoFailure;
+    mut write(buffer: ByteArray, offset: Int, length: Int): Unit performs IoFailure;
 
-    mut flush(): Unit raises IoFailure;
+    mut flush(): Unit performs IoFailure;
 }
 
 class FileByteReader is Reader, Disposable {
@@ -27,15 +27,15 @@ class FileByteReader is Reader, Disposable {
 
     public constructor from(input: &InputStream) = FileByteReader.new(input);
 
-    public mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> raises IoFailure {
+    public mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> performs IoFailure {
         let count = this.input.read(buffer, offset, length);
         if (count < 0) return Option<Int>.None();
         return Option.Some(count);
     }
 
-    public mut dispose(): Unit raises DisposeFailure {
+    public mut dispose(): Unit performs DisposeFailure {
         handle (this.input.close()) with {
-            case IoFailure.cause(cause) -> raise DisposeFailure.new(cause);
+            case IoFailure.cause(cause) -> perform DisposeFailure.new(cause);
         };
     }
 }
@@ -47,33 +47,33 @@ class FileByteWriter is Writer, Disposable {
 
     public constructor from(output: &OutputStream) = FileByteWriter.new(output);
 
-    public mut write(buffer: ByteArray, offset: Int, length: Int): Unit raises IoFailure {
+    public mut write(buffer: ByteArray, offset: Int, length: Int): Unit performs IoFailure {
         this.output.write(buffer, offset, length);
     }
 
-    public mut flush(): Unit raises IoFailure {
+    public mut flush(): Unit performs IoFailure {
         this.output.flush();
     }
 
-    private mut closeAfterFlushFailure(cause: java.io.IOException): Unit raises DisposeFailure {
+    private mut closeAfterFlushFailure(cause: java.io.IOException): Unit performs DisposeFailure {
         handle (this.output.close()) with {
-            case IoFailure.cause(closeCause) -> raise DisposeFailure.new(closeCause);
+            case IoFailure.cause(closeCause) -> perform DisposeFailure.new(closeCause);
         };
-        raise DisposeFailure.new(cause);
+        perform DisposeFailure.new(cause);
     }
 
-    public mut dispose(): Unit raises DisposeFailure {
+    public mut dispose(): Unit performs DisposeFailure {
         handle (this.output.flush()) with {
             case IoFailure.cause(cause) -> this.closeAfterFlushFailure(cause);
         };
         handle (this.output.close()) with {
-            case IoFailure.cause(cause) -> raise DisposeFailure.new(cause);
+            case IoFailure.cause(cause) -> perform DisposeFailure.new(cause);
         };
     }
 }
 
-public fn openReader(path: Path): &Reader raises IoFailure =
+public fn openReader(path: Path): &Reader performs IoFailure =
     FileByteReader.from(Files.newInputStream(File.new(path.toString()).toPath()));
 
-public fn openWriter(path: Path): &Writer raises IoFailure =
+public fn openWriter(path: Path): &Writer performs IoFailure =
     FileByteWriter.from(Files.newOutputStream(File.new(path.toString()).toPath()));

@@ -40,8 +40,8 @@ public final class ContractDerivationTest {
                 public type Coordinates deriving Hashable = (left: Int, right: Int);
                 public type CasePayload deriving Hashable = Left(value: Int) | Right(value: Int);
                 public newtype UserId deriving Eq, Hashable = Int;
-                fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
+                fn same<T: Eq<T> admits mutable>(left: T, right: T): Boolean = left.eq(right);
+                fn hash<T: Hashable<T> admits mutable>(value: T): Long = value.hash();
                 fn equalRecords(): Boolean =
                     same(Record.new(7, "seven"), Record.new(7, "seven"));
                 fn unequalRecords(): Boolean =
@@ -142,7 +142,7 @@ public final class ContractDerivationTest {
                     package client;
                     import %s.Box;
                     import zeron.lang.Eq;
-                    fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
+                    fn same<T: Eq<T> admits mutable>(left: T, right: T): Boolean = left.eq(right);
                     fn result(): Boolean = same(Box<Int>.new(7), Box<Int>.new(7));
                     """.formatted(libraryPackage));
             final var clientCompiler = CompilationService.forCompilationUnits(
@@ -227,7 +227,7 @@ public final class ContractDerivationTest {
                         package client;
                         import %s.Box;
                         import zeron.lang.Hashable;
-                        fn hashBox<T: mut + Hashable<T>>(value: T): Long = value.hash();
+                        fn hashBox<T: Hashable<T> admits mutable>(value: T): Long = value.hash();
                         fn result(): Long = hashBox(Box<Int>.new(17));
                         """.formatted(libraryPackage));
                 final var clientCompiler = CompilationService.forCompilationUnits(

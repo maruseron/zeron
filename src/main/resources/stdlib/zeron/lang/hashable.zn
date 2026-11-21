@@ -3,7 +3,7 @@ package zeron.lang;
 /// Defines a hashing operation for types that can be mapped to a 64-bit hash.
 /// `Eq<T>` is a contract prerequisite. This contract can be derived by the compiler
 /// for Algebraic Data Types, newtypes and classes.
-public contract Hashable<T: nullable + mut> requires Eq<T> {
+public contract Hashable<T admits nullable + mutable> requires Eq<T> {
 
     /// Returns a 64-bit hash value for this object.
     ///

@@ -40,7 +40,7 @@ decisions, and perform several actions. Use `return` to give back the result:
 ```zeron
 import zeron.io.println;
 
-fn reportTotal(left: Int, right: Int): Unit raises IoFailure {
+fn reportTotal(left: Int, right: Int): Unit performs IoFailure {
     let total = add(left, right);
     println(total);
 }

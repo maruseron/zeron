@@ -9,11 +9,11 @@
 
 ## Purpose
 
-This document discusses whether `List<T: mut>`, `Map<K: Hashable<K>, V: mut>`, and
+This document discusses whether `List<T admits mutable>`, `Map<K: Hashable<K>, V admits mutable>`, and
 `Set<T: Hashable<T>>` should move from classes to contracts, so that specialized implementations
 (`ArrayList`, `DoublyLinkedList`, `ConstructList`, `Church`, `HashMap`, `IdentityHashMap`,
 `TreeMap`, `RedBlackMap`, `HashSet`, and others) can coexist behind one API. It also discusses
-whether `Stream<T: mut>`, or a contract for lazy sequences, is worth the same treatment, and how it
+whether `Stream<T admits mutable>`, or a contract for lazy sequences, is worth the same treatment, and how it
 relates to `List`.
 
 It is a discussion document, not a proposal. It records what the sources currently do, the design
@@ -32,18 +32,18 @@ This section is taken from `list.zn`, `map.zn`, `set.zn`, `stream.zn`, and the d
 `Iterable<T>`. It supersedes the assumptions of the first revision of this document, several of
 which were wrong.
 
-**`Iterable<T: mut>`** has one abstract method, `iterator(): &Iterator<T>`, and two defaults:
+**`Iterable<T admits mutable>`** has one abstract method, `iterator(): &Iterator<T>`, and two defaults:
 `forEach(consumer)` and `stream(): Stream<T> = Stream.from(this)`. `Iterator<T>` is pull-based:
 `mut next(): Step<T>`, with `Step.Yield(value)` and `Step.Done()`.
 
-**`List<T: mut>`** is a final, array-backed class. It conforms to `Iterable<T>`, `Sink<T>`,
+**`List<T admits mutable>`** is a final, array-backed class. It conforms to `Iterable<T>`, `Sink<T>`,
 `RandomAccess<T>`, `Sequenced<T>`, `Reversible<List<_>>`, `Foldable<List<_>>`, and
 `CollectionBuilder<List<_>>`. Its members are `size`, `isEmpty`, `at(index): Option<T>`, `first`,
 `last`, `replaceAt`, `add` (returns `Boolean`), `insert`, `removeAt`, `clear`, and `foldLeft`. Its
 constructors are `of(T...)`, `empty()`, and `fromArray`. It has no `map` or `filter`, and no `Eq` or
 `Hashable`. Its iterator reads through the class's own `at` and `size`.
 
-**`Map<K: Hashable<K>, V: mut>`** is a final hash-table class with chained, immutable `MapEntry`
+**`Map<K: Hashable<K>, V admits mutable>`** is a final hash-table class with chained, immutable `MapEntry`
 nodes. **Each map instance holds its own `hashFunction` and `equalityFunction`**, supplied through
 `withOperations`; `empty()` supplies the `Hashable` and `Eq` of `K`. Its members are `size`,
 `isEmpty`, `containsKey`, `get`, `put`, `putIfAbsent`, `compute`, `computeIfAbsent`, `remove`,
@@ -53,7 +53,7 @@ nodes. **Each map instance holds its own `hashFunction` and `equalityFunction`**
 **`Set<T: Hashable<T>>`** is a final class that wraps a `&Map<T, Unit>` (`withMap`). It conforms to
 `Iterable<T>` and `Sink<T>`, and iterates through `keyIterator()`.
 
-**`Stream<T: mut>`** is a final class that holds a single `Iterable<T>` source. Each operator
+**`Stream<T admits mutable>`** is a final class that holds a single `Iterable<T>` source. Each operator
 (`map`, `filter`, `take`, ...) wraps the source in an internal `Iterable` class. It conforms to
 `Iterable<T>`, `Monad<Stream<_>>`, and `Foldable<Stream<_>>`. The documentation states that each
 traversal starts a fresh iterator from the source, so a stream can be traversed again whenever its
@@ -125,9 +125,9 @@ What remains is the first two, and the ergonomics of naming.
 5. **Static dispatch is a stated project value.** A change should not make the common case slower
    or less predictable without measurement.
 6. **Effects.** Function types carry effect rows ([ZEP-0086](./ZEP-0086.md), implemented):
-   `(T) -> R raises E` with `E: effect...`. Row variables are quantified on declarations only, a
+   `(T) -> R performs E` with `E admits effect...`. Row variables are quantified on declarations only, a
    contract method may not widen its row (an open row needs a row parameter on the method or the
-   interface), and at most one row variable may appear in a single `raises` list. The standard
+   interface), and at most one row variable may appear in a single `performs` list. The standard
    library has not yet adopted rows.
 7. **Two kinds of contract that do not connect.** Ordinary contracts are parameterized by element
    types (`Iterable<T>`, `Sink<T>`). Capability contracts over type constructors (`Foldable<F<_>>`,
@@ -151,7 +151,7 @@ contract is a bundle of capabilities, so defining it is nearly free:
 
 ```zeron
 // illustrative
-public contract List<T: mut> requires Iterable<T> + Sequenced<T> { }
+public contract List<T admits mutable> requires Iterable<T> + Sequenced<T> { }
 ```
 
 Mutation is not part of this bundle; see "Mutation without a `MutableList` bundle". The cost is
@@ -206,7 +206,7 @@ capability that `ArrayList` has and `ConstructList` does not:
 
 ```zeron
 // illustrative
-public contract IndexedList<T: mut> requires List<T> + RandomAccess<T> { }
+public contract IndexedList<T admits mutable> requires List<T> + RandomAccess<T> { }
 ```
 
 This is the most consequential naming decision after Option 1. Code that calls `at` on a `List`
@@ -361,16 +361,16 @@ operators would duplicate code without adding behavior. `Stream` as a final clas
   for collections:
   1. *Strict higher-order operations are straightforward.* `forEach`, `foldLeft`, and `fold` take a
      row parameter and propagate it, which is correct because the callback runs during the call:
-     `forEach<E: effect...>(consumer: (T) -> Unit raises E): Unit raises E`.
+     `forEach<E admits effect...>(consumer: (T) -> Unit performs E): Unit performs E`.
   2. *Lazy transformations cannot be made polymorphic by a row parameter on the method.* A callback
      given to `map` runs at consumption, not during the call to `map`; declaring that call as
-     `raises E` would let the effect escape the handler scope enclosing the call. The stream type
-     itself would have to carry the row (`Stream<T, E: effect...>`), and each operator would return a
+     `performs E` would let the effect escape the handler scope enclosing the call. The stream type
+     itself would have to carry the row (`Stream<T, E admits effect...>`), and each operator would return a
      stream whose row is the union of the upstream row and the callback's row: a union of two row
-     variables in a type argument. [ZEP-0086](./ZEP-0086.md) allows one row variable per `raises`
+     variables in a type argument. [ZEP-0086](./ZEP-0086.md) allows one row variable per `performs`
      list and does not say whether that restriction covers type-argument rows.
   3. *Iteration itself has the empty row.* `Iterator.next` and `Iterable.iterator` declare no row, so
-     an implementation cannot raise. An effectful source (reading a file) must report failures as
+     an implementation cannot perform. An effectful source (reading a file) must report failures as
      data, or the contracts need a row parameter (`Iterator<T, E>`), which changes the arity of the
      most used contract.
 

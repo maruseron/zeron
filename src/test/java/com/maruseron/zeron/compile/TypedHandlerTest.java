@@ -41,9 +41,9 @@ public final class TypedHandlerTest {
                 import %s.Failure;
                 import %s.catchFailure;
                 fn apply(handler: String ~> {Failure}): String =
-                    handle (raise Failure.new("passed")) with handler;
+                    handle (perform Failure.new("passed")) with handler;
                 fn named(): String =
-                    handle (raise Failure.new("named")) with catchFailure;
+                    handle (perform Failure.new("named")) with catchFailure;
                 fn anonymous(): String = apply(handler {
                     case Failure.message(message) -> message;
                 });
@@ -52,22 +52,22 @@ public final class TypedHandlerTest {
                     let handler = handler {
                         case Failure.message(message) -> message + suffix;
                     };
-                    return handle (raise Failure.new("captured")) with handler;
+                    return handle (perform Failure.new("captured")) with handler;
                 }
                 effect Audit {}
-                fn propagated(): String raises Audit = handle (
-                    raise Failure.new("audit")
+                fn propagated(): String performs Audit = handle (
+                    perform Failure.new("audit")
                 ) with handler {
                     case Failure as failure ->
-                        if (false) then failure.message else raise Audit.new();
+                        if (false) then failure.message else perform Audit.new();
                 };
-                fn partial(): String raises Audit = handle (
-                    raise Audit.new()
+                fn partial(): String performs Audit = handle (
+                    perform Audit.new()
                 ) with handler {
                     case Failure -> "unused";
                 };
-                fn guarded(): String raises Failure = handle (
-                    raise Failure.new("guarded")
+                fn guarded(): String performs Failure = handle (
+                    perform Failure.new("guarded")
                 ) with handler {
                     case Failure.message(message) if false -> message;
                 };
@@ -117,7 +117,7 @@ public final class TypedHandlerTest {
                 effect Failure {}
                 effect Other {}
                 fn apply(handler: String ~> {Failure}): String =
-                    handle (raise Failure.new()) with handler;
+                    handle (perform Failure.new()) with handler;
                 fn mismatch(): String = apply(handler {
                     case Other -> "wrong shape";
                 });

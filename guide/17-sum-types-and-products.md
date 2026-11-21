@@ -71,7 +71,7 @@ shallow: a component may refer to mutable state, which can still affect equality
 Initialization assigns components first, evaluates direct field initializers in declaration order,
 then runs initializer blocks in source order. Direct initializers may call only effect-free
 functions. An initializer block can declare its raised effects on the data class name, for example
-`Point raises InitializationFailure { ... }`; those effects become part of construction and must be
+`Point performs InitializationFailure { ... }`; those effects become part of construction and must be
 handled or propagated by the caller. See [Raised effects](./22-raised-effects.md) for the effect
 model.
 
@@ -79,7 +79,7 @@ Data classes can be destructured positionally. The pattern arity is the canonica
 not the number of auxiliary properties:
 
 ```zeron
-public data class Box<A: mut>(value: A) {
+public data class Box<A admits mutable>(value: A) {
     public property doubled: A {
         get = value;
     }
@@ -157,7 +157,7 @@ declare a `model` for a target type:
 ```zeron
 import zeron.lang.Model;
 
-public contract SqlModel<T: nullable + mut> requires Model<T> {
+public contract SqlModel<T admits nullable + mutable> requires Model<T> {
     property tableName: String;
 }
 
@@ -251,10 +251,10 @@ Inside a newtype-owned extension, witness, or namespace body, `this` and newtype
 are the representation directly. Callers use an explicit operation when they need the value:
 
 ```zeron
-public newtype IO<A: mut> = () -> A;
+public newtype IO<A admits mutable> = () -> A;
 
-public extension<A: mut> IO<A> {
-    public fn map<B: mut>(transform: A -> B): IO<B> =
+public extension<A admits mutable> IO<A> {
+    public fn map<B admits mutable>(transform: A -> B): IO<B> =
         IO.new(() -> transform(this()));
 
     public fn run(): A = this();

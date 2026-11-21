@@ -35,7 +35,7 @@ fn total<T: Numeric<T>>(items: Iterable<T>, zero: T): T {
     return sum;
 }
 
-fn main(): Unit raises IoFailure {
+fn main(): Unit performs IoFailure {
     let shapes = [ 
         Shape.Circle(Point.new(0.0, 0.0), 1.5), 
         Shape.Rect(Point.new(1.0, 1.0), 2.0, 3.0) 

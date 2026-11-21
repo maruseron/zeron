@@ -17,12 +17,12 @@ public data class Json(indent: Int) {
     public isCompact(): Boolean = this.indent <= 0;
 
     /// Encodes `value` as a JSON value using its `Encode` evidence.
-    public encodeToValue<T: nullable + mut + Encode<T, {}>>(
+    public encodeToValue<T: Encode<T, {}> admits nullable + mutable>(
         value: T
     ): Result<&JsonValue, EncodeError> = encodeValue<T>(value);
 
     /// Encodes `value` and writes it as JSON text using this configuration.
-    public encodeToString<T: nullable + mut + Encode<T, {}>>(
+    public encodeToString<T: Encode<T, {}> admits nullable + mutable>(
         value: T
     ): Result<String, EncodeError> =
         match (encodeValue<T>(value)) {
@@ -37,7 +37,7 @@ public data class Json(indent: Int) {
     /// Decodes a value of `T` from JSON text.
     ///
     /// Parsing does not depend on this configuration.
-    public decodeFromString<T: nullable + mut + Decode<T, {}>>(
+    public decodeFromString<T: Decode<T, {}> admits nullable + mutable>(
         text: String
     ): Result<T, DecodeError> = parseAs<T>(text);
 
@@ -45,7 +45,7 @@ public data class Json(indent: Int) {
     ///
     /// A model records field identity and external names but erases value types, so the block
     /// supplies the typed reads, as it does for `jsonModel`.
-    public encodeToValueWith<T: nullable + mut>(
+    public encodeToValueWith<T admits nullable + mutable>(
         model: Model<T>,
         value: T,
         block: &JsonModelObjectBuilder<T>.() -> Unit
@@ -53,7 +53,7 @@ public data class Json(indent: Int) {
 
     /// Encodes the fields that `block` selects through `model` and writes them using this
     /// configuration.
-    public encodeToStringWith<T: nullable + mut>(
+    public encodeToStringWith<T admits nullable + mutable>(
         model: Model<T>,
         value: T,
         block: &JsonModelObjectBuilder<T>.() -> Unit
@@ -91,12 +91,12 @@ namespace Json {
     public fn pretty(indent: Int): Json = Json.new(indent);
 
     /// Encodes `value` and writes compact JSON text using the default configuration.
-    public fn encodeToString<T: nullable + mut + Encode<T, {}>>(
+    public fn encodeToString<T: Encode<T, {}> admits nullable + mutable>(
         value: T
     ): Result<String, EncodeError> = Json.new(0).encodeToString<T>(value);
 
     /// Decodes a value of `T` from JSON text using the default configuration.
-    public fn decodeFromString<T: nullable + mut + Decode<T, {}>>(
+    public fn decodeFromString<T: Decode<T, {}> admits nullable + mutable>(
         text: String
     ): Result<T, DecodeError> = Json.new(0).decodeFromString<T>(text);
 }

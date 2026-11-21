@@ -1426,7 +1426,7 @@ final class DeclarationResolver {
         }
         final var effects = requiredType.raisedEffects().isEmpty()
                 ? ""
-                : " raises " + requiredType.raisedEffects().stream()
+                : " performs " + requiredType.raisedEffects().stream()
                         .map(TypeFormatter::format).collect(java.util.stream.Collectors.joining(", "));
         return "public " + (required.isMutating() ? "mut " : "") + required.name().lexeme()
                 + genericParameters + parameters.stream().collect(

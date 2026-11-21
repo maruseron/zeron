@@ -222,19 +222,19 @@ final class TypeResolver {
                 if (rowVariableSeen) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, where,
-                            "A raises clause may contain at most one effect-row variable."));
+                            "A performs clause may contain at most one effect-row variable."));
                 }
                 rowVariableSeen = true;
             } else if (!isEffectType(context, effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        where, "A raises clause must name a declared effect type, an effect-kinded "
+                        where, "A performs clause must name a declared effect type, an effect-kinded "
                                 + "parameter, or an effect-row parameter."));
             } else {
                 validateEffectApplication(context, effect, where);
             }
             if (!seenEffects.add(effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
-                        where, "An effect may appear only once in a raises clause."));
+                        where, "An effect may appear only once in a performs clause."));
             }
         }
         if (function.isHandler()) {

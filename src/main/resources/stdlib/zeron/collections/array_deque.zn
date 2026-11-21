@@ -3,7 +3,7 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.internal.unwrapSome;
 
-class ArrayDequeIterator<T: mut> is Iterator<T> {
+class ArrayDequeIterator<T admits mutable> is Iterator<T> {
     values: ArrayDeque<T>;
     position: Int;
 
@@ -24,7 +24,7 @@ class ArrayDequeIterator<T: mut> is Iterator<T> {
 /// An `ArrayDeque` keeps a head index into a contiguous backing array. Adding or removing at either
 /// end is amortized constant time, and indexed reads are constant time. Removing from the middle is
 /// not part of the deque contract and is not offered.
-public class ArrayDeque<T: mut>
+public class ArrayDeque<T admits mutable>
     is Deque<T>,
        Sink<T>,
        RandomAccess<T>,
@@ -155,7 +155,7 @@ public class ArrayDeque<T: mut>
     }
 
     /// Combines the elements from left to right into a single value.
-    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+    public foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut index = 0;
         while (index < elementCount) {
@@ -202,7 +202,7 @@ public class ArrayDeque<T: mut>
     }
 
     delegating implementation CollectionBuilder<ArrayDeque<_>> {
-        fn empty<A: mut>(): &ArrayDeque<A> = ArrayDeque<A>.empty();
+        fn empty<A admits mutable>(): &ArrayDeque<A> = ArrayDeque<A>.empty();
     }
 
     /// Returns an iterator over the elements, from first to last.

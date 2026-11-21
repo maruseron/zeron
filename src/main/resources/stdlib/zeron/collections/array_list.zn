@@ -4,12 +4,12 @@ import zeron.control.Foldable;
 import zeron.internal.unwrapSome;
 
 // These private self-calls are compiler intrinsics lowered to direct array operations.
-fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+fn allocateArray<T admits nullable + mutable>(size: Int): &Array<T> = allocateArray<T>(size);
 
-fn clearArraySlot<T: nullable + mut>(values: &Array<T>, index: Int): Unit =
+fn clearArraySlot<T admits nullable + mutable>(values: &Array<T>, index: Int): Unit =
     clearArraySlot<T>(values, index);
 
-class ArrayListIterator<T: mut> is Iterator<T> {
+class ArrayListIterator<T admits mutable> is Iterator<T> {
     values: ArrayList<T>;
     position: Int;
 
@@ -30,7 +30,7 @@ class ArrayListIterator<T: mut> is Iterator<T> {
 /// An `ArrayList` keeps its elements in a contiguous backing array that grows as needed, so reads
 /// by index are constant time and adding at the end is amortized constant time. Removing or
 /// inserting in the middle shifts the following elements.
-public class ArrayList<T: mut>
+public class ArrayList<T admits mutable>
     is List<T>,
        Sink<T>,
        RandomAccess<T>,
@@ -164,7 +164,7 @@ public class ArrayList<T: mut>
     }
 
     /// Combines the elements from left to right into a single value.
-    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+    public foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut index = 0;
         while (index < elementCount) {
@@ -209,7 +209,7 @@ public class ArrayList<T: mut>
     }
 
     delegating implementation CollectionBuilder<ArrayList<_>> {
-        fn empty<A: mut>(): &ArrayList<A> = ArrayList<A>.empty();
+        fn empty<A admits mutable>(): &ArrayList<A> = ArrayList<A>.empty();
     }
 
     /// Returns an iterator over the elements, in index order.
@@ -218,14 +218,14 @@ public class ArrayList<T: mut>
 
 /// An `ArrayList` can produce a sorted copy and sort itself in place.
 default witness Sortable<ArrayList<_>> for ArrayList<_> {
-    fn sortedBy<A: mut>(
+    fn sortedBy<A admits mutable>(
         this: ArrayList<A>,
         compare: (A, A) -> Ordering
     ): ArrayList<A> = sortedArrayList(this, compare);
 }
 
 default witness InPlaceSortable<ArrayList<_>> for ArrayList<_> {
-    fn sortBy<A: mut>(
+    fn sortBy<A admits mutable>(
         this: &ArrayList<A>,
         compare: (A, A) -> Ordering
     ): Unit = sortArrayList(this, compare);

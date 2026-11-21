@@ -26,8 +26,8 @@ public final class NewtypeTest {
         final var output = Files.createTempDirectory("zeron-newtype-witness-");
         final var unit = parse("newtype-witness.zn", """
                 import zeron.control.Functor;
-                public newtype IO<A: mut> = () -> A;
-                public extension<A: mut> IO<A> { public fn run(): A = this(); }
+                public newtype IO<A admits mutable> = () -> A;
+                public extension<A admits mutable> IO<A> { public fn run(): A = this(); }
                 default witness Functor<IO<_>> for IO<_> {
                     fn map<A, B>(this: IO<A>, transform: A -> B): IO<B> =
                         IO.new(() -> transform(this()));
@@ -62,7 +62,7 @@ public final class NewtypeTest {
         final var secondOutput = Files.createTempDirectory("zeron-newtype-isolation-second");
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var first = parse("first.zn", """
-                newtype IO<A: mut> = () -> A;
+                newtype IO<A admits mutable> = () -> A;
                 fn value(): IO<Int> = IO.new(() -> 42);
                 """);
         final var second = parse("second.zn", """
@@ -104,8 +104,8 @@ public final class NewtypeTest {
         final var libraryPackage = "functionnewtypelib" + UUID.randomUUID().toString().replace("-", "");
         final var library = parse("library/IO.zn", """
                 package %s;
-                public newtype IO<A: mut> = () -> A;
-                public extension<A: mut> IO<A> {
+                public newtype IO<A admits mutable> = () -> A;
+                public extension<A admits mutable> IO<A> {
                     public fn run(): A = this();
                 }
                 """.formatted(libraryPackage));
@@ -152,11 +152,11 @@ public final class NewtypeTest {
         final var output = Files.createTempDirectory("zeron-function-newtype-test");
         final var programName = "FunctionNewtypeProgram" + UUID.randomUUID().toString().replace("-", "");
         final var unit = parse("function-newtypes.zn", """
-                public newtype IO<A: mut> = () -> A;
-                public extension<A: mut> IO<A> {
-                    public fn map<B: mut>(transform: A -> B): IO<B> =
+                public newtype IO<A admits mutable> = () -> A;
+                public extension<A admits mutable> IO<A> {
+                    public fn map<B admits mutable>(transform: A -> B): IO<B> =
                         IO.new(() -> transform(this()));
-                    public fn flatMap<B: mut>(transform: A -> IO<B>): IO<B> =
+                    public fn flatMap<B admits mutable>(transform: A -> IO<B>): IO<B> =
                         IO.new(() -> {
                             let next: () -> B = transform(this());
                             return next();

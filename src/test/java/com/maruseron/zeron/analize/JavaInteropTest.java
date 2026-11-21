@@ -355,7 +355,7 @@ public final class JavaInteropTest {
                 }
                 public external fn boundChecked(): java.io.IOException?
                     throws java.io.IOException -> FileFailure::fromIOException;
-                fn throwConstructor(): CheckedHost raises FileFailure = CheckedHost.new(true);
+                fn throwConstructor(): CheckedHost performs FileFailure = CheckedHost.new(true);
                 fn catchConstructor(): Any =
                     handle (CheckedHost.new(true)) with {
                         case FileFailure.cause(_) -> "mapped constructor";
@@ -368,13 +368,13 @@ public final class JavaInteropTest {
                     handle (host.checked()) with {
                         case FileFailure.cause(_) -> "mapped";
                     };
-                fn propagateBroad(host: CheckedExceptionHost): String? raises BroadFailure =
+                fn propagateBroad(host: CheckedExceptionHost): String? performs BroadFailure =
                     host.broad();
-                fn catchMostSpecific(host: CheckedExceptionHost): String? raises BroadFailure =
+                fn catchMostSpecific(host: CheckedExceptionHost): String? performs BroadFailure =
                     handle (host.overlapping()) with {
                         case FileFailure.cause(_) -> "specific";
                     };
-                fn propagateError(host: CheckedExceptionHost): String? raises ThrowableFailure =
+                fn propagateError(host: CheckedExceptionHost): String? performs ThrowableFailure =
                     host.error();
                 """.formatted(packageName));
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-checked-exceptions-");
@@ -588,8 +588,8 @@ public final class JavaInteropTest {
                     public property cause: String;
                     public constructor fromCause(cause: String) = Boom.new(cause);
                 }
-                fn boom(): Int raises Boom = raise Boom.fromCause("boom");
-                fn call(): Int raises Boom = unsafe boom();
+                fn boom(): Int performs Boom = perform Boom.fromCause("boom");
+                fn call(): Int performs Boom = unsafe boom();
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(List.of(source),
                 packageName + ".UnsafeEffect", packageName);

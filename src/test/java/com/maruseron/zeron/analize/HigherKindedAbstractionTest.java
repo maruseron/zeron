@@ -73,10 +73,10 @@ public final class HigherKindedAbstractionTest {
                 contract Mapper<F<_>> {
                     map<A, B>(this: F<A>, transform: (A) -> B): F<B>;
                 }
-                class Box<T: mut> is Mapper<Box<_>> {
+                class Box<T admits mutable> is Mapper<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     delegating implementation Mapper<Box<_>> {}
                 }
@@ -108,16 +108,16 @@ public final class HigherKindedAbstractionTest {
         final var contractName = "DelegatingMapper" + suffix;
         final var source = """
                 contract %1$s<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
-                class %2$s<T: nullable + mut> is %1$s<%2$s<_>> {
+                class %2$s<T admits nullable + mutable> is %1$s<%2$s<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): %2$s<R> =
+                    public map<R admits mutable>(transform: (T) -> R): %2$s<R> =
                         %2$s<R>.new(transform(this.value));
                     delegating implementation %1$s<%2$s<_>> {}
                 }
-                fn mapValue<F<_>: %1$s<F>, A: mut, B: mut>(
+                fn mapValue<F<_>: %1$s<F>, A admits mutable, B admits mutable>(
                     source: F<A>, transform: (A) -> B
                 ): F<B> = source.map(transform);
                 fn run(): Int =
@@ -144,15 +144,15 @@ public final class HigherKindedAbstractionTest {
     public void delegatingClassImplementationAcceptsCompatibleInstanceMethodSignatures() throws Exception {
         final var source = """
                 contract Replacer<F<_>> {
-                    replace<A: mut>(this: F<A>, value: A): F<A>;
+                    replace<A admits mutable>(this: F<A>, value: A): F<A>;
                 }
-                class Box<T: mut> is Replacer<Box<_>> {
+                class Box<T admits mutable> is Replacer<Box<_>> {
                     public property value: T;
                     public constructor new;
                     public replace(value: Any): Box<T> = this;
                     delegating implementation Replacer<Box<_>> {}
                 }
-                fn replaceValue<F<_>: Replacer<F>, A: mut>(source: F<A>, value: A): F<A> =
+                fn replaceValue<F<_>: Replacer<F>, A admits mutable>(source: F<A>, value: A): F<A> =
                     source.replace(value);
                 fn run(): Int =
                     replaceValue<Box<_>, Int>(Box<Int>.new(42), 0).value;
@@ -178,22 +178,22 @@ public final class HigherKindedAbstractionTest {
     public void delegatingClassImplementationForwardsInheritedHktMethods() throws Exception {
         final var source = """
                 contract Mapper<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Mapper<F> {
-                    pure<A: mut>(value: A): F<A>;
+                    pure<A admits mutable>(value: A): F<A>;
                 }
-                class Box<T: mut> is Mapper<Box<_>>, Applicative<Box<_>> {
+                class Box<T admits mutable> is Mapper<Box<_>>, Applicative<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     delegating implementation Mapper<Box<_>> {}
                     delegating implementation Applicative<Box<_>> {
-                        fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                        fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
                     }
                 }
-                fn mapValue<F<_>: Mapper<F>, A: mut, B: mut>(
+                fn mapValue<F<_>: Mapper<F>, A admits mutable, B admits mutable>(
                     source: F<A>, transform: (A) -> B
                 ): F<B> = source.map(transform);
                 fn run(): Int =
@@ -220,34 +220,34 @@ public final class HigherKindedAbstractionTest {
     public void delegatingClassImplementationsRequirePerContractBlocks() throws Exception {
         final var source = """
                 contract Mapper<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Mapper<F> {
-                    pure<A: mut>(value: A): F<A>;
-                    ap<A: mut, B: mut>(this: F<(A) -> B>, values: F<A>): F<B>;
+                    pure<A admits mutable>(value: A): F<A>;
+                    ap<A admits mutable, B admits mutable>(this: F<(A) -> B>, values: F<A>): F<B>;
                 }
                 contract Monad<F<_>> requires Applicative<F> {
-                    flatMap<A: mut, B: mut>(this: F<A>, transform: (A) -> F<B>): F<B>;
+                    flatMap<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> F<B>): F<B>;
                 }
                 contract Foldable<F<_>> requires Mapper<F> {
-                    foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
+                    foldLeft<A admits mutable, B admits mutable>(this: F<A>, initial: B, combine: (B, A) -> B): B;
                 }
-                class Box<T: nullable + mut> is Mapper<Box<_>>, Applicative<Box<_>>,
+                class Box<T admits nullable + mutable> is Mapper<Box<_>>, Applicative<Box<_>>,
                         Monad<Box<_>>, Foldable<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
-                    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R =
+                    public foldLeft<R admits mutable>(initial: R, combine: (R, T) -> R): R =
                         combine(initial, this.value);
                     delegating implementation Mapper<Box<_>> {}
                     delegating implementation Applicative<Box<_>> {
-                        fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
-                        fn ap<A: mut, B: mut>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
+                        fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
+                        fn ap<A admits mutable, B admits mutable>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
                             Box<B>.new(this.value(values.value));
                     }
                     delegating implementation Monad<Box<_>> {
-                        fn flatMap<A: mut, B: mut>(
+                        fn flatMap<A admits mutable, B admits mutable>(
                             this: Box<A>, transform: (A) -> Box<B>
                         ): Box<B> = transform(this.value);
                     }
@@ -276,33 +276,33 @@ public final class HigherKindedAbstractionTest {
     public void higherKindedBoundCanPassAnExplicitConstructorPattern() throws Exception {
         final var source = """
                 contract Mapper<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Mapper<F> {
-                    pure<A: mut>(value: A): F<A>;
-                    ap<A: mut, B: mut>(this: F<(A) -> B>, values: F<A>): F<B>;
+                    pure<A admits mutable>(value: A): F<A>;
+                    ap<A admits mutable, B admits mutable>(this: F<(A) -> B>, values: F<A>): F<B>;
                 }
                 contract Monad<F<_>> requires Applicative<F> {
-                    flatMap<A: mut, B: mut>(this: F<A>, transform: (A) -> F<B>): F<B>;
+                    flatMap<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> F<B>): F<B>;
                 }
-                class Box<T: mut> is Mapper<Box<_>>, Applicative<Box<_>>, Monad<Box<_>> {
+                class Box<T admits mutable> is Mapper<Box<_>>, Applicative<Box<_>>, Monad<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     delegating implementation Mapper<Box<_>> {}
                     delegating implementation Applicative<Box<_>> {
-                        fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
-                        fn ap<A: mut, B: mut>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
+                        fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
+                        fn ap<A admits mutable, B admits mutable>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
                             Box<B>.new(this.value(values.value));
                     }
                     delegating implementation Monad<Box<_>> {
-                        fn flatMap<A: mut, B: mut>(
+                        fn flatMap<A admits mutable, B admits mutable>(
                             this: Box<A>, transform: (A) -> Box<B>
                         ): Box<B> = transform(this.value);
                     }
                 }
-                fn pureValue<M<_>: Monad<M>, A: mut>(value: A): M<A> = M.pure(value);
+                fn pureValue<M<_>: Monad<M>, A admits mutable>(value: A): M<A> = M.pure(value);
                 fn run(): Int = pureValue<Box<_>, Int>(42).value;
                 """;
         final var program = CompilationService.forCompilationUnits(
@@ -330,9 +330,9 @@ public final class HigherKindedAbstractionTest {
         final var contractName = "DelegatingAppender" + suffix;
         final var source = """
                 contract %1$s<F<_>> {
-                    mut add<A: mut>(this: F<A>, value: A): Boolean;
+                    mut add<A admits mutable>(this: F<A>, value: A): Boolean;
                 }
-                class %2$s<T: mut> is %1$s<%2$s<_>> {
+                class %2$s<T admits mutable> is %1$s<%2$s<_>> {
                     public mut property count: Int = 0;
                     public constructor new;
                     public mut add(value: T): Boolean {
@@ -341,7 +341,7 @@ public final class HigherKindedAbstractionTest {
                     }
                     delegating implementation %1$s<%2$s<_>> {}
                 }
-                fn append<F<_>: %1$s<F>, A: mut>(values: &F<A>, value: A): Boolean =
+                fn append<F<_>: %1$s<F>, A admits mutable>(values: &F<A>, value: A): Boolean =
                     values.add(value);
                 fn run(): Int {
                     let bag = %2$s<Int>.new();
@@ -370,17 +370,17 @@ public final class HigherKindedAbstractionTest {
     public void explicitHktImplementationMethodsWinAndReceiverlessOperationsStayExplicit() {
         final var result = new ResolutionService().resolveWithDiagnostics(parse("""
                 contract Mapper<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
-                    pure<A: mut>(value: A): F<A>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
+                    pure<A admits mutable>(value: A): F<A>;
                 }
-                class Box<T: mut> is Mapper<Box<_>> {
+                class Box<T admits mutable> is Mapper<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                    public map<R admits mutable>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     public pure(value: T): Box<T> = Box<T>.new(value);
                     delegating implementation Mapper<Box<_>> {
-                        fn map<A: mut, B: mut>(this: Box<A>, transform: (A) -> B): String = "invalid";
+                        fn map<A admits mutable, B admits mutable>(this: Box<A>, transform: (A) -> B): String = "invalid";
                     }
                 }
                 """));
@@ -480,7 +480,7 @@ public final class HigherKindedAbstractionTest {
         final var source = """
                 import zeron.collections.CollectionBuilder;
                 import zeron.collections.Sink;
-                class Bag<T: mut> is Sink<T>, CollectionBuilder<Bag<_>> {
+                class Bag<T admits mutable> is Sink<T>, CollectionBuilder<Bag<_>> {
                     public mut property count: Int = 0;
                     public constructor empty() = Bag<T>.new();
                     public mut add(value: T): Boolean {
@@ -489,21 +489,21 @@ public final class HigherKindedAbstractionTest {
                     }
                     public read(): Int = this.count;
                     implementation CollectionBuilder<Bag<_>> {
-                        fn empty<A: mut>(): &Bag<A> = Bag<A>.empty();
-                        fn add<A: mut>(this: &Bag<A>, value: A): Boolean {
+                        fn empty<A admits mutable>(): &Bag<A> = Bag<A>.empty();
+                        fn add<A admits mutable>(this: &Bag<A>, value: A): Boolean {
                             this.add(value);
                             this.add(value);
                             return true;
                         }
                     }
                 }
-                fn empty<C<_>: CollectionBuilder<C>, A: mut>(): &C<A> = C.empty<A>();
-                fn append<C<_>: CollectionBuilder<C>, A: mut>(values: &C<A>, value: A): Boolean =
+                fn empty<C<_>: CollectionBuilder<C>, A admits mutable>(): &C<A> = C.empty<A>();
+                fn append<C<_>: CollectionBuilder<C>, A admits mutable>(values: &C<A>, value: A): Boolean =
                     values.add(value);
-                fn appendWithBoth<A: mut, C<_>: Sink<A> + CollectionBuilder<C>>(
+                fn appendWithBoth<A admits mutable, C<_>: Sink<A> + CollectionBuilder<C>>(
                     values: &C<A>, value: A
                 ): Boolean = values.add(value);
-                fn appendStatically<A: mut, C<_>: Sink<A> + CollectionBuilder<C>>(
+                fn appendStatically<A admits mutable, C<_>: Sink<A> + CollectionBuilder<C>>(
                     values: &C<A>, value: A
                 ): Boolean = C.add(values, value);
                 fn run(): Int {
@@ -531,7 +531,7 @@ public final class HigherKindedAbstractionTest {
 
         final var immutableCall = """
                 import zeron.collections.CollectionBuilder;
-                fn append<C<_>: CollectionBuilder<C>, A: mut>(values: C<A>, value: A): Boolean =
+                fn append<C<_>: CollectionBuilder<C>, A admits mutable>(values: C<A>, value: A): Boolean =
                     values.add(value);
                 """;
         assertThrows(ResolutionError.class,
@@ -648,27 +648,27 @@ public final class HigherKindedAbstractionTest {
     public void childWitnessUsesAncestorEvidenceWithoutProvidingIt() throws Exception {
         final var source = """
                 contract Functor<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Functor<F> {
-                    pure<A: mut>(value: A): F<A>;
+                    pure<A admits mutable>(value: A): F<A>;
                 }
-                class Box<T: mut> {
+                class Box<T admits mutable> {
                     public property value: T;
                     public constructor new;
                 }
                 witness BoxFunctor: Functor<Box<_>> for Box<_> {
-                    fn map<A: mut, B: mut>(
+                    fn map<A admits mutable, B admits mutable>(
                         this: Box<A>, transform: (A) -> B
                     ): Box<B> = Box<B>.new(transform(this.value));
                 }
                 witness BoxApplicative: Applicative<Box<_>> for Box<_> {
-                    fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                    fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
                 }
-                fn mapValue<F<_>: Applicative<F>, A: mut, B: mut>(
+                fn mapValue<F<_>: Applicative<F>, A admits mutable, B admits mutable>(
                     source: F<A>, transform: (A) -> B
                 ): F<B> = F.map(source, transform);
-                fn pureValue<F<_>: Applicative<F>, A: mut>(value: A): F<A> = F.pure(value);
+                fn pureValue<F<_>: Applicative<F>, A admits mutable>(value: A): F<A> = F.pure(value);
                 fn run(): Int =
                     mapValue<Box<_>, Int, Int>(Box<Int>.new(40), value -> value + 1).value
                         + pureValue<Box<_>, Int>(1).value;
@@ -693,20 +693,20 @@ public final class HigherKindedAbstractionTest {
     public void childWitnessCannotRedeclareAnInheritedOperation() {
         final var source = """
                 contract Functor<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Functor<F> {
-                    pure<A: mut>(value: A): F<A>;
+                    pure<A admits mutable>(value: A): F<A>;
                 }
-                class Box<T: mut> {
+                class Box<T admits mutable> {
                     public property value: T;
                     public constructor new;
                 }
                 witness BoxApplicative: Applicative<Box<_>> for Box<_> {
-                    fn map<A: mut, B: mut>(
+                    fn map<A admits mutable, B admits mutable>(
                         this: Box<A>, transform: (A) -> B
                     ): Box<B> = Box<B>.new(transform(this.value));
-                    fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                    fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
                 }
                 """;
 
@@ -720,22 +720,22 @@ public final class HigherKindedAbstractionTest {
     public void receiverBasedHktDefaultUsesDeclaredOperations() throws Exception {
         final var source = """
                 contract Foldable<F<_>> {
-                    foldLeft<A: mut, B: mut>(
+                    foldLeft<A admits mutable, B admits mutable>(
                         this: F<A>, initial: B, combine: (B, A) -> B
                     ): B;
-                    default count<A: mut>(this: F<A>): Int =
+                    default count<A admits mutable>(this: F<A>): Int =
                         this.foldLeft(0, (count, _) -> count + 1);
                 }
-                class Box<T: mut> is Foldable<Box<_>> {
+                class Box<T admits mutable> is Foldable<Box<_>> {
                     public property value: T;
                     public constructor new;
                     implementation Foldable<Box<_>> {
-                        fn foldLeft<A: mut, B: mut>(
+                        fn foldLeft<A admits mutable, B admits mutable>(
                             this: Box<A>, initial: B, combine: (B, A) -> B
                         ): B = combine(initial, this.value);
                     }
                 }
-                fn countItems<F<_>: Foldable<F>, A: mut>(source: F<A>): Int =
+                fn countItems<F<_>: Foldable<F>, A admits mutable>(source: F<A>): Int =
                     source.count();
                 fn run(): Int = countItems<Box<_>, Int>(Box<Int>.new(42));
                 """;
@@ -759,17 +759,17 @@ public final class HigherKindedAbstractionTest {
     public void receiverlessHktDefaultUsesContractEvidence() throws Exception {
         final var source = """
                 contract Factory<F<_>> {
-                    pure<A: mut>(value: A): F<A>;
-                    default create<A: mut>(value: A): F<A> = F.pure(value);
+                    pure<A admits mutable>(value: A): F<A>;
+                    default create<A admits mutable>(value: A): F<A> = F.pure(value);
                 }
-                class Box<T: mut> is Factory<Box<_>> {
+                class Box<T admits mutable> is Factory<Box<_>> {
                     public property value: T;
                     public constructor new;
                     implementation Factory<Box<_>> {
-                        fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                        fn pure<A admits mutable>(value: A): Box<A> = Box<A>.new(value);
                     }
                 }
-                fn create<F<_>: Factory<F>, A: mut>(value: A): F<A> = F.create(value);
+                fn create<F<_>: Factory<F>, A admits mutable>(value: A): F<A> = F.create(value);
                 fn run(): Int = create<Box<_>, Int>(42).value;
                 """;
         final var program = new CompilationService(parse(source), "HktDefaultCreateMain");
@@ -792,32 +792,32 @@ public final class HigherKindedAbstractionTest {
     public void hktDefaultCanComposeRequiredContractOperations() throws Exception {
         final var source = """
                 contract Functor<F<_>> {
-                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                    map<A admits mutable, B admits mutable>(this: F<A>, transform: (A) -> B): F<B>;
                 }
                 contract Applicative<F<_>> requires Functor<F> {
-                    ap<A: mut, B: mut>(this: F<A>, transform: F<(A) -> B>): F<B>;
-                    default map2<A: mut, B: mut, C: mut>(
+                    ap<A admits mutable, B admits mutable>(this: F<A>, transform: F<(A) -> B>): F<B>;
+                    default map2<A admits mutable, B admits mutable, C admits mutable>(
                         first: F<A>, second: F<B>, combine: (A, B) -> C
                     ): F<C> = first.ap(second.map((b) -> applySecond(combine, b)));
                 }
-                fn applySecond<A: mut, B: mut, C: mut>(
+                fn applySecond<A admits mutable, B admits mutable, C admits mutable>(
                     combine: (A, B) -> C, second: B
                 ): (A) -> C = first -> combine(first, second);
-                class Box<T: mut> is Functor<Box<_>>, Applicative<Box<_>> {
+                class Box<T admits mutable> is Functor<Box<_>>, Applicative<Box<_>> {
                     public property value: T;
                     public constructor new;
                     implementation Functor<Box<_>> {
-                        fn map<A: mut, B: mut>(
+                        fn map<A admits mutable, B admits mutable>(
                             this: Box<A>, transform: (A) -> B
                         ): Box<B> = Box<B>.new(transform(this.value));
                     }
                     implementation Applicative<Box<_>> {
-                        fn ap<A: mut, B: mut>(
+                        fn ap<A admits mutable, B admits mutable>(
                             this: Box<A>, transform: Box<(A) -> B>
                         ): Box<B> = Box<B>.new(transform.value(this.value));
                     }
                 }
-                fn mapTwo<F<_>: Applicative<F>, A: mut, B: mut, C: mut>(
+                fn mapTwo<F<_>: Applicative<F>, A admits mutable, B admits mutable, C admits mutable>(
                     first: F<A>, second: F<B>, combine: (A, B) -> C
                 ): F<C> = F.map2(first, second, combine);
                 fn run(): Int =
@@ -845,13 +845,13 @@ public final class HigherKindedAbstractionTest {
     public void unrelatedInheritedHktDefaultsAreLegalWithoutUse() {
         final var source = """
                 contract First<F<_>> {
-                    default identity<A: mut>(value: F<A>): F<A> = value;
+                    default identity<A admits mutable>(value: F<A>): F<A> = value;
                 }
                 contract Second<F<_>> {
-                    default identity<A: mut>(value: F<A>): F<A> = value;
+                    default identity<A admits mutable>(value: F<A>): F<A> = value;
                 }
                 contract Combined<F<_>> requires First<F> + Second<F> {}
-                class Box<T: mut> is Combined<Box<_>> {
+                class Box<T admits mutable> is Combined<Box<_>> {
                     implementation Combined<Box<_>> {}
                 }
                 """;

@@ -4,4 +4,4 @@ package zeron.lang;
 ///
 /// `Pair` is an ordinary product type: its components are named, compared structurally, and
 /// available through those names.
-public type Pair<out A: nullable + mut, out B: nullable + mut> = (fst: A, snd: B);
+public type Pair<out A admits nullable + mutable, out B admits nullable + mutable> = (fst: A, snd: B);

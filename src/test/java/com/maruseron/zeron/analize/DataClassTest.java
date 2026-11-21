@@ -38,8 +38,8 @@ public final class DataClassTest {
                     }
                 }
                 fn sum(x: Int, y: Int): Int = x + y;
-                fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left == right;
-                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
+                fn same<T: Eq<T> admits mutable>(left: T, right: T): Boolean = left == right;
+                fn hash<T: Hashable<T> admits mutable>(value: T): Long = value.hash();
                 fn components(): Int = %s.new(3, 4).squaredDistance();
                 fn auxiliaryInitializer(): Int = %s.new(3, 4).getTotal();
                 fn equal(): Boolean = same(%s.new(3, 4), %s.new(3, 4));
@@ -177,11 +177,11 @@ public final class DataClassTest {
         final var effectful = parse("""
                 effect %s {}
                 data class %s(value: Int) {
-                    %s raises %s {
-                        raise %s.new();
+                    %s performs %s {
+                        perform %s.new();
                     }
                 }
-                fn create(): %s raises %s = %s.new(1);
+                fn create(): %s performs %s = %s.new(1);
                 fn handled(): Any = handle (%s.new(1)) with {
                     case %s -> true;
                 };
@@ -212,7 +212,7 @@ public final class DataClassTest {
         final var unhandled = parse("""
                 effect %s {}
                 data class %s(value: Int) {
-                    %s raises %s {}
+                    %s performs %s {}
                 }
                 fn create(): %s = %s.new(1);
                 """.formatted(effectName, className, className, effectName, className, className));
@@ -231,7 +231,7 @@ public final class DataClassTest {
                     package %s;
                     public effect InitializationFailure {}
                     public data class Source(value: Int) {
-                        Source raises InitializationFailure {}
+                        Source performs InitializationFailure {}
                     }
                     """.formatted(libraryPackage));
             final var libraryCompiler = CompilationService.forCompilationUnits(
@@ -254,8 +254,8 @@ public final class DataClassTest {
                     import %s.Source;
                     import %s.InitializationFailure;
                     import zeron.lang.Eq;
-                    fn create(): Source raises InitializationFailure = Source.new(1);
-                    fn equal(): Boolean raises InitializationFailure =
+                    fn create(): Source performs InitializationFailure = Source.new(1);
+                    fn equal(): Boolean performs InitializationFailure =
                         Source.new(1) == Source.new(1);
                     """.formatted(libraryPackage, libraryPackage));
             final var clientCompiler = CompilationService.forCompilationUnits(
@@ -332,7 +332,7 @@ public final class DataClassTest {
     public void genericDataClassPatternsInferTypeArgumentsAndIgnoreAuxiliaryProperties()
             throws Exception {
         final var source = """
-                data class Box<A: mut>(value: A) {
+                data class Box<A admits mutable>(value: A) {
                     public property doubled: A {
                         get = value;
                     }

@@ -65,17 +65,17 @@ an explicit implementation to resolve the conflict. Defaults are compiled as sta
 contract artifact and remain available to separately compiled clients. See
 [ZEP-0078](../zeps/ZEP-0078.md).
 
-Generic type parameters admit non-null, read-only arguments by default. `T: nullable` explicitly
-permits nullable arguments, and `T: mut` permits mutable-reference arguments without granting
+Generic type parameters admit non-null, read-only arguments by default. `T admits nullable` explicitly
+permits nullable arguments, and `T admits mutable` permits mutable-reference arguments without granting
 mutation operations to the generic body. `nullable` and `mut` may be combined; `effect` is exclusive
-with both and restricts a parameter to effect types for exact propagation through `raise` and
-`raises`. A mutable view of an effect value is normalized to its nominal effect identity rather than
-propagated as part of the effect type. Generic raise sites perform a runtime marker check because
+with both and restricts a parameter to effect types for exact propagation through `perform` and
+`performs`. A mutable view of an effect value is normalized to its nominal effect identity rather than
+propagated as part of the effect type. Generic perform sites perform a runtime marker check because
 type arguments erase on the JVM.
 Mutable admissibility is checked at each generic argument boundary; nested generic applications
 enforce their own parameter policies.
 
-Inside a generic body a value of type `T: nullable` is possibly null and opaque, because the
+Inside a generic body a value of type `T admits nullable` is possibly null and opaque, because the
 declaration admits arguments such as `String?` and substitution is erased. Member access,
 contract-bound operations, operators, iteration, indexing, and passing it to a parameter whose type
 does not admit `null` (including `Any`) require a non-null region established by a `null` check,
@@ -96,7 +96,7 @@ nullability or capability metadata.
 | Generic classes and contracts | Implemented. Type arguments are substituted through members, constructors, conformance, and library metadata. Constructor calls can use argument and expected-type constraints. | No implicit raw view. Inference is bounded and does not compute an arbitrary common supertype. Standalone class references and later statements do not provide constraints. |
 | Declaration-site variance | Implemented for checked covariance using `out` on classes, contracts, sums, and products; unannotated parameters remain invariant. Unsafe positions are rejected. | Declaration-site contravariance is not part of the implemented model. Arrays, mutable references, writable properties, mutable fields, and generic effects retain their documented invariance rules; use-site projections over ADT applications are rejected. |
 | Use-site projections | Implemented for `out T` and `in T` generic applications, including supported imported Java generic signatures and wildcard mappings. | Capture is limited to the supported member-resolution model. Raw Java types, generic arrays, and unsupported Java signature forms remain unsupported. |
-| Contract bounds and witnesses | Applied contract bounds, multiple bounds in supported declarations, HKT constructor-family evidence, and non-nominal witnesses are implemented. | Mutating bound calls require a mutable receiver view and admissible arguments; `T: mut` admits mutable-reference arguments but grants no operations. Generic functions still require explicit `Numeric<T>`, `Fractional<T>`, or `Comparable<T>` bounds; ZEP-0133, shipped in `0.8.0`, infers numeric or comparison bounds for eligible typeless `let`-bound lambdas. The witness solver rejects overlaps it can identify; complete generic-pattern overlap analysis remains follow-up hardening. |
+| Contract bounds and witnesses | Applied contract bounds, multiple bounds in supported declarations, HKT constructor-family evidence, and non-nominal witnesses are implemented. | Mutating bound calls require a mutable receiver view and admissible arguments; `T admits mutable` admits mutable-reference arguments but grants no operations. Generic functions still require explicit `Numeric<T>`, `Fractional<T>`, or `Comparable<T>` bounds; ZEP-0133, shipped in `0.8.0`, infers numeric or comparison bounds for eligible typeless `let`-bound lambdas. The witness solver rejects overlaps it can identify; complete generic-pattern overlap analysis remains follow-up hardening. |
 | Higher-kinded abstractions | The first-order constructor kind `F<_>`, constructor bounds, associated evidence, and receiver-based or receiverless non-static default operations are implemented. Default bodies can use operations from their contract's transitive `requires` graph and are available across compiled-library boundaries. | Static HKT defaults, unrestricted higher-kinded polymorphism, and type-level computation are not supported. Unrelated inherited defaults need an explicit implementation to resolve conflicts. |
 | Generic function values | Generic named functions can be explicitly specialized or specialized from a fully constraining expected function type. A constrained rank-1 scheme is implemented for supported immutable `let` lambda initializers. ZEP-0109 implements rank-2 polymorphic function types, generic lambdas, alpha-equivalent assignment, eta-expansion of generic named functions, per-application instantiation, the hidden-slot adapter ABI for bounded and `reified` binders, and separate-compilation preservation. | Mutable polymorphic bindings, generic SAM implementations, nested schemes, rank-3 values, explicit `forall`, partial function specialization, and arbitrary lambda-valued expressions remain unsupported; effect-kinded binders and binder-dependent effect rows are deferred. |
 | Type inference | Bounded structural inference is implemented for functions, methods, constructors, arrays, function types, and supported variance/projection contexts. Conflicts and unresolved variables are diagnosed. | Inference is not a general-purpose constraint solver. Inference from result types alone and common-supertype inference are not general features. Exact variance/projection inference boundaries should be maintained by tests as the implementation evolves. |

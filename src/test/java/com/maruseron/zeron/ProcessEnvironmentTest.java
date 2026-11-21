@@ -29,7 +29,7 @@ public final class ProcessEnvironmentTest {
                 import zeron.io.println;
                 import zeron.process.exit;
                 import zeron.process.workingDirectory;
-                fn main(args: Array<String>): Unit raises IoFailure {
+                fn main(args: Array<String>): Unit performs IoFailure {
                     println(lookup(args[0]).getOrElse("<missing>"));
                     println(lookup(args[1]).getOrElse("<missing>"));
                     println(workingDirectory().toString());

@@ -5,15 +5,29 @@
 ### Compiler and language work
 
 - Implemented ZEP-0118 response-typed effects and tail-resumptive handlers. An effect may declare
-  `responds R`; `raise` then has type `R`, and an inline `handle` case may bind a resume token with
-  `case Ask<Int>, k -> k.resume(8);`. The handler answer returns directly to the raise site through
+  `responds R`; `perform` then has type `R`, and an inline `handle` case may bind a resume token
+  with `case Ask<Int>, k -> k.resume(8);`. The handler answer returns directly to the perform site
+  through
   a synchronous thread-local handler frame with no continuation capture, while effects without a
   response and cases without a token keep the existing abortive behavior. The standard library
   gains `Ask<T>`, `Yield<T>`, and `Log`; compiled-library API metadata stores response types under
   schema 17 and reads older indexes as abortive, and `STANDARD_LIBRARY_API_VERSION` is now 20.
   Stored or captured resume tokens, non-tail resumption, resuming cases in named or first-class
-  handler values, and generic or row-variable responding raises are rejected or remain unsupported;
-  general continuations are ZEP-0119.
+  handler values, and generic or row-variable responding performs are rejected or remain
+  unsupported; general continuations are ZEP-0119.
+- Implemented ZEP-0147 by replacing `raise` and `raises` with `perform` and `performs`. Effect
+  operations are now written `perform Effect.new(...)`, and callable signatures, function types,
+  handler types, and contracts use `performs`. There are no aliases: old spellings produce
+  targeted migration diagnostics, while a member named `raise` such as `IoFailure.raise(...)`
+  remains an ordinary constructor call. Runtime carriers, effect identity, and library-index
+  metadata are unchanged.
+- Implemented ZEP-0123 admissibility clauses and leading reification. Ordinary contract bounds
+  remain after `:`, while admissibility markers move to `admits`: `T: Render admits nullable`,
+  `T admits mutable`, and `E admits effect...`. Anonymous existentials accept the same split,
+  including `Box<reified _: Render admits nullable>` and marker-only `Box<: admits nullable>`.
+  `reified` is now a leading capability (`reified T`), and legacy marker spellings such as
+  `T: mut` or `T: nullable` produce migration diagnostics. Response constraints remain the
+  `Responds<R>` bound, and effect markers do not take response type arguments.
 
 ## [0.8.0] - 2026, 20 NOV
 

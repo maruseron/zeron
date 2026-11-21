@@ -73,7 +73,7 @@ preserved in the integer's mathematical value.
 When there is no expected numeric type, the existing defaults remain: integer literals default to
 `Int`, and fractional literals to `Float`. Values outside the default `Int` range or an explicitly
 expected `Int` or `Long` range are rejected at compile time. Conversions of already-existing
-`Integer` values use checked conversions and raise `ArithmeticException` if out of range. Conversion
+`Integer` values use checked conversions and perform `ArithmeticException` if out of range. Conversion
 from `Rational` to `Float` rounds to the nearest binary64 value, ties to even.
 
 The expected type must provide the relevant numeric evidence. Zeron does not silently widen

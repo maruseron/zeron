@@ -9,7 +9,7 @@ import zeron.lang.Pair;
 /// key updates the existing entry. Iteration yields one `Pair` per mapping, in order only when an
 /// implementation documents one. `K` is intentionally unbound: each implementation states its own
 /// key requirement.
-public contract Map<K, V: mut> requires Iterable<Pair<K, V>> {
+public contract Map<K, V admits mutable> requires Iterable<Pair<K, V>> {
     /// Whether the map holds an entry for `key`.
     containsKey(key: K): Boolean;
 

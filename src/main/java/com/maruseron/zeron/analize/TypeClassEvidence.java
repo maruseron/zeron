@@ -1240,7 +1240,7 @@ final class TypeClassEvidence {
         }
         final var effects = requiredType.raisedEffects().isEmpty()
                 ? ""
-                : " raises " + requiredType.raisedEffects().stream()
+                : " performs " + requiredType.raisedEffects().stream()
                         .map(TypeFormatter::format).collect(java.util.stream.Collectors.joining(", "));
         return (required.isStatic() ? "static " : "") + "fn " + required.name().lexeme()
                 + genericParameters + parameters.stream().collect(

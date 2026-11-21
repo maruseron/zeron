@@ -5,10 +5,10 @@ import zeron.control.Monad;
 import zeron.control.Semigroup;
 import zeron.control.Monoid;
 
-type List<T: mut> = Nil | Cons(head: T, tail: List<T>);
+type List<T admits mutable> = Nil | Cons(head: T, tail: List<T>);
 
 namespace List {
-    fn from<T: mut>(elements: T...): List<T> {
+    fn from<T admits mutable>(elements: T...): List<T> {
         let mut result: List<T> = List<T>.Nil();
         for (let element in elements) {
             let p = pure(element);
@@ -17,17 +17,17 @@ namespace List {
         return result;
     }
 
-    fn pure<A: mut>(head: A): List<A> = List.Cons(head, List.Nil());
+    fn pure<A admits mutable>(head: A): List<A> = List.Cons(head, List.Nil());
 }
 
-public extension<T: mut> List<List<T>> {
+public extension<T admits mutable> List<List<T>> {
     fn join(): List<T> = match (this) {
         case Cons(head, tail) -> head.combine(tail.join());
         case Nil() -> List<T>.Nil();
     };
 }
 
-witness<T: mut + Display> Display for List<T> {
+witness<T: Display admits mutable> Display for List<T> {
     fn toString(): String = match (this) {
         case Cons(head, tail) -> head.toString() + " " + tail.toString();
         case Nil() -> "";

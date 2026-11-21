@@ -35,7 +35,7 @@ public final class TestCommandTest {
                 import zeron.test.assertEquals;
 
                 @Test
-                public fn additionAddsOperands(): Unit raises TestFailure {
+                public fn additionAddsOperands(): Unit performs TestFailure {
                     assertEquals(4, add(2, 2));
                 }
 

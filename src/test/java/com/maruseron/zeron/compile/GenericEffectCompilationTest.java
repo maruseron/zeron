@@ -23,50 +23,50 @@ public final class GenericEffectCompilationTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-generic-effect-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public effect Failure<T: nullable> {
+                public effect Failure<T admits nullable> {
                     public property value: T;
                 }
-                fn handledInt(): Int = handle (raise Failure<Int>(42)) with {
+                fn handledInt(): Int = handle (perform Failure<Int>(42)) with {
                     case Failure<String> as failure -> 0;
                     case Failure<Int> as failure -> failure.value;
                 };
-                fn handledString(): Int = handle (raise Failure<String>("boom")) with {
+                fn handledString(): Int = handle (perform Failure<String>("boom")) with {
                     case Failure<Int>(_) -> -1;
                     case Failure<String> as failure -> failure.value.length();
                 };
-                fn caughtByEffect(): Int = handle (raise Failure<Int>(9)) with {
+                fn caughtByEffect(): Int = handle (perform Failure<Int>(9)) with {
                     case Effect -> 7;
                 };
-                fn mismatchedDescriptorFallsThrough(): Int = handle (raise Failure<Int>(9)) with {
+                fn mismatchedDescriptorFallsThrough(): Int = handle (perform Failure<Int>(9)) with {
                     case Failure<String> -> -1;
                     case Effect -> 7;
                 };
-                fn nullableIdentity(): Int = handle (raise Failure<Int?>(null)) with {
+                fn nullableIdentity(): Int = handle (perform Failure<Int?>(null)) with {
                     case Failure<Int> as failure -> -1;
                     case Failure<Int?> as failure -> failure.value ?? 5;
                 };
-                fn nestedIdentity(): Int = handle (raise Failure<Array<Int>>([1, 2, 3])) with {
+                fn nestedIdentity(): Int = handle (perform Failure<Array<Int>>([1, 2, 3])) with {
                     case Failure<Array<Int>> as failure -> failure.value.length;
                 };
-                fn orAlternative(): Int = handle (raise Failure<Int>(11)) with {
+                fn orAlternative(): Int = handle (perform Failure<Int>(11)) with {
                     case Failure<Int> | Failure<Int> as failure -> failure.value;
                 };
-                fn positionalPayload(): Int = handle (raise Failure<Int>(19)) with {
+                fn positionalPayload(): Int = handle (perform Failure<Int>(19)) with {
                     case Failure<Int>(value) -> value;
                 };
-                fn raiseInto<E: effect>(raised: E): Int raises E = raise raised;
+                fn raiseInto<E admits effect>(raised: E): Int performs E = perform raised;
                 fn throughEffectVariable(): Int = handle (raiseInto(Failure<Int>(13))) with {
                     case Failure<Int> as failure -> failure.value;
                 };
-                public effect Boxed<T: nullable> {
+                public effect Boxed<T admits nullable> {
                     public property value: T;
                     public constructor of(value: T) = Boxed<T>.new(value);
                 }
-                fn namedConstructorForwarding(): Int = handle (raise Boxed<Int>.of(17)) with {
+                fn namedConstructorForwarding(): Int = handle (perform Boxed<Int>.of(17)) with {
                     case Boxed<Int> as boxed -> boxed.value;
                 };
                 public effect Ping<T> {}
-                fn statelessGeneric(): Int = handle (raise Ping<Int>()) with {
+                fn statelessGeneric(): Int = handle (perform Ping<Int>()) with {
                     case Ping<Int> -> 23;
                 };
                 """.formatted(packageName));
@@ -104,7 +104,7 @@ public final class GenericEffectCompilationTest {
                 effect Failure<T> {
                     public property value: T;
                 }
-                fn bad<T>(): Unit raises Failure<T> = raise Failure<T>(value);
+                fn bad<T>(): Unit performs Failure<T> = perform Failure<T>(value);
                 """);
         final var compiler = CompilationService.forCompilationUnits(List.of(unit),
                 "bad.Main", "bad", List.of(), true, List.of(),
@@ -123,10 +123,10 @@ public final class GenericEffectCompilationTest {
         final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-generic-client-");
         final var libraryUnit = parse("Library.zn", """
                 package %s;
-                public effect Failure<T: nullable> {
+                public effect Failure<T admits nullable> {
                     public property value: T;
                 }
-                public fn fail(): Int raises Failure<Int> = raise Failure<Int>(21);
+                public fn fail(): Int performs Failure<Int> = perform Failure<Int>(21);
                 """.formatted(libraryPackage));
         try {
             final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),

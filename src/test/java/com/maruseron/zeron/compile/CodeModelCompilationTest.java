@@ -57,7 +57,7 @@ public final class CodeModelCompilationTest {
                 public property grade: Char { get = gradeValue; }
             }
 
-            public class Box<T: nullable + mut> {
+            public class Box<T admits nullable + mutable> {
                 public constructor new;
                 public property value: T;
             }

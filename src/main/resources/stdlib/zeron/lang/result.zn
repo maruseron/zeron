@@ -7,7 +7,8 @@ import zeron.control.Functor;
 import zeron.control.Applicative;
 import zeron.control.Monad;
 
-// fn applyResultFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
+// fn applyResultFunction<A admits mutable, B admits mutable>(
+//     transform: (A) -> B, value: A): B = transform(value);
 
 /// The outcome of an operation that can fail.
 ///
@@ -19,21 +20,21 @@ import zeron.control.Monad;
 ///
 /// Both type parameters admit nullable arguments, as `Option`'s does, so a result may carry
 /// `T?` or an optional error without an intervening wrapper.
-public type Result<out T: nullable + mut, out E: nullable + mut> =
+public type Result<out T admits nullable + mutable, out E admits nullable + mutable> =
       Ok(value: T)
     | Err(error: E);
 
 /// Constructors of `Result` that leave the other type argument to the caller.
 namespace Result {
     /// Wraps `value` in a successful result.
-    public fn ok<T: mut, E: mut>(value: T): Result<T, E> = Result<T, E>.Ok(value);
+    public fn ok<T admits mutable, E admits mutable>(value: T): Result<T, E> = Result<T, E>.Ok(value);
 
     /// Wraps `error` in a failed result.
-    public fn err<T: mut, E: mut>(error: E): Result<T, E> = Result<T, E>.Err(error);
+    public fn err<T admits mutable, E admits mutable>(error: E): Result<T, E> = Result<T, E>.Err(error);
 }
 
 /// Operations of `Result`.
-public extension<T: mut, E: mut> Result<T, E> {
+public extension<T admits mutable, E admits mutable> Result<T, E> {
     /// Whether this result is successful.
     public fn isOk(): Boolean =
         match (this) {
@@ -49,39 +50,39 @@ public extension<T: mut, E: mut> Result<T, E> {
         };
 
     /// Reduces this result to a single value by choosing the matching branch.
-    public fn fold<R: mut>(ifOk: (T) -> R, ifErr: (E) -> R): R =
+    public fn fold<R admits mutable>(ifOk: (T) -> R, ifErr: (E) -> R): R =
         match (this) {
             case Result.Ok(value) -> ifOk(value);
             case Result.Err(error) -> ifErr(error);
         };
 
     /// Transforms the successful value, leaving a failure unchanged.
-    public fn map<U: mut>(transform: (T) -> U): Result<U, E> =
+    public fn map<U admits mutable>(transform: (T) -> U): Result<U, E> =
         match (this) {
             case Result.Ok(value) -> Result<U, E>.Ok(transform(value));
             case Result.Err(error) -> Result<U, E>.Err(error);
         };
 
     /// Transforms the failure value, leaving a success unchanged.
-    public fn mapError<F: mut>(transform: (E) -> F): Result<T, F> =
+    public fn mapError<F admits mutable>(transform: (E) -> F): Result<T, F> =
         match (this) {
             case Result.Ok(value) -> Result<T, F>.Ok(value);
             case Result.Err(error) -> Result<T, F>.Err(transform(error));
         };
 
     /// Chains another fallible operation on the successful value, leaving a failure unchanged.
-    public fn flatMap<U: mut>(transform: (T) -> Result<U, E>): Result<U, E> =
+    public fn flatMap<U admits mutable>(transform: (T) -> Result<U, E>): Result<U, E> =
         match (this) {
             case Result.Ok(value) -> transform(value);
             case Result.Err(error) -> Result<U, E>.Err(error);
         };
 }
 
-default witness<E: mut> Functor<Result<_, E>> for Result<_, E> {
+default witness<E admits mutable> Functor<Result<_, E>> for Result<_, E> {
     fn map<A, B>(this: Result<A, E>, transform: (A) -> B): Result<B, E> = this.map(transform);
 }
 
-default witness<E: mut> Applicative<Result<_, E>> for Result<_, E> {
+default witness<E admits mutable> Applicative<Result<_, E>> for Result<_, E> {
     fn pure<A>(value: A): Result<A, E> = Result<A, E>.Ok(value);
 
     fn ap<A, B>(this: Result<A, E>, function: Result<(A) -> B, E>): Result<B, E> =
@@ -94,12 +95,12 @@ default witness<E: mut> Applicative<Result<_, E>> for Result<_, E> {
         };
 }
 
-default witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
+default witness<E admits mutable> Monad<Result<_, E>> for Result<_, E> {
     fn flatMap<A, B>(this: Result<A, E>, transform: (A) -> Result<B, E>): Result<B, E> =
         this.flatMap(transform);
 }
 
-default witness<E: mut> Foldable<Result<_, E>> for Result<_, E> {
+default witness<E admits mutable> Foldable<Result<_, E>> for Result<_, E> {
     fn foldLeft<A, B>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B =
         match (this) {
             case Result.Ok(value) -> combine(initial, value);
@@ -111,12 +112,12 @@ default witness<E: mut> Foldable<Result<_, E>> for Result<_, E> {
 /// with status `1`.
 ///
 /// The failure report is written to standard error using `Display`.
-fn reportResultError<E: Display + nullable + mut>(error: E): Int {
+fn reportResultError<E: Display admits nullable + mutable>(error: E): Int {
     System.err?.println(error?.toString());
     return 1;
 }
 
-default witness<T: mut, E: Display + nullable + mut>
+default witness<T admits mutable, E: Display admits nullable + mutable>
 Main<Result<Unit, E>> for Result<T, E> {
     static fn run(value: Result<Unit, E>): Unit {
         let status = match (value) {

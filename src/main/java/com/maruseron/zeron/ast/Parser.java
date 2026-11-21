@@ -1543,6 +1543,17 @@ public final class Parser {
                 }
                 variance = TypeParameterDescriptor.Variance.COVARIANT;
             }
+            var reified = false;
+            if (check(IDENTIFIER) && peek().lexeme().equals("reified")
+                    && current + 1 < tokens.size()
+                    && tokens.get(current + 1).type() == IDENTIFIER) {
+                final var capability = advance();
+                reified = true;
+                if (variance != TypeParameterDescriptor.Variance.INVARIANT) {
+                    error(capability, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                            "A covariant type parameter cannot be reified.");
+                }
+            }
             final var parameter = consume(IDENTIFIER, "Expect type parameter name.");
             if (parameters.containsKey(parameter.lexeme())) {
                 error(parameter, DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT, "Duplicate type parameter.");
@@ -1568,89 +1579,196 @@ public final class Parser {
             var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), List.of(), higherKinded,
                     variance);
             parameters.put(parameter.lexeme(), descriptor);
-            var nullableArguments = false;
-            var effectKind = false;
-            var effectRowKind = false;
-            var mutableArguments = false;
-            var reified = false;
+            final var markers = new AdmissibilityMarkers();
+            markers.reified = reified;
+            var bounds = List.<TypeDescriptor>of();
             if (match(COLON)) {
                 final var enclosingTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(parameters);
-                final var bounds = new ArrayList<TypeDescriptor>();
-                do {
-                    if (check(IDENTIFIER) && peek().lexeme().equals("nullable")) {
-                        final var marker = advance();
-                        if (nullableArguments) {
-                            error(marker, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                                    "Duplicate 'nullable' type-parameter marker.");
-                        }
-                        nullableArguments = true;
-                    } else if (check(EFFECT)) {
-                        final var marker = advance();
-                        if (effectKind || effectRowKind) {
-                            error(marker, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                                    "Duplicate 'effect' type-parameter marker.");
-                        }
-                        effectRowKind = match(ELLIPSIS);
-                        effectKind = !effectRowKind;
-                    } else if (match(MUT)) {
-                        if (mutableArguments) {
-                            error(previous(), DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                                    "Duplicate 'mut' type-parameter marker.");
-                        }
-                        mutableArguments = true;
-                    } else if (check(IDENTIFIER) && peek().lexeme().equals("reified")) {
-                        final var marker = advance();
-                        if (reified) {
-                            error(marker, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                                    "Duplicate 'reified' type-parameter marker.");
-                        }
-                        reified = true;
-                    } else {
+                final var parsedBounds = new ArrayList<TypeDescriptor>();
+                if (!isAdmitsClause()) {
+                    do {
+                        final var legacyError = parseLegacyMarker(markers, parameter.lexeme(), false);
+                        if (legacyError != null) break;
                         if (!allowBounds) {
                             throw error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                                     "Type-parameter bounds are supported only on generic classes, contracts, "
                                             + "sum types, functions, methods, and witnesses.");
                         }
-                        bounds.add(collectType());
-                    }
-                } while (match(PLUS));
+                        parsedBounds.add(collectType());
+                    } while (match(PLUS) && !isAdmitsClause());
+                }
                 activeTypeParameters = enclosingTypeParameters;
-                if (higherKinded && (nullableArguments || effectKind || effectRowKind || mutableArguments)) {
-                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "Admissibility markers cannot be applied to higher-kinded type parameters.");
-                    nullableArguments = false;
-                    effectKind = false;
-                    effectRowKind = false;
-                    mutableArguments = false;
-                }
-                if ((effectKind || effectRowKind) && (nullableArguments || mutableArguments)) {
-                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "The 'effect' marker cannot be combined with 'nullable' or 'mut'.");
-                    nullableArguments = false;
-                    effectKind = false;
-                    effectRowKind = false;
-                    mutableArguments = false;
-                }
-                if (reified && higherKinded) {
-                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "A higher-kinded type parameter cannot be reified.");
-                    reified = false;
-                }
-                if (reified && effectRowKind) {
-                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "An effect-row type parameter cannot be reified.");
-                    reified = false;
-                }
-                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded,
-                        variance, nullableArguments, effectKind, effectRowKind, mutableArguments, reified);
-                parameters.put(parameter.lexeme(), descriptor);
+                bounds = List.copyOf(parsedBounds);
             }
+            parseAdmitsClause(markers, parameter.lexeme(), true,
+                    DiagnosticCatalog.INVALID_GENERIC_DECLARATION);
+            if (higherKinded && (markers.nullable || markers.effectKind
+                    || markers.effectRowKind || markers.mutable)) {
+                error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "Admissibility markers cannot be applied to higher-kinded type parameters.");
+                markers.nullable = false;
+                markers.effectKind = false;
+                markers.effectRowKind = false;
+                markers.mutable = false;
+            }
+            if ((markers.effectKind || markers.effectRowKind)
+                    && (markers.nullable || markers.mutable)) {
+                error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "The 'effect' marker cannot be combined with 'nullable' or 'mutable'.");
+                markers.nullable = false;
+                markers.effectKind = false;
+                markers.effectRowKind = false;
+                markers.mutable = false;
+            }
+            if (markers.reified && higherKinded) {
+                error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "A higher-kinded type parameter cannot be reified.");
+                markers.reified = false;
+            }
+            if (markers.reified && markers.effectRowKind) {
+                error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "An effect-row type parameter cannot be reified.");
+                markers.reified = false;
+            }
+            descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded,
+                    variance, markers.nullable, markers.effectKind, markers.effectRowKind,
+                    markers.mutable, markers.reified);
+            parameters.put(parameter.lexeme(), descriptor);
         } while (match(COMMA));
         consume(GREATER, "Expect '>' after type parameters.");
         if (parameters.isEmpty()) error(declarationName, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                 "A generic declaration must declare a type parameter.");
         return parameters;
+    }
+
+    private boolean isAdmitsClause() {
+        return check(IDENTIFIER) && peek().lexeme().equals("admits");
+    }
+
+    private ParseError parseLegacyMarker(final AdmissibilityMarkers markers,
+                                         final String label,
+                                         final boolean anonymous) {
+        final Token marker;
+        final String replacement;
+        if (check(IDENTIFIER) && peek().lexeme().equals("nullable")) {
+            marker = advance();
+            replacement = "'" + label + " admits nullable'";
+            markers.nullable = true;
+        } else if (match(MUT)) {
+            marker = previous();
+            replacement = "'" + label + " admits mutable'";
+            markers.mutable = true;
+        } else if (check(EFFECT)) {
+            marker = advance();
+            markers.effectRowKind = match(ELLIPSIS);
+            markers.effectKind = !markers.effectRowKind;
+            replacement = "'" + label + " admits effect"
+                    + (markers.effectRowKind ? "..." : "") + "'";
+        } else if (check(IDENTIFIER) && peek().lexeme().equals("reified")) {
+            marker = advance();
+            markers.reified = true;
+            return error(marker,
+                    anonymous ? DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE
+                            : DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                    "'reified' is a leading capability; write 'reified " + label + "'.");
+        } else {
+            return null;
+        }
+        return error(marker,
+                anonymous ? DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE
+                        : DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                "'" + marker.lexeme() + "' was replaced; write " + replacement + ".");
+    }
+
+    private void parseAdmitsClause(final AdmissibilityMarkers markers,
+                                   final String label,
+                                   final boolean recover,
+                                   final DiagnosticCatalog.Entry entry) {
+        if (!isAdmitsClause()) return;
+        final var admits = advance();
+        var found = false;
+        do {
+            if (check(IDENTIFIER) && peek().lexeme().equals("nullable")) {
+                final var marker = advance();
+                if (markers.nullable) {
+                    markerError(marker, "Duplicate 'nullable' admissibility marker.", recover, entry);
+                }
+                markers.nullable = true;
+                found = true;
+            } else if (check(IDENTIFIER) && peek().lexeme().equals("mutable")) {
+                final var marker = advance();
+                if (markers.mutable) {
+                    markerError(marker, "Duplicate 'mutable' admissibility marker.", recover, entry);
+                }
+                markers.mutable = true;
+                found = true;
+            } else if (match(MUT)) {
+                markerError(previous(), "'mut' was replaced by 'mutable'; write '"
+                        + label + " admits mutable'.", recover, entry);
+                markers.mutable = true;
+                found = true;
+            } else if (check(EFFECT)) {
+                final var marker = advance();
+                if (match(LESS)) {
+                    markerError(marker, "An effect marker does not take a response type; "
+                            + "use 'Responds<R>' in the bound list.", recover, entry);
+                    skipTypeArgumentList();
+                    found = true;
+                } else {
+                    if (markers.effectKind || markers.effectRowKind) {
+                        markerError(marker, "Duplicate 'effect' admissibility marker.", recover, entry);
+                    }
+                    markers.effectRowKind = match(ELLIPSIS);
+                    markers.effectKind = !markers.effectRowKind;
+                    found = true;
+                }
+            } else if (check(IDENTIFIER) && peek().lexeme().equals("reified")) {
+                final var marker = advance();
+                markerError(marker, "'reified' is a leading capability; write 'reified "
+                        + label + "'.", recover, entry);
+                markers.reified = true;
+                found = true;
+            } else {
+                final var err = error(peek(), entry,
+                        "Expected an admissibility marker after 'admits'.");
+                if (!recover) throw err;
+                if (!check(GREATER) && !check(COMMA) && !isAtEnd()) advance();
+                break;
+            }
+        } while (match(PLUS));
+        if (!found) {
+            final var err = error(admits, entry,
+                    "An 'admits' clause requires at least one marker.");
+            if (!recover) throw err;
+        }
+    }
+
+    private void markerError(final Token token, final String message, final boolean recover,
+                             final DiagnosticCatalog.Entry entry) {
+        final var err = error(token, entry, message);
+        if (!recover) throw err;
+    }
+
+    private void skipTypeArgumentList() {
+        var depth = 1;
+        while (depth > 0 && !isAtEnd()) {
+            if (match(LESS)) {
+                depth++;
+            } else if (match(GREATER)) {
+                depth--;
+            } else {
+                advance();
+            }
+        }
+    }
+
+    private static final class AdmissibilityMarkers {
+        private boolean nullable;
+        private boolean mutable;
+        private boolean effectKind;
+        private boolean effectRowKind;
+        private boolean reified;
     }
 
     private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic) {
@@ -1951,7 +2069,7 @@ public final class Parser {
         final var simpleName = className.lexeme().substring(className.lexeme().lastIndexOf('.') + 1);
         if (!peek().lexeme().equals(simpleName) || current + 1 >= tokens.size()) return false;
         final var next = tokens.get(current + 1).type();
-        return next == RAISES || next == LEFT_BRACE;
+        return next == PERFORMS || next == LEFT_BRACE;
     }
 
     private Stmt.Witness higherKindedImplementation(final boolean delegating,
@@ -2625,7 +2743,7 @@ public final class Parser {
         if (match(TILDE)) {
             consume(GREATER, "Expect '>' after '~' in a handler type.");
             final var handledEffects = parseEffectTypeSet();
-            final var raisedEffects = match(RAISES) ? parseEffectTypeSet() : List.<TypeDescriptor>of();
+            final var raisedEffects = match(PERFORMS) ? parseEffectTypeSet() : List.<TypeDescriptor>of();
             type = TypeDescriptor.handlerOf(type, handledEffects, raisedEffects);
         }
 
@@ -2759,8 +2877,28 @@ public final class Parser {
                         TypeDescriptor.ofAny().toNullable()));
                 continue;
             }
+            if (check(IDENTIFIER) && peek().lexeme().equals("reified")
+                    && current + 1 < tokens.size()
+                    && tokens.get(current + 1).type() == IDENTIFIER
+                    && tokens.get(current + 1).lexeme().equals("_")) {
+                final var leading = advance();
+                advance();
+                consume(COLON, "Expect ':' after 'reified _'.");
+                typeArgs.add(anonymousExistential(leading, true));
+                continue;
+            }
+            if (check(IDENTIFIER) && peek().lexeme().equals("reified")
+                    && current + 1 < tokens.size()
+                    && tokens.get(current + 1).type() == COLON) {
+                final var leading = advance();
+                consume(COLON, "Expect ':' after 'reified'.");
+                error(leading, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        "'reified' is a leading capability; write 'reified _:'.");
+                typeArgs.add(anonymousExistential(leading, true));
+                continue;
+            }
             if (match(COLON)) {
-                typeArgs.add(anonymousExistential(previous()));
+                typeArgs.add(anonymousExistential(previous(), false));
                 continue;
             }
             final TypeProjectionDescriptor.Kind projectionKind;
@@ -2786,58 +2924,34 @@ public final class Parser {
         return typeArgs;
     }
 
-    private TypeParameterDescriptor anonymousExistential(final Token where) {
+    private TypeParameterDescriptor anonymousExistential(final Token where,
+                                                         final boolean leadingReified) {
         if (pendingAnonymousTypeParameters == null && !allowStoredAnonymousTypeParameters) {
             throw error(where, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     "An anonymous existential is allowed only in a parameter type or a stored "
                             + "field, property, or local type.");
         }
         final var storing = pendingAnonymousTypeParameters == null;
-        var nullable = false;
-        var mutable = false;
-        var reified = false;
-        var effectKind = false;
-        var effectRowKind = false;
+        final var markers = new AdmissibilityMarkers();
+        markers.reified = leadingReified;
         final var bounds = new ArrayList<TypeDescriptor>();
         final var previousSink = pendingAnonymousTypeParameters;
         pendingAnonymousTypeParameters = null;
         try {
-            do {
-                if (check(IDENTIFIER) && peek().lexeme().equals("nullable")) {
-                    final var marker = advance();
-                    if (nullable) {
-                        throw error(marker, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                                "Duplicate 'nullable' anonymous-existential marker.");
-                    }
-                    nullable = true;
-                } else if (match(MUT)) {
-                    if (mutable) {
-                        throw error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                                "Duplicate 'mut' anonymous-existential marker.");
-                    }
-                    mutable = true;
-                } else if (check(IDENTIFIER) && peek().lexeme().equals("reified")) {
-                    final var marker = advance();
-                    if (reified) {
-                        throw error(marker, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                                "Duplicate 'reified' anonymous-existential marker.");
-                    }
-                    reified = true;
-                } else if (match(EFFECT)) {
-                    if (effectKind || effectRowKind) {
-                        throw error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                                "Duplicate 'effect' anonymous-existential marker.");
-                    }
-                    effectRowKind = match(ELLIPSIS);
-                    effectKind = !effectRowKind;
-                } else {
+            if (!isAdmitsClause() && !check(GREATER) && !check(COMMA)) {
+                do {
+                    final var legacyError = parseLegacyMarker(markers, "_", true);
+                    if (legacyError != null) throw legacyError;
                     bounds.add(collectType());
-                }
-            } while (match(PLUS));
+                } while (match(PLUS) && !isAdmitsClause());
+            }
+            parseAdmitsClause(markers, "_", false,
+                    DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE);
         } finally {
             pendingAnonymousTypeParameters = previousSink;
         }
-        if (bounds.isEmpty() && !nullable && !mutable && !reified && !effectKind && !effectRowKind) {
+        if (bounds.isEmpty() && !markers.nullable && !markers.mutable && !markers.reified
+                && !markers.effectKind && !markers.effectRowKind) {
             throw error(where, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     "An anonymous existential requires a bound or marker.");
         }
@@ -2845,7 +2959,8 @@ public final class Parser {
         final var parameter = new TypeParameterDescriptor(id,
                 TypeParameterDescriptor.ANONYMOUS_EXISTENTIAL_PREFIX + id, bounds,
                 false, TypeParameterDescriptor.Variance.INVARIANT,
-                nullable, effectKind, effectRowKind, mutable, reified);
+                markers.nullable, markers.effectKind, markers.effectRowKind,
+                markers.mutable, markers.reified);
         if (storing) {
             parameter.markStoredExistential();
         } else {
@@ -2896,7 +3011,13 @@ public final class Parser {
     }
 
     private List<TypeDescriptor> parseRaisedEffects() {
-        if (!match(RAISES)) return List.of();
+        if (check(IDENTIFIER) && peek().lexeme().equals("raises")) {
+            final var keyword = advance();
+            error(keyword, DiagnosticCatalog.EXPECTED_SYNTAX,
+                    "'raises' was removed; use 'performs'.");
+        } else if (!match(PERFORMS)) {
+            return List.of();
+        }
         final var effects = new ArrayList<TypeDescriptor>();
         do {
             effects.add(collectType());
@@ -3486,7 +3607,18 @@ public final class Parser {
             final var keyword = previous();
             return new Expr.Unsafe(keyword, unary());
         }
-        if (match(RAISE)) {
+        if (check(IDENTIFIER) && peek().lexeme().equals("raise")
+                && current + 1 < tokens.size()
+                && switch (tokens.get(current + 1).type()) {
+                    case IDENTIFIER, THIS -> true;
+                    default -> false;
+                }) {
+            final var keyword = advance();
+            error(keyword, DiagnosticCatalog.EXPECTED_SYNTAX,
+                    "'raise' was removed; use 'perform'.");
+            return new Expr.Raise(keyword, unary());
+        }
+        if (match(PERFORM)) {
             final var keyword = previous();
             return new Expr.Raise(keyword, unary());
         }

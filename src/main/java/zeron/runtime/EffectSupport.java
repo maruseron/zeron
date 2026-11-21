@@ -30,7 +30,7 @@ public final class EffectSupport {
         if (!frames.isEmpty()) frames.removeLast();
     }
 
-    /// Performs a responding raise. The innermost active resuming handler runs with the frame
+    /// Performs a responding perform. The innermost active resuming handler runs with the frame
     /// temporarily inactive, so effects raised while evaluating its response reach the next
     /// enclosing handler. When a handler does not match, it rethrows the same carrier and the
     /// search continues outward.

@@ -28,8 +28,8 @@ public final class RuntimeReificationTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-reified-top-level-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
-                fn chained<T: reified>(value: T): T = identity(value);
+                public fn identity<reified T>(value: T): T = value;
+                fn chained<reified T>(value: T): T = identity(value);
                 fn callInt(): Int = identity(42);
                 fn callString(): String = identity("reified");
                 """.formatted(packageName));
@@ -65,8 +65,8 @@ public final class RuntimeReificationTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-reified-nested-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
-                public fn relay<T: reified>(value: Array<T>): Array<T> = identity(value);
+                public fn identity<reified T>(value: T): T = value;
+                public fn relay<reified T>(value: Array<T>): Array<T> = identity(value);
                 fn use(): Int = relay([5])[0];
                 """.formatted(packageName));
         try {
@@ -92,7 +92,7 @@ public final class RuntimeReificationTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-reified-value-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
+                public fn identity<reified T>(value: T): T = value;
                 fn callExplicit(): Int {
                     let operation: (Int) -> Int = identity::<Int>;
                     return operation(12);
@@ -129,7 +129,7 @@ public final class RuntimeReificationTest {
                 public class Box {
                     public property value: Int;
                     public constructor new;
-                    public echo<T: reified>(value: T): T = value;
+                    public echo<reified T>(value: T): T = value;
                 }
                 fn callMethod(): Int = Box.new(0).echo(9);
                 """.formatted(packageName));
@@ -161,7 +161,7 @@ public final class RuntimeReificationTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-reified-inferred-");
         final var unit = parse("Main.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
+                public fn identity<reified T>(value: T): T = value;
                 fn outer<T>(value: T): T = inner(value);
                 fn inner<T>(value: T): T = identity(value);
                 fn use(): Int = outer(21);
@@ -196,7 +196,7 @@ public final class RuntimeReificationTest {
         final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-reified-client-");
         final var library = parse("Library.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
+                public fn identity<reified T>(value: T): T = value;
                 """.formatted(libraryPackage));
         final var client = parse("Main.zn", """
                 package %s;
@@ -244,11 +244,11 @@ public final class RuntimeReificationTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 public contract Echo {
-                    echo<T: reified>(value: T): T;
+                    echo<reified T>(value: T): T;
                 }
                 public class Box is Echo {
                     public constructor new;
-                    public echo<T: reified>(value: T): T = value;
+                    public echo<reified T>(value: T): T = value;
                 }
                 fn use(): String = Box.new().echo("contract");
                 """.formatted(packageName));
@@ -280,7 +280,7 @@ public final class RuntimeReificationTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 public contract Echo {
-                    echo<T: reified>(value: T): T;
+                    echo<reified T>(value: T): T;
                 }
                 public class Box is Echo {
                     public constructor new;
@@ -299,7 +299,7 @@ public final class RuntimeReificationTest {
         final var output = Path.of("target", "zeron-reified-exported-" + packageName);
         final var unit = parse("Main.zn", """
                 package %s;
-                public fn identity<T: reified>(value: T): T = value;
+                public fn identity<reified T>(value: T): T = value;
                 public fn relay<T>(value: T): T = identity(value);
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
@@ -315,7 +315,7 @@ public final class RuntimeReificationTest {
         final var output = Path.of("target", "zeron-reified-class-" + packageName);
         final var unit = parse("Main.zn", """
                 package %s;
-                public class Box<T: reified> {
+                public class Box<reified T> {
                     public property value: T;
                     public constructor new;
                 }

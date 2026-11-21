@@ -20,14 +20,14 @@ public final class GenericCallbackInferenceTest {
 
             import zeron.io.println;
 
-            fn apply<E: effect...>(callback: (Int) -> Unit raises E): Unit raises E {
+            fn apply<E admits effect...>(callback: (Int) -> Unit performs E): Unit performs E {
                 callback(1);
             }
 
-            fn throughReference(): Unit raises IoFailure = apply(println);
+            fn throughReference(): Unit performs IoFailure = apply(println);
 
-            fn throughValue(): Unit raises IoFailure {
-                let printer: (Any?) -> Unit raises IoFailure = println;
+            fn throughValue(): Unit performs IoFailure {
+                let printer: (Any?) -> Unit performs IoFailure = println;
                 apply(printer);
             }
 
@@ -37,7 +37,7 @@ public final class GenericCallbackInferenceTest {
     private static final String NARROW_CALLBACK = """
             package app;
 
-            fn apply<E: effect...>(callback: (Int) -> Unit raises E): Unit raises E {
+            fn apply<E admits effect...>(callback: (Int) -> Unit performs E): Unit performs E {
                 callback(1);
             }
 

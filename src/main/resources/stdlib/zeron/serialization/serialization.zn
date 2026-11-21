@@ -93,35 +93,35 @@ public contract Decoder {
 
 /// The capability of writing values of `T`.
 ///
-/// `E` is the effect row of the operation, so a codec whose body raises effects declares them
+/// `E` is the effect row of the operation, so a codec whose body performs effects declares them
 /// here. Derivation provides this evidence for native products, native sums, and transparent data
 /// classes; a hand-written codec is an explicit witness.
-public contract Encode<T: nullable + mut, E: effect...> {
+public contract Encode<T admits nullable + mutable, E admits effect...> {
     /// Writes `value` to `encoder`, in order.
     ///
     /// Like `decode`, this is static: the free `encode` entry point supplies the value and the
     /// evidence supplies the operation, so derived types need no methods of their own.
-    static encode(value: T, encoder: &Encoder): Result<Unit, EncodeError> raises E;
+    static encode(value: T, encoder: &Encoder): Result<Unit, EncodeError> performs E;
 }
 
 /// The capability of reading values of `T`.
 ///
 /// `decode` is static because decoding has no receiver: the type of the result comes from the
 /// evidence, not from a value.
-public contract Decode<T: nullable + mut, E: effect...> {
+public contract Decode<T admits nullable + mutable, E admits effect...> {
     /// Reads one value from `decoder`.
-    static decode(decoder: &Decoder): Result<T, DecodeError> raises E;
+    static decode(decoder: &Decoder): Result<T, DecodeError> performs E;
 }
 
 /// The combined capability of writing and reading values of `T`.
 ///
 /// `deriving Codec` is equivalent to `deriving Encode, Decode`.
-public contract Codec<T: nullable + mut, E: effect...> requires Encode<T, {E}> + Decode<T, {E}> {}
+public contract Codec<T admits nullable + mutable, E admits effect...> requires Encode<T, {E}> + Decode<T, {E}> {}
 
 /// Static shape information about `T`, for consumers such as schema generation.
 ///
 /// Kind is `RecordKind` for products and transparent data classes, and `AlternativeKind` for sums.
-public contract Shape<T: nullable + mut> {
+public contract Shape<T admits nullable + mutable> {
     /// The kind of the encoded representation of `T`.
     static shape(): ValueKind;
 
@@ -132,18 +132,18 @@ public contract Shape<T: nullable + mut> {
 /// Writes `value` to `encoder` using the `Encode` evidence for `T`.
 ///
 /// This is the canonical entry point. The effect row is inferred at the call site.
-public fn encode<E: effect..., T: nullable + mut + Encode<T, {E}>>(
+public fn encode<E admits effect..., T: Encode<T, {E}> admits nullable + mutable>(
     value: T,
     encoder: &Encoder
-): Result<Unit, EncodeError> raises E =
+): Result<Unit, EncodeError> performs E =
     T.encode(value, encoder);
 
 /// Reads a `T` from `decoder` using the `Decode` evidence for `T`.
 ///
 /// This is the canonical entry point. The effect row is inferred at the call site.
-public fn decode<E: effect..., T: nullable + mut + Decode<T, {E}>>(
+public fn decode<E admits effect..., T: Decode<T, {E}> admits nullable + mutable>(
     decoder: &Decoder
-): Result<T, DecodeError> raises E =
+): Result<T, DecodeError> performs E =
     T.decode(decoder);
 
 public fn encodeErrorAt(error: EncodeError, name: String): EncodeError =
@@ -152,7 +152,7 @@ public fn encodeErrorAt(error: EncodeError, name: String): EncodeError =
 public fn decodeErrorAt(error: DecodeError, name: String): DecodeError =
     DecodeError.new(error.message, error.path.append(name), error.position);
 
-fn encodeNamed<T: nullable + mut>(
+fn encodeNamed<T admits nullable + mutable>(
     name: String, writeValue: (T, &Encoder) -> Result<Unit, EncodeError>
 ): (T, &Encoder) -> Result<Unit, EncodeError> =
     (owner, encoder) -> match (encoder.writeField(name)) {
@@ -163,7 +163,7 @@ fn encodeNamed<T: nullable + mut>(
         };
     };
 
-fn decodeNamed<T: nullable + mut, V: nullable + mut>(
+fn decodeNamed<T admits nullable + mutable, V admits nullable + mutable>(
     name: String, readValue: (&Decoder) -> Result<V, DecodeError>, write: (&T, V) -> Unit
 ): (&Decoder) -> Result<(&T) -> Unit, DecodeError> =
     (decoder) -> match (readValue(decoder)) {

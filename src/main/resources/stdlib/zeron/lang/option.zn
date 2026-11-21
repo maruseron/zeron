@@ -13,12 +13,12 @@ import zeron.control.Alternative;
 ///
 /// `Option` implements the `Monad` and `Foldable` operations through its witnesses, so the
 /// generic control operations work on it as well as the members below.
-public type Option<out T: nullable + mut> =
+public type Option<out T admits nullable + mutable> =
       Some(value: T)
     | None;
 
 /// Operations of `Option`.
-public extension<T: nullable + mut> Option<T> {
+public extension<T admits nullable + mutable> Option<T> {
     /// Whether this option holds a value.
     public fn isSome(): Boolean =
         match (this) {
@@ -36,14 +36,14 @@ public extension<T: nullable + mut> Option<T> {
     /// Reduces this option to a single value by choosing the matching branch.
     ///
     /// `ifSome` receives the contained value; `ifNone` receives no arguments.
-    public fn fold<R: mut>(ifSome: (T) -> R, ifNone: () -> R): R =
+    public fn fold<R admits mutable>(ifSome: (T) -> R, ifNone: () -> R): R =
         match (this) {
             case Some(value) -> ifSome(value);
             case None() -> ifNone();
         };
 
     /// Transforms the contained value, if any, leaving `None` unchanged.
-    public fn map<B: mut>(f: (T) -> B): Option<B> =
+    public fn map<B admits mutable>(f: (T) -> B): Option<B> =
         match (this) {
             case Some(value) -> Option.Some(f(value));
             case None() -> Option<B>.None();

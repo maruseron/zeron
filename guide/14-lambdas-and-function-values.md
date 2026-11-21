@@ -491,7 +491,7 @@ implements this conversion: the compiler discovers the interface's single abstra
 class-file metadata, infers the lambda parameters from that method, and uses the Java interface
 directly instead of a generated Zeron shape. A top-level function reference converts the same way,
 but a stored function value requires an explicit adapter. A converted callback must have an empty
-`raises` row, because a Zeron raised effect would otherwise escape into Java.
+`performs` row, because a Zeron raised effect would otherwise escape into Java.
 
 Receiver functions have a distinct generated shape. Their receiver is the first runtime argument,
 followed by their explicit parameters.

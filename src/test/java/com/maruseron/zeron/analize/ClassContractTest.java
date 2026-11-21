@@ -31,11 +31,11 @@ public final class ClassContractTest {
     public void resolvesImplicitStandardPackageContractRequirements() {
         final var hashable = Parser.of(Scanner.from("""
                 package zeron.lang;
-                public contract Hashable<T: mut> {}
+                public contract Hashable<T admits mutable> {}
                 """).scanTokens()).parseCompilationUnit("zeron/lang/hashable.zn");
         final var numeric = Parser.of(Scanner.from("""
                 package zeron.numeric;
-                public contract Integral<T: mut> requires Hashable<T> {}
+                public contract Integral<T admits mutable> requires Hashable<T> {}
                 """).scanTokens()).parseCompilationUnit("zeron/numeric/numeric.zn");
         final var localContract = Parser.of(Scanner.from("""
                 package zeron.numeric;
@@ -383,9 +383,9 @@ public final class ClassContractTest {
                     public constructor from(value: Int) = Implementation%s.new(value);
                     public value(): Int = this.item;
                 }
-                fn read<T: mut + Derived%s<Int>>(value: T): Int = value.value() + value.extra();
-                fn readBase<T: mut + Base%s<Int>>(value: T): Int = value.value();
-                fn readItem<T: mut + Base%s<Int>>(value: T): Int = value.item;
+                fn read<T: Derived%s<Int> admits mutable>(value: T): Int = value.value() + value.extra();
+                fn readBase<T: Base%s<Int> admits mutable>(value: T): Int = value.value();
+                fn readItem<T: Base%s<Int> admits mutable>(value: T): Int = value.item;
                 fn update<T: Base%s<Int>>(value: &T): Unit { value.item = 9; }
                 fn run(): Int {
                     let item = Implementation%s.from(7);
@@ -443,8 +443,8 @@ public final class ClassContractTest {
                     default label(): String = "child";
                 }
                 class %s is %s { public constructor new; }
-                fn read<T: mut + %s<String>>(value: T): String = value.value();
-                fn readLabel<T: mut + %s>(value: T): String = value.label();
+                fn read<T: %s<String> admits mutable>(value: T): String = value.value();
+                fn readLabel<T: %s admits mutable>(value: T): String = value.label();
                 fn run(): String =
                     read(%s.from("ignored")) + ":" + readLabel(%s.new());
                 """.formatted(rootName, leftName, rootName, rightName, rootName,
@@ -547,7 +547,7 @@ public final class ClassContractTest {
                 delegating witness Addable<OverrideBox%s> for OverrideBox%s {
                     fn add(other: OverrideBox%s): OverrideBox%s = OverrideBox%s.new(42);
                 }
-                fn add<T: mut + Addable<T>>(left: T, right: T): T = left.add(right);
+                fn add<T: Addable<T> admits mutable>(left: T, right: T): T = left.add(right);
                 fn run(): Int =
                     add(Box%s.new(2), Box%s.new(3)).value
                     + add(OverrideBox%s.new(2), OverrideBox%s.new(3)).value;
@@ -577,15 +577,15 @@ public final class ClassContractTest {
     @Test
     public void delegatingWitnessReportsOverridesWithScalarSignaturesForVectorContract() {
         final var result = new ResolutionService().resolveWithDiagnostics(parse("""
-                contract Numeric<T: mut> {
+                contract Numeric<T admits mutable> {
                     add(other: T): T;
                     negate(): T;
                 }
-                class Vector2<T: mut> {
+                class Vector2<T admits mutable> {
                     public add(other: Vector2<T>): Vector2<T> = other;
                     public negate(): Vector2<T> = this;
                 }
-                delegating witness<T: mut> Numeric<Vector2<T>> for Vector2<T> {
+                delegating witness<T admits mutable> Numeric<Vector2<T>> for Vector2<T> {
                     fn add(other: T): T = other;
                     fn negate(): T {}
                 }
@@ -774,9 +774,9 @@ public final class ClassContractTest {
                     "value=" + BoundedBox<Label>.new(Label.new("label"));
                 fn builtin(): String = "value=" + 42;
                 fn nullable(value: Int?): String = "value=" + value;
-                fn generic<T: mut + zeron.lang.Display>(value: T): String = "value=" + value;
+                fn generic<T: zeron.lang.Display admits mutable>(value: T): String = "value=" + value;
                 fn genericRun(): String = generic(42);
-                fn genericBounded<T: mut + zeron.lang.Display>(value: T): String = "value=" + value;
+                fn genericBounded<T: zeron.lang.Display admits mutable>(value: T): String = "value=" + value;
                 fn genericBoundedRun(): String =
                     genericBounded(BoundedBox<Label>.new(Label.new("generic label")));
                 """;

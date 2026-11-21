@@ -492,7 +492,7 @@ public final class ZeronLibraryIndexDump {
             case FunctionDescriptor function when function.isHandler() ->
                     formatType(function.returnType()) + " ~> "
                             + function.handledEffects().stream().map(ZeronLibraryIndexDump::formatType)
-                            .collect(Collectors.joining(", ", "{", "}")) + " raises "
+                            .collect(Collectors.joining(", ", "{", "}")) + " performs "
                             + function.raisedEffects().stream().map(ZeronLibraryIndexDump::formatType)
                             .collect(Collectors.joining(", ", "{", "}"));
             case FunctionDescriptor function -> formatTypeParameters(function.typeParameters())

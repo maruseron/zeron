@@ -8,7 +8,7 @@ import zeron.lang.Hashable;
 /// elements. The contract does not prescribe how equivalence is implemented: a hash set uses
 /// `Hashable`, an identity set reference identity, and an ordered set its ordering. Iteration order
 /// is not specified.
-public contract Set<T: mut> requires Iterable<T> {
+public contract Set<T admits mutable> requires Iterable<T> {
     /// Whether `value` is an element of the set.
     contains(value: T): Boolean;
 }

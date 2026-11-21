@@ -27,7 +27,7 @@ public final class AppliedTypeMatchCompilationTest {
                     public property value: T;
                     public constructor new;
                 }
-                fn classify<T: reified>(box: Box<T>): Int = match (box) {
+                fn classify<reified T>(box: Box<T>): Int = match (box) {
                     case Box<Int> as boxed -> boxed.value;
                     case Box<String> as boxed -> boxed.value.length();
                     case _ -> -1;
@@ -35,7 +35,7 @@ public final class AppliedTypeMatchCompilationTest {
                 fn intResult(): Int = classify<Int>(Box<Int>.new(42));
                 fn stringResult(): Int = classify<String>(Box<String>.new("four"));
                 fn fallbackResult(): Int = classify<Boolean>(Box<Boolean>.new(true));
-                fn classifyValue<T: reified>(value: T): Int = match (value) {
+                fn classifyValue<reified T>(value: T): Int = match (value) {
                     case Box<Int> as boxed -> boxed.value;
                     case _ -> -1;
                 };
@@ -45,12 +45,12 @@ public final class AppliedTypeMatchCompilationTest {
                     case Box<Int>(value) -> value;
                 };
                 fn unboxed(): Int = unbox(Box<Int>.new(12));
-                fn unboxGeneric<T: reified>(box: Box<T>): Int = match (box) {
+                fn unboxGeneric<reified T>(box: Box<T>): Int = match (box) {
                     case Box<Int>(value) -> value;
                     case _ -> -1;
                 };
                 fn unboxedGeneric(): Int = unboxGeneric<Int>(Box<Int>.new(13));
-                fn guarded<T: reified>(box: Box<T>): Int = match (box) {
+                fn guarded<reified T>(box: Box<T>): Int = match (box) {
                     case Box<Int> as boxed if boxed.value > 10 -> 1;
                     case Box<Int> -> 0;
                     case _ -> -1;
@@ -94,7 +94,7 @@ public final class AppliedTypeMatchCompilationTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 public type Pair<A, B> = (left: A, right: B);
-                fn leftOfIntPair<T: reified>(pair: Pair<T, String>): Int = match (pair) {
+                fn leftOfIntPair<reified T>(pair: Pair<T, String>): Int = match (pair) {
                     case Pair<Int, String>(left, _) -> left;
                     case _ -> -1;
                 };
@@ -131,7 +131,7 @@ public final class AppliedTypeMatchCompilationTest {
                     public property value: T;
                     public constructor new;
                 }
-                fn classify(box: Box<: reified>): Int = match (box) {
+                fn classify(box: Box<reified _:>): Int = match (box) {
                     case Box<Int> as boxed -> boxed.value;
                     case Box<String> as boxed -> boxed.value.length();
                     case _ -> -1;
@@ -242,7 +242,7 @@ public final class AppliedTypeMatchCompilationTest {
             final var clientUnit = parse("Client.zn", """
                     package %s;
                     import %s.Box;
-                    fn classify<T: reified>(box: Box<T>): Int = match (box) {
+                    fn classify<reified T>(box: Box<T>): Int = match (box) {
                         case Box<Int>(value) -> value;
                         case _ -> -1;
                     };
@@ -296,14 +296,14 @@ public final class AppliedTypeMatchCompilationTest {
                 };
                 """).stream().anyMatch(error -> error.message().contains("wildcard")));
         assertTrue(resolveErrors(boxDecl + """
-                fn bad<T: reified>(box: Box<T>): Int = match (box) {
+                fn bad<reified T>(box: Box<T>): Int = match (box) {
                     case Box<Int> -> 1;
                     case Box<Int> -> 2;
                     case _ -> 0;
                 };
                 """).stream().anyMatch(error -> error.message().contains("same exact identity")));
         assertTrue(resolveErrors(boxDecl + """
-                fn bad<T: reified>(box: Box<T>): Int = match (box) {
+                fn bad<reified T>(box: Box<T>): Int = match (box) {
                     case Box<Int> -> 1;
                 };
                 """).stream().anyMatch(error -> error.message().contains("Non-exhaustive match")));

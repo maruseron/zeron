@@ -49,45 +49,45 @@ public final class FileSystemTextIoTest {
                 public fn exists(value: String): Boolean = Path.from(value).exists();
                 public fn isFile(value: String): Boolean = Path.from(value).isFile();
                 public fn isDirectory(value: String): Boolean = Path.from(value).isDirectory();
-                public fn listPaths(value: String): Array<String> raises IoFailure {
+                public fn listPaths(value: String): Array<String> performs IoFailure {
                     let entries = Path.from(value).list();
                     return generateArray<String>(
                         entries.length,
                         (index) -> entries[index].toString()
                     );
                 }
-                public fn walkPaths(value: String): Array<String> raises IoFailure {
+                public fn walkPaths(value: String): Array<String> performs IoFailure {
                     let entries = Path.from(value).walk();
                     return generateArray<String>(
                         entries.length,
                         (index) -> entries[index].toString()
                     );
                 }
-                public fn createDirectories(value: String): Unit raises IoFailure {
+                public fn createDirectories(value: String): Unit performs IoFailure {
                     Path.from(value).createDirectories();
                 }
-                public fn createDirectory(value: String): Unit raises IoFailure {
+                public fn createDirectory(value: String): Unit performs IoFailure {
                     Path.from(value).createDirectory();
                 }
-                public fn deleteIfExists(value: String): Boolean raises IoFailure =
+                public fn deleteIfExists(value: String): Boolean performs IoFailure =
                     Path.from(value).deleteIfExists();
-                public fn read(value: String): String raises IoFailure =
+                public fn read(value: String): String performs IoFailure =
                     readText(Path.from(value));
                 public fn writeBytes(value: String, bytes: ByteArray): Unit
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     using (let writer: &Writer = openWriter(Path.from(value))) {
                         writer.write(bytes, 0, bytes.length);
                     }
                 }
                 public fn readCount(value: String, bytes: &ByteArray): Int
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     using (let reader: &Reader = openReader(Path.from(value))) {
                         let count = reader.read(bytes, 0, bytes.length);
                         return count.getOrElse(-1);
                     }
                 }
                 public fn readPartialCounts(value: String, bytes: &ByteArray): Int
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     using (let reader: &Reader = openReader(Path.from(value))) {
                         let first = reader.read(bytes, 0, bytes.length);
                         let second = reader.read(bytes, 0, bytes.length);
@@ -98,14 +98,14 @@ public final class FileSystemTextIoTest {
                     }
                 }
                 public fn readEof(value: String, bytes: &ByteArray): Boolean
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     using (let reader: &Reader = openReader(Path.from(value))) {
                         let first = reader.read(bytes, 0, bytes.length);
                         if (not first.isSome()) return true;
                         return not reader.read(bytes, 0, bytes.length).isSome();
                     }
                 }
-                public fn strictReadOrInvalid(value: String): String raises IoFailure, DisposeFailure {
+                public fn strictReadOrInvalid(value: String): String performs IoFailure, DisposeFailure {
                     using (let reader: &TextReader = openTextReader(Path.from(value))) {
                         return handle (reader.readAll()) with {
                             case IoFailure.cause(_) -> "invalid";
@@ -113,11 +113,11 @@ public final class FileSystemTextIoTest {
                     }
                 }
                 public fn write(value: String, text: String): Unit
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     writeText(Path.from(value), text);
                 }
                 public fn writeTextChunks(value: String): Unit
-                        raises IoFailure, DisposeFailure {
+                        performs IoFailure, DisposeFailure {
                     using (let writer: &TextWriter = openTextWriter(Path.from(value))) {
                         writer.write("first ");
                         writer.write("café");
@@ -238,7 +238,7 @@ public final class FileSystemTextIoTest {
                 import zeron.io.text.readText;
                 import zeron.io.text.writeText;
                 import zeron.resource.DisposeFailure;
-                public fn roundTrip(path: String): String raises IoFailure, DisposeFailure {
+                public fn roundTrip(path: String): String performs IoFailure, DisposeFailure {
                     writeText(Path.from(path), "compiled café");
                     return readText(Path.from(path));
                 }

@@ -56,7 +56,7 @@ public fn json(block: &JsonObjectBuilder.() -> Unit): Result<&JsonValue, JsonErr
     return builder.build();
 }
 
-public fn jsonModel<T: nullable + mut>(
+public fn jsonModel<T admits nullable + mutable>(
     model: Model<T>, owner: T, block: &JsonModelObjectBuilder<T>.() -> Unit
 ): Result<&JsonValue, JsonError> {
     let builder = JsonModelObjectBuilder.of(model, owner);

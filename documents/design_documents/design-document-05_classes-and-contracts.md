@@ -204,10 +204,10 @@ fixed prefix. Defaults and spread arguments are not supported on named construct
 An ordinary class may group receiver-free functions with its instance API using `static fn`:
 
 ```zeron
-class Box<T: mut> {
+class Box<T admits mutable> {
     value: T;
     public constructor new;
-    public static fn of<U: mut>(value: U): Box<U> = Box<U>.new(value);
+    public static fn of<U admits mutable>(value: U): Box<U> = Box<U>.new(value);
 }
 ```
 
@@ -286,9 +286,9 @@ generic API needs to construct one particular type. For generic collection famil
 
 ```zeron
 public contract CollectionBuilder<C<_>> {
-    empty<A: nullable + mut>(): &C<A>;
+    empty<A admits nullable + mutable>(): &C<A>;
 
-    mut add<A: nullable + mut>(this: C<A>, value: A): Boolean;
+    mut add<A admits nullable + mutable>(this: C<A>, value: A): Boolean;
 }
 ```
 

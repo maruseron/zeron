@@ -4,7 +4,7 @@ package zeron.numeric;
 ///
 /// Implementations decide their own normalization rules, such as reducing the fraction or keeping
 /// the denominator positive.
-public contract Ratio<T: mut> {
+public contract Ratio<T admits mutable> {
     /// Returns the numerator of this ratio.
     numerator(): T;
     /// Returns the denominator of this ratio.
@@ -18,7 +18,7 @@ public contract Ratio<T: mut> {
 /// arithmetic wherever their representation allows it, so `add` and `multiply` are associative
 /// and commutative, `subtract(a, b)` equals `add(a, negate(b))`, and `multiply` distributes over
 /// `add`. Floating-point instances approximate these laws by necessity.
-public contract Numeric<T: mut> {
+public contract Numeric<T admits mutable> {
     /// Returns the sum of this value and `other`.
     add(other: T): T;
     /// Returns the difference of this value and `other`.
@@ -43,7 +43,7 @@ public contract Numeric<T: mut> {
 /// `rem` takes the sign of the dividend, while `div`/`mod` round towards negative infinity and
 /// `mod` takes the sign of the divisor. Both pairs satisfy `quot * b + rem == this` and
 /// `div * b + mod == this`, so `mod` lies in `0 .. abs(b) - 1` when `b` is positive.
-public contract Integral<T: mut> requires Numeric<T> + Hashable<T> + Comparable<T> {
+public contract Integral<T admits mutable> requires Numeric<T> + Hashable<T> + Comparable<T> {
     /// Returns the quotient of this value and `other`, truncated towards zero.
     quot(other: T): T;
     /// Returns the remainder of `quot`, with the sign of this value.
@@ -59,7 +59,7 @@ public contract Integral<T: mut> requires Numeric<T> + Hashable<T> + Comparable<
 }
 
 /// Division and reciprocal on top of `Numeric`.
-public contract Fractional<T: mut> requires Numeric<T> {
+public contract Fractional<T admits mutable> requires Numeric<T> {
     /// Returns the quotient of this value and `other`.
     divide(other: T): T;
     /// Returns the multiplicative inverse of this value, equal to `divide(1)`.
@@ -72,7 +72,7 @@ public contract Fractional<T: mut> requires Numeric<T> {
 ///
 /// Angles are measured in radians. Functions outside their domain follow the underlying
 /// implementation: for `Float` they produce `NaN` or an infinity rather than an error.
-public contract Floating<T: mut> requires Fractional<T> {
+public contract Floating<T admits mutable> requires Fractional<T> {
     /// Returns the square root of this value.
     sqrt(): T;
     /// Returns this value raised to `exponent`.

@@ -11,7 +11,7 @@ import zeron.io.text.readText;
 import zeron.io.text.writeText;
 import zeron.resource.DisposeFailure;
 
-fn updateNotes(): String raises IoFailure, DisposeFailure {
+fn updateNotes(): String performs IoFailure, DisposeFailure {
     let notes = Path.from("notes/today.txt");
     writeText(notes, "Remember to review the design.");
     return readText(notes);
@@ -28,10 +28,10 @@ filesystem, normalize automatically, or resolve symbolic links.
 
 `exists()`, `isFile()`, and `isDirectory()` are status queries. They return `false` when the host
 cannot confirm the requested condition, as with the underlying `java.io.File` queries. Use
-operations that raise `IoFailure` when distinguishing an I/O failure matters.
+operations that perform `IoFailure` when distinguishing an I/O failure matters.
 
 `list()` returns this directory's immediate children, and `walk()` returns this path together with
-every entry beneath it, recursively. Both return an `Array<Path>` and raise `IoFailure` when the
+every entry beneath it, recursively. Both return an `Array<Path>` and perform `IoFailure` when the
 filesystem cannot be read; `list()` also fails when the path is not a directory. Entries are
 returned eagerly, and their order is not specified.
 
@@ -39,23 +39,23 @@ returned eagerly, and their order is not specified.
 import zeron.fs.Path;
 import zeron.io.IoFailure;
 
-fn entries(root: Path): Array<Path> raises IoFailure = root.walk();
+fn entries(root: Path): Array<Path> performs IoFailure = root.walk();
 ```
 
 `createDirectory()` requires the target's parent to exist and fails if the target already exists.
 `createDirectories()` creates missing parent directories. `deleteIfExists()` returns `true` when it
-deletes an entry and `false` when the entry was absent. These operations raise `zeron.io.IoFailure`
+deletes an entry and `false` when the entry was absent. These operations perform `zeron.io.IoFailure`
 for checked Java I/O failures.
 
 ## Whole-file text
 
 `readText(path)` reads the entire file as UTF-8. `writeText(path, text)` creates or truncates the
 file and writes the supplied text as UTF-8. Neither operation changes line endings or adds a newline.
-Both operations are synchronous and raise `IoFailure` for checked I/O failures.
+Both operations are synchronous and perform `IoFailure` for checked I/O failures.
 
 `writeText` closes its writer with a `using` scope. If writing fails and closing also fails, the
 write failure remains primary and the cleanup outcome is suppressed. If closing alone fails, the
-call raises `DisposeFailure`; its `cause` contains the original Java `IOException`. Callers may
+call performs `DisposeFailure`; its `cause` contains the original Java `IOException`. Callers may
 declare or handle both effects:
 
 ```zeron
@@ -63,7 +63,7 @@ import zeron.fs.Path;
 import zeron.io.IoFailure;
 import zeron.resource.DisposeFailure;
 
-fn save(path: Path, text: String): Unit raises IoFailure, DisposeFailure =
+fn save(path: Path, text: String): Unit performs IoFailure, DisposeFailure =
     writeText(path, text);
 ```
 

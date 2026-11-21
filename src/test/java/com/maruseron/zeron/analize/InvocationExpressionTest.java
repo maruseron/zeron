@@ -130,9 +130,9 @@ public final class InvocationExpressionTest {
                 fn invoked(): Int = make()();
                 fn count(): Int = factoryCalls;
 
-                fn failing(): Int raises Failure = raise Failure.new();
-                fn calleeEffect(): Int raises Failure = (if (true) then failing else () -> 0)();
-                fn invocationEffect(): Int raises Failure = (failing)();
+                fn failing(): Int performs Failure = perform Failure.new();
+                fn calleeEffect(): Int performs Failure = (if (true) then failing else () -> 0)();
+                fn invocationEffect(): Int performs Failure = (failing)();
                 """);
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, "");
         try {

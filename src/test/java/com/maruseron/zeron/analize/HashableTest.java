@@ -24,7 +24,7 @@ public final class HashableTest {
         final var classFile = Path.of("dist", className + ".class");
         final var source = """
                 import zeron.lang.Hashable;
-                fn hashValue<T: nullable + Hashable<T>>(value: T): Long {
+                fn hashValue<T: Hashable<T> admits nullable>(value: T): Long {
                     if (value == null) return 0L;
                     return value.hash();
                 }

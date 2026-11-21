@@ -38,10 +38,10 @@ public final class MathApiTest {
                 import zeron.lang.Ordering;
                 import suffix zeron.numeric.Integer.n;
 
-                fn display<T: mut + Display>(value: T): String = value.toString();
-                fn equal<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
-                fn compare<T: mut + Comparable<T>>(left: T, right: T): Ordering =
+                fn display<T: Display admits mutable>(value: T): String = value.toString();
+                fn equal<T: Eq<T> admits mutable>(left: T, right: T): Boolean = left.eq(right);
+                fn hash<T: Hashable<T> admits mutable>(value: T): Long = value.hash();
+                fn compare<T: Comparable<T> admits mutable>(left: T, right: T): Ordering =
                     left.compareTo(right);
                 fn rationalThird(): Rational = 1 / 3;
                 fn rationalHalf(): Rational = 0.5;

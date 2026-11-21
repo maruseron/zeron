@@ -106,14 +106,15 @@ public class AnsiSyntaxHighlighterTest {
     public void highlightsEffectAndNullableAdmissibilityMarkersContextually() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 public effect IoFailure {}
-                fn resolveEffects<E: effect, T: nullable + Display>(value: T): String =
+                fn resolveEffects<E admits effect, T: Display admits nullable + mutable>(value: T): String =
                     value.toString();
-                fn resolveRows<E: effect...>(value: Int): Int = value;
+                fn resolveRows<E admits effect...>(value: Int): Int = value;
                 let nullable = 1;
                 """);
         assertEquals(3, occurrences(highlighted, AnsiColor.apply("effect", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("...", "33")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("nullable", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("mutable", "35")));
     }
 
     @Test
@@ -153,13 +154,13 @@ public class AnsiSyntaxHighlighterTest {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 public handler Named { case Failure(_) -> ""; }
                 let inline = handler { case Failure(_) -> ""; };
-                fn apply(value: String ~> {Failure} raises {}): String =
-                    handle (raise Failure.new()) with value;
+                fn apply(value: String ~> {Failure} performs {}): String =
+                    handle (perform Failure.new()) with value;
                 """);
 
         assertEquals(2, occurrences(highlighted, AnsiColor.apply("handler", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("with", "35")));
-        assertTrue(highlighted.contains(AnsiColor.apply("raises", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("performs", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("~", "33") + AnsiColor.apply(">", "33")));
     }
 
@@ -185,12 +186,12 @@ public class AnsiSyntaxHighlighterTest {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 public effect Failure {}
                 data class Point(x: Int) {
-                    Point raises Failure {}
+                    Point performs Failure {}
                 }
                 """);
 
         assertTrue(highlighted.contains(AnsiColor.apply("data", "35")));
-        assertTrue(highlighted.contains(AnsiColor.apply("raises", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("performs", "35")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("Point", "36")));
     }
 

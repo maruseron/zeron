@@ -20,11 +20,11 @@ public final class OpeningPatternsTest {
     public void opensAStarViewAndPassesTheBinderToAGenericCall() throws Exception {
         assertCompiledResult("star", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
-                public fn size<T: nullable>(box: Box<T>): Int = 1;
+                public fn size<T admits nullable>(box: Box<T>): Int = 1;
                 public fn opened(box: Box<*>): Int {
                     if (box is Box<let T>) {
                         return size(box);
@@ -42,7 +42,7 @@ public final class OpeningPatternsTest {
     public void exposesTheBinderInBranchLocalTypeAnnotations() throws Exception {
         assertCompiledResult("annotation", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -94,8 +94,8 @@ public final class OpeningPatternsTest {
                     public property value: T;
                     public constructor new;
                 }
-                public fn identify<T: reified>(value: T): T = value;
-                public fn inspect(box: Box<: reified>): Int {
+                public fn identify<reified T>(value: T): T = value;
+                public fn inspect(box: Box<reified _:>): Int {
                     if (box is Box<let T>) {
                         let value: T = box.value;
                         identify(value);
@@ -111,12 +111,12 @@ public final class OpeningPatternsTest {
     public void opensMultipleArgumentsInOnePattern() throws Exception {
         assertCompiledResult("multiple", """
                 package %s;
-                public class Pair<K: nullable, V: nullable> {
+                public class Pair<K admits nullable, V admits nullable> {
                     public property first: K;
                     public property second: V;
                     public constructor new;
                 }
-                public fn sizeOf<K: nullable, V: nullable>(pair: Pair<K, V>): Int = 1;
+                public fn sizeOf<K admits nullable, V admits nullable>(pair: Pair<K, V>): Int = 1;
                 public fn read(pair: Pair<*, *>): Int {
                     if (pair is Pair<let K, let V>) {
                         let first: K = pair.first;
@@ -136,7 +136,7 @@ public final class OpeningPatternsTest {
     public void opensARawAnyTestWithoutInventingEvidence() throws Exception {
         assertCompiledResult("raw", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -174,7 +174,7 @@ public final class OpeningPatternsTest {
     public void scopesTheBinderToAWhileBody() throws Exception {
         assertCompiledResult("while", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -264,7 +264,7 @@ public final class OpeningPatternsTest {
     public void opensNestedGenericArguments() throws Exception {
         assertCompiledResult("nested", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -283,7 +283,7 @@ public final class OpeningPatternsTest {
     public void opensInAnElseIfBranch() throws Exception {
         assertCompiledResult("elseIf", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
@@ -308,11 +308,11 @@ public final class OpeningPatternsTest {
     public void opensInAValueProducingIf() throws Exception {
         assertCompiledResult("valueIf", """
                 package %s;
-                public class Box<T: nullable> {
+                public class Box<T admits nullable> {
                     public property value: T;
                     public constructor new;
                 }
-                public fn size<T: nullable>(box: Box<T>): Int = 1;
+                public fn size<T admits nullable>(box: Box<T>): Int = 1;
                 public fn classify(value: Any): Int =
                         if (value is Box<let T>) then size(value) else 0;
                 fn use(): Int = classify(Box.new(7));

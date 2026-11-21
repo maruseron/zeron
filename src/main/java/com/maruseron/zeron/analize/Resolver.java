@@ -685,6 +685,14 @@ public final class Resolver {
         context.recordDeclarationType(name, type);
     }
 
+    /// Declares a compiler-generated capture binding. Its name comes from an enclosing local, so it
+    /// is not user-authored shadowing and must not produce a shadowing warning.
+    static void declareCapture(final ResolutionContext context, final Token name,
+                               final TypeDescriptor type) {
+        context.symbols.declareSymbol(SYNTHETIC_VAR, name, type, BindingMutability.IMMUTABLE, false);
+        context.recordDeclarationType(name, type);
+    }
+
     static void define(final ResolutionContext context, final Token name) {
         context.symbols.define(name);
     }

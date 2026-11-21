@@ -168,6 +168,28 @@ public final class WarningDiagnosticsTest {
     }
 
     @Test
+    public void doesNotReportShadowingForAnonymousCaptureBindings() {
+        final var warnings = resolve("""
+                package warnings;
+
+                contract Reader {
+                    read(): Int;
+                }
+                class Box {
+                    public peek(): Int {
+                        let captured = 7;
+                        let reader = object: Reader {
+                            public read(): Int = captured;
+                        };
+                        return reader.read();
+                    }
+                }
+                fn main(): Unit = ();
+                """);
+        assertFalse(warnings.toString(), warnings.contains("ZR3017"));
+    }
+
+    @Test
     public void anonymousWitnessWarnsWithoutFailingParsing() {
         Zeron.beginReplSubmission();
         final var parsed = Parser.of(Scanner.from("""

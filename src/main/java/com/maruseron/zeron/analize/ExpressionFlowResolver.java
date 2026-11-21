@@ -4168,7 +4168,7 @@ final class ExpressionFlowResolver {
         return type;
     }
 
-    /// Reports the type-checking diagnostic when `type` is a `T: nullable` type parameter that flow
+    /// Reports the type-checking diagnostic when `type` is a `T admits nullable` type parameter that flow
     /// analysis has not proved non-null. The diagnostic points at the use, not at the declaration.
     static void requireNullCheckForTypeParameter(final ResolutionContext context,
                                                  final Expr expression,

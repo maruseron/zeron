@@ -182,7 +182,7 @@
           }
         },
         {
-          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\s+)(raises)\\b(?=[^{};]*\\{)",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\s+)(performs)\\b(?=[^{};]*\\{)",
           "captures": {
             "1": {
               "name": "entity.name.type.zeron"
@@ -254,14 +254,30 @@
     },
     "keywords": {
       "name": "keyword.control.zeron",
-      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|under|unsafe|until|using|witness|while)\\b"
+      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|perform|performs|private|property|public|return|sealed|static|then|this|throws|type|typeof|under|unsafe|until|using|witness|while)\\b"
     },
     "contextual-keywords": {
       "patterns": [
         {
-          "match": "(?<=:)\\s*(nullable)\\b(?=\\s*(?:\\+|,|>))",
+          "match": "\\b(admits)\\b(?=\\s+(?:nullable|mutable|effect)\\b)",
           "captures": {
             "1": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b(nullable|mutable)\\b(?=\\s*(?:\\+|,|>))",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "match": "(?:(?<=<)|(?<=,))(\\s*)(reified)\\b(?=\\s*(?:[A-Za-z_]|_))",
+          "captures": {
+            "2": {
               "name": "keyword.control.zeron"
             }
           }

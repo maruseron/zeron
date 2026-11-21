@@ -1139,7 +1139,7 @@ final class DeclarationResolver {
             if (!Stmt.isAnonymousCaptureField(field)) continue;
             final var captureName = new Token(TokenType.IDENTIFIER,
                     Stmt.anonymousCaptureSourceName(field), null, field.name().span());
-            declare(context, SYNTHETIC_VAR, captureName, field.type(), BindingMutability.IMMUTABLE);
+            declareCapture(context, captureName, field.type());
             define(context, captureName);
         }
         for (int i = 0; i < method.parameters().size(); i++) {

@@ -163,10 +163,18 @@ public final class SymbolTable {
                              final Token name,
                              final TypeDescriptor type,
                              final BindingMutability mutability) {
+        return declareSymbol(declaration, name, type, mutability, true);
+    }
+
+    public int declareSymbol(final Stmt declaration,
+                             final Token name,
+                             final TypeDescriptor type,
+                             final BindingMutability mutability,
+                             final boolean reportShadowing) {
         if (scope == null)
             return declareGlobal(declaration, name, type, mutability); // -1
 
-        return declareLocal(declaration, name, type, mutability);      // last lvt idx
+        return declareLocal(declaration, name, type, mutability, reportShadowing); // last lvt idx
     }
 
     private int declareGlobal(final Stmt declaration,
@@ -194,7 +202,8 @@ public final class SymbolTable {
     private int declareLocal(final Stmt declaration,
                              final Token name,
                              final TypeDescriptor type,
-                             final BindingMutability mutability) {
+                             final BindingMutability mutability,
+                             final boolean reportShadowing) {
         if (!scope.names.add(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, name,
                     "Already a symbol bound to this name."));
@@ -206,7 +215,9 @@ public final class SymbolTable {
         if (previous != null) {
             // Implicit receivers (`this`) are compiler-generated and cannot be renamed, so a nested
             // receiver shadowing an outer one is not actionable for the user.
-            if (!name.lexeme().equals("_") && name.type() != TokenType.THIS) {
+            if (reportShadowing
+                    && !name.lexeme().equals("_")
+                    && name.type() != TokenType.THIS) {
                 Zeron.warning(name, DiagnosticCatalog.SHADOWED_LOCAL,
                         "Local '" + name.lexeme() + "' shadows an outer declaration.");
             }

@@ -976,7 +976,7 @@ final class MemberInteropResolver {
                     call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
                 }
                 resolveMemberArguments(context, call, descriptor, fixedArity, variadic);
-                final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
+                final var returnType = exposeProjectedResult(descriptor.returnType(), call.name, true);
                 call.setType(returnType);
                 return returnType;
             }
@@ -1026,7 +1026,7 @@ final class MemberInteropResolver {
                                 fixedArity);
                     }
                     resolveMemberArguments(context, call, descriptor, fixedArity, variadic);
-                    final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
+                    final var returnType = exposeProjectedResult(descriptor.returnType(), call.name, true);
                     call.setType(returnType);
                     return returnType;
                 }
@@ -1066,7 +1066,7 @@ final class MemberInteropResolver {
                 classMethod != null
                         ? TypeResolver.substitutionsFor(context, typeParameters, receiverType)
                         : appliedContract.substitutions());
-        final var exposedReturn = exposeProjectedResult(instantiatedDescriptor.returnType(), call.name);
+        final var exposedReturn = exposeProjectedResult(instantiatedDescriptor.returnType(), call.name, true);
         final var isMutating = classMethod != null
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
@@ -2317,9 +2317,13 @@ final class MemberInteropResolver {
             ensureAssignable(context, expected, resolvedArguments[i], call.name);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
-        final var exposedReturn = exposeProjectedResult(instantiatedReturn, call.name);
-        final var resolvedDescriptor = TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
-                instantiatedParameters.toArray(TypeDescriptor[]::new));
+        final var exposedReturn = exposeProjectedResult(instantiatedReturn, call.name, true);
+        final var instantiatedEffects = EffectRows.normalize(genericType.raisedEffects().stream()
+                .map(effect -> TypeSubstitution.substitute(effect, substitutions))
+                .toList());
+        final var resolvedDescriptor = TypeDescriptor.functionWithEffectsOf(
+                genericType.name(), instantiatedReturn,
+                instantiatedParameters, List.of(), instantiatedEffects);
         call.setResolvedDescriptor(resolvedDescriptor);
         context.recordCallSiteFunctionType(call.name, resolvedDescriptor);
         if (variadic) {
@@ -2376,7 +2380,15 @@ final class MemberInteropResolver {
 
     private static TypeDescriptor exposeProjectedResult(final TypeDescriptor resultType,
                                                         final Token where) {
-        if (TypeSubstitution.hasUnexposableCapture(resultType)) {
+        return exposeProjectedResult(resultType, where, false);
+    }
+
+    /// Zeron members may return a type parameterized by an effect row. Effect-row variables are not
+    /// Java wildcard captures, so the stricter rejection applies only at Java interop boundaries.
+    private static TypeDescriptor exposeProjectedResult(final TypeDescriptor resultType,
+                                                        final Token where,
+                                                        final boolean allowEffectRowVariables) {
+        if (!allowEffectRowVariables && TypeSubstitution.hasUnexposableCapture(resultType)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     where, "A captured projected type cannot escape inside a compound result type."));
         }
@@ -3471,7 +3483,12 @@ final class MemberInteropResolver {
             if (contextual != null) return contextual;
         }
         if (argument instanceof Expr.MemberCall call) {
-            return resolveMemberCall(context, call, expectedType);
+            final var resolved = resolveMemberCall(context, call, expectedType);
+            if (call.resolvedDescriptor() != null) {
+                RaisedEffectFlow.add(context,
+                        new java.util.LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()), call.name);
+            }
+            return resolved;
         }
         if (argument instanceof Expr.Call call) {
             return ExpressionFlowResolver.resolveCallWithExpected(context, call, expectedType);

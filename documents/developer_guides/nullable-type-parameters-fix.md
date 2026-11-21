@@ -1,4 +1,4 @@
-# Fix: unchecked dereference of `T: nullable` values in generic bodies
+# Fix: unchecked dereference of `T admits nullable` values in generic bodies
 
 | Field | Value |
 | ----- | ----- |
@@ -9,7 +9,7 @@
 
 ## Summary
 
-A type parameter declared `T: nullable` admits `null`-containing arguments such as `String?`. Inside
+A type parameter declared `T admits nullable` admits `null`-containing arguments such as `String?`. Inside
 the generic body, a value of type `T` must therefore be treated as possibly null. The checker must
 not let such a value be dereferenced, passed where a non-null type is required, or used with a
 bound's operations until it has been checked against `null`. Without this rule, a generic body can
@@ -21,12 +21,12 @@ validate it.
 
 ## Problem
 
-`nullable` is an admissibility marker. It widens the set of types a caller may supply for `T`, so
+`admits nullable` is an admissibility marker. It widens the set of types a caller may supply for `T`, so
 that `Option<String?>` or `identity<String?>(null)` is legal. It does not rewrite the occurrences of
 `T` in a signature. That is correct, and must stay so: in
 
 ```zeron
-fn firstOf<T: nullable>(values: Array<T>): T
+fn firstOf<T admits nullable>(values: Array<T>): T
 ```
 
 the result is `String` when `T = String` and `String?` when `T = String?`. If every `T` were
@@ -36,14 +36,14 @@ The defect is in the body, not the signature. Inside the body the checker has to
 knows about a `T` value. If it treats `T` like an ordinary non-null type, this compiles:
 
 ```zeron
-fn describe<T: nullable>(value: T): String = value.toString();
+fn describe<T admits nullable>(value: T): String = value.toString();
 ```
 
 and `describe<String?>(null)` fails at run time. The same gap applies to three other uses of a
-`T: nullable` value:
+`T admits nullable` value:
 
-- a call through a contract bound, as in `T: nullable + Comparable<T>`, where the receiver may be
-  `null`;
+- a call through a contract bound, as in `T: Comparable<T> admits nullable`, where the receiver may
+  be `null`;
 - passing the value to a parameter whose type does not admit `null`, including `Any`;
 - using the value as an operand.
 
@@ -55,10 +55,10 @@ rejected, the problem is limited to the bound, argument, and operand cases.
 ### Signatures
 
 Type-argument substitution at a call site is unchanged. `T` is replaced exactly by the argument the
-caller supplies, nullable or not. A type parameter without the `nullable` marker still rejects
+caller supplies, nullable or not. A type parameter without `admits nullable` still rejects
 `null`-containing arguments.
 
-### Values of type `T: nullable` inside the body
+### Values of type `T admits nullable` inside the body
 
 Inside the body, a value whose type is a `nullable` type parameter is **possibly null and opaque**.
 The checker applies these rules:
@@ -81,7 +81,7 @@ The checker applies these rules:
    flow. In that region the bound's operations and the members of `Any` are available. The refined
    type is internal; the source language has no spelling for it, and none is added.
 4. **Invalidation.** Refinement of a mutable local ends at the next assignment to that local.
-5. **Bounds.** For `T: nullable + C<T>`, the operations of `C` apply to the non-null part of `T`. A
+5. **Bounds.** For `T: C<T> admits nullable`, the operations of `C` apply to the non-null part of `T`. A
    body that wants to support `null` elements must handle them explicitly.
 
 ### Diagnostics
@@ -91,7 +91,7 @@ be null. Check it against `null` before using it." Allocate a code with the othe
 diagnostics. The diagnostic should point at the dereference, not at the declaration of `T`.
 
 A comparison of a value whose type does not admit `null` with `null` (for example `x == null` where
-`x: A` and `A: mut`) is always false. Report it as a warning. This is a lint and is not required by
+`x: A` and `A admits mutable`) is always false. Report it as a warning. This is a lint and is not required by
 the fix.
 
 ### Runtime
@@ -112,15 +112,17 @@ erased `Object` operations.
 4. **Flow analysis.** Extend the existing null-refinement logic to values whose type is a type
    parameter, including the early-exit and branch forms, and invalidate on assignment.
 5. **Operators.** Apply the same rule to unary and binary operators and to `match` scrutinees.
-6. **Standard library.** Audit every declaration that uses `nullable` and fix each body that now
-   fails. Start with these:
-   - `Sortable.sorted` and `InPlaceSortable.sort`, whose bounds are `nullable + mut + Comparable<T>`.
-     Comparing elements with `compareTo` dereferences each one. Remove `nullable` from these bounds
+6. **Standard library.** Audit every declaration that uses `admits nullable` and fix each body that
+   now fails. Start with these:
+   - `Sortable.sorted` and `InPlaceSortable.sort`, whose bounds are
+     `Comparable<T> admits nullable + mutable`. Comparing elements with `compareTo` dereferences
+     each one. Remove `admits nullable` from these bounds
      if `null` has no meaningful order. If a null policy is wanted, define it (for example nulls
      first) and implement it explicitly.
-   - Bodies of `Option`, `Result`, `Step`, `Iterable`, and `Iterator`, which are all `nullable` and
-     mostly move values. They should pass unchanged, and any that call a member must be checked.
-   - Any other contract that combines `nullable` with a behavioral bound.
+   - Bodies of `Option`, `Result`, `Step`, `Iterable`, and `Iterator`, which all admit `nullable`
+     arguments and mostly move values. They should pass unchanged, and any that call a member must
+     be checked.
+   - Any other contract that combines `admits nullable` with a behavioral bound.
 7. **Rollout.** Ship in two steps. First report the diagnostic as a warning and run the audit
    against the standard library and the test suite. Then promote it to an error once the audit
    passes. Nothing in the library index changes, because the check applies to bodies when they are
@@ -142,20 +144,20 @@ The first four tests establish the problem and the basic rule. Run test 1 before
 
 ```zeron
 // 1. Member access on an unrefined value.            Expected: error
-fn describe<T: nullable>(value: T): String = value.toString();
+fn describe<T admits nullable>(value: T): String = value.toString();
 
 // 2. Branch refinement.                              Expected: compiles
-fn describeBranch<T: nullable>(value: T): String =
+fn describeBranch<T admits nullable>(value: T): String =
     if (value != null) then value.toString() else "null";
 
 // 3. Early exit refinement.                          Expected: compiles
-fn describeEarly<T: nullable>(value: T): String {
+fn describeEarly<T admits nullable>(value: T): String {
     if (value == null) return "null";
     return value.toString();
 }
 
 // 4. Use before the check, even in the same function.      Expected: error
-fn checkedTooLate<T: nullable>(value: T): String {
+fn checkedTooLate<T admits nullable>(value: T): String {
     let text = value.toString();
     if (value == null) return "null";
     return text;
@@ -166,11 +168,11 @@ fn checkedTooLate<T: nullable>(value: T): String {
 
 ```zeron
 // 5. Identity and wrapping move the value without using it.   Expected: compiles
-fn identityOf<T: nullable>(value: T): T = value;
-fn wrap<T: nullable>(value: T): Option<T> = Option.Some(value);
+fn identityOf<T admits nullable>(value: T): T = value;
+fn wrap<T admits nullable>(value: T): Option<T> = Option.Some(value);
 
 // 6. Safe navigation yields a nullable result.               Expected: compiles
-fn safeText<T: nullable>(value: T): String? = value?.toString();
+fn safeText<T admits nullable>(value: T): String? = value?.toString();
 ```
 
 ### Parameter types
@@ -180,13 +182,13 @@ fn takesAny(value: Any): String = "ok";
 fn takesAnyOrNull(value: Any?): String = "ok";
 
 // 7. Passing to a non-null parameter.                 Expected: error
-fn leak<T: nullable>(value: T): String = takesAny(value);
+fn leak<T admits nullable>(value: T): String = takesAny(value);
 
 // 8. Passing to a nullable parameter.                 Expected: compiles
-fn pass<T: nullable>(value: T): String = takesAnyOrNull(value);
+fn pass<T admits nullable>(value: T): String = takesAnyOrNull(value);
 
 // 9. Passing after a check.                           Expected: compiles
-fn passChecked<T: nullable>(value: T): String =
+fn passChecked<T admits nullable>(value: T): String =
     if (value != null) then takesAny(value) else "null";
 ```
 
@@ -197,11 +199,11 @@ differently.
 
 ```zeron
 // 10. Bound operation on an unrefined receiver.       Expected: error
-fn order<T: nullable + Comparable<T>>(left: T, right: T): Int =
+fn order<T: Comparable<T> admits nullable>(left: T, right: T): Int =
     left.compareTo(right);
 
 // 11. Bound operation after checks on both values.    Expected: compiles
-fn orderChecked<T: nullable + Comparable<T>>(left: T, right: T): Int {
+fn orderChecked<T: Comparable<T> admits nullable>(left: T, right: T): Int {
     if (left == null or right == null) return 0;
     return left.compareTo(right);
 }
@@ -210,7 +212,7 @@ fn orderChecked<T: nullable + Comparable<T>>(left: T, right: T): Int {
 ### Call sites are unchanged
 
 ```zeron
-fn firstOf<T: nullable>(values: Array<T>): T = values[0];
+fn firstOf<T admits nullable>(values: Array<T>): T = values[0];
 
 // 12. T = String keeps a non-null result.              Expected: compiles
 let name: String = firstOf(["Ada"]);
@@ -220,7 +222,7 @@ let nullableNames: Array<String?> = ["Ada", null];
 let bad: String = firstOf(nullableNames);
 
 // 14. A parameter without the marker rejects null.      Expected: error
-fn only<A: mut>(value: A): A = value;
+fn only<A admits mutable>(value: A): A = value;
 let rejected = only(null);
 
 // 15. A nullable parameter accepts null.                Expected: compiles
@@ -231,7 +233,7 @@ let accepted = identityOf<String?>(null);
 
 ```zeron
 // 16. Assignment invalidates the refinement.             Expected: error
-fn reassigned<T: nullable>(value: T, replacement: T): String {
+fn reassigned<T admits nullable>(value: T, replacement: T): String {
     let mut current = value;
     if (current == null) return "null";
     current = replacement;

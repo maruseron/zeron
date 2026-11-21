@@ -28,6 +28,21 @@
   `reified` is now a leading capability (`reified T`), and legacy marker spellings such as
   `T: mut` or `T: nullable` produce migration diagnostics. Response constraints remain the
   `Responds<R>` bound, and effect markers do not take response type arguments.
+- Implemented ZEP-0112 structured concurrency on virtual threads. `zeron.concurrent.Scope` opens a
+  `using`-scoped lifetime over virtual threads (or an injected `ExecutorService`), starts
+  `Task<T, E>` handles, and joins or cancels them on close; `Task.value()` blocks and re-raises the
+  task body's captured effects at the join point, so the caller's `performs` row covers them.
+  Cancellation interrupts running tasks before the closing join, deadlines request cancellation,
+  and `using` cleanup inside a task keeps the normal primary-effect/suppressed-failure precedence.
+  The compiler now preserves substituted effects on generic member calls and records effects for
+  member calls resolved as arguments. This is a standard-library and runtime addition: no
+  suspension syntax, task monad, compiler transform, or runtime ABI change.
+- Fixed syntax highlighting after the `perform`/`performs` and `admits`/leading-`reified` syntax
+  changes. The TextMate grammar recognizes the new keywords, data-class `performs` headers, and
+  admissibility markers; the ANSI highlighter applies the same contextual rules.
+- Stopped reporting `ZR3017` shadowing warnings for compiler-generated anonymous-object capture
+  bindings. Resolving an object expression no longer makes captured locals such as `l` and `r` in
+  the standard library look like user-authored shadowing.
 
 ## [0.8.0] - 2026, 20 NOV
 

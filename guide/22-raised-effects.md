@@ -323,6 +323,32 @@ catch-all case. Java exceptions are not converted automatically; external-class 
 explicitly map declared checked exceptions to Zeron effects, as described in the
 [Java interoperability guide](23-java-interoperability.md).
 
+## Effects across task boundaries
+
+A concurrent task started with `Scope.start` captures a raised effect at its boundary instead of
+letting it cross threads. The effect stays dormant until the task is joined with `value()`, which
+re-raises it in the joining thread:
+
+```zeron
+fn loadAll(): Array<User> performs NotFound, DisposeFailure {
+    using (let scope = Scope.open()) {
+        let first = scope.start(() -> find(1));
+        let second = scope.start(() -> find(2));
+        return [first.value(), second.value()];
+    }
+}
+```
+
+Starting the task does not perform `NotFound`; `first.value()` does. The `Task<T, {E}>` handle records
+the task body's effects, so omitting `NotFound` from `loadAll`'s `performs` row is a compile-time
+error. Ordinary handlers work at the join point because the effect is re-raised there.
+
+An ordinary Java failure inside a task is not translated into a Zeron effect. It surfaces unchanged
+from `value()`. Cancellation surfaces as `java.util.concurrent.CancellationException`, with a task
+failure attached as suppressed if cancellation and failure overlap. See the
+[structured concurrency guide](43-structured-concurrency.md) for scope lifetime, cancellation, and
+deadlines.
+
 ## Effects and `Result`
 
 `Result<T, E>` represents success or failure as an ordinary value. The caller can store it, return

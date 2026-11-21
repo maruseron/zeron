@@ -14,6 +14,27 @@ using (let file: &File = File.open(path)) {
 value use an explicit `return`. Effects from resource initializers, the body, and disposal remain in
 the enclosing callable's effect set, so they must be handled or declared with `performs`.
 
+## Scopes own task lifetimes
+
+A concurrent scope is itself a `Disposable` resource. Open it in a `using` block, start tasks in it,
+and let the closing join bound their lifetimes:
+
+```zeron
+using (let scope = Scope.open()) {
+    let first = scope.start(() -> load(1));
+    let second = scope.start(() -> load(2));
+    scope.join();
+    return first.value() + second.value();
+}
+```
+
+Closing the scope joins every task, so no task outlives the block. Cancelling the scope interrupts
+its tasks before that join, and `using` cleanup inside a task still runs as the task unwinds. When a
+task body and a resource disposal both fail, the body's effect stays primary and the cleanup
+failures are suppressed, using the same precedence as synchronous code. The
+[structured concurrency guide](43-structured-concurrency.md) covers effects, cancellation, and
+deadlines.
+
 ## Mutable resource views
 
 Disposal can mutate the resource, so each binding must have a mutable reference type (`&T`) whose

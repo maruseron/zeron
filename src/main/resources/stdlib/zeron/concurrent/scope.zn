@@ -1,0 +1,75 @@
+package zeron.concurrent;
+
+import com.maruseron.zeron.runtime.ScopeSupport;
+
+import java.util.concurrent.ExecutorService;
+
+import zeron.lang.Cell;
+import zeron.lang.Option;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+import zeron.time.Duration;
+
+/// A structured lifetime for concurrent tasks.
+///
+/// Open a scope in a `using` block. Tasks started in it run on virtual threads and are bounded by
+/// the scope's lifetime: closing the scope joins every task, and cancelling the scope interrupts
+/// every task before that join. The scope never leaves a task running after `dispose`.
+///
+/// ```zeron
+/// using (let scope = Scope.open()) {
+///     let first = scope.start(() -> load(1));
+///     let second = scope.start(() -> load(2));
+///     scope.join();
+///     return [first.value(), second.value()];
+/// }
+/// ```
+public class Scope is Disposable {
+    runtime: &ScopeSupport;
+
+    private constructor new;
+
+    /// Opens a scope whose tasks run on named virtual threads.
+    public constructor open() = Scope.new(ScopeSupport.open());
+
+    /// Opens a scope on an injected executor. The caller keeps ownership of the executor; the
+    /// scope only uses it to run tasks and never shuts it down.
+    public constructor openWith(executor: &ExecutorService) =
+        Scope.new(ScopeSupport.openWith(executor));
+
+    /// Starts `block` on a virtual thread and returns its handle.
+    ///
+    /// The block's effects are captured at the task boundary. Starting a task therefore does not
+    /// perform `E`; the joining `Task.value()` call does.
+    public start<T admits nullable + mutable, E admits effect...>(
+        block: () -> T performs E
+    ): Task<T, {E}> {
+        let result = Cell<Option<T>>.new(Option<T>.None());
+        let receive: (T) -> Unit = (item) -> result.set(Option.Some(item));
+        let task = ScopeSupport.start(this.runtime, block, receive);
+        return TaskImpl<T, {E}>.new(task, result);
+    }
+
+    /// Waits for every task started in this scope and prevents new tasks from starting.
+    ///
+    /// Task outcomes stay attached to their handles; call `value()` on a task to re-raise its
+    /// captured effect at the join point.
+    public join(): Unit = ScopeSupport.join(this.runtime);
+
+    /// Requests cooperative cancellation of every task in this scope and interrupts running tasks.
+    ///
+    /// The subsequent scope close joins the cancelled tasks, so their `using` cleanup still runs.
+    public cancel(): Unit = ScopeSupport.cancel(this.runtime);
+
+    /// Cancels the scope when `duration` elapses. A later deadline replaces an earlier one.
+    ///
+    /// The deadline only requests cancellation; it does not create a separate failure channel.
+    public deadline(duration: Duration): Unit =
+        ScopeSupport.deadline(this.runtime, duration.nanoseconds);
+
+    /// Joins every task. A task that has not been joined explicitly still finishes here, so the
+    /// scope's `using` block is the outer bound on every task lifetime.
+    public mut dispose(): Unit performs DisposeFailure {
+        ScopeSupport.join(this.runtime);
+    }
+}

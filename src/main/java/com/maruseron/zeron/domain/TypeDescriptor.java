@@ -26,7 +26,7 @@ public sealed interface TypeDescriptor
         return this instanceof NullableDescriptor;
     }
 
-    /// Whether this type is a type parameter declared `T: nullable`. Inside a generic body a value
+    /// Whether this type is a type parameter declared `T admits nullable`. Inside a generic body a value
     /// of that type may be null until flow analysis proves otherwise.
     default boolean isNullableTypeParameter() {
         return this instanceof TypeParameterDescriptor parameter && parameter.admitsNullableArguments();

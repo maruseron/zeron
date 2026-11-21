@@ -70,6 +70,8 @@ public final class AnsiSyntaxHighlighter {
             case "integer", "decimal" -> followsSuffixCategory(tokens, index);
             case "string" -> followsSuffixStringInput(tokens, index);
             case "out" -> isTypeProjection(tokens, index);
+            case "admits" -> followsAdmissibilityClause(tokens, index);
+            case "reified" -> isLeadingReifiedCapability(tokens, index);
             case "nullable", "mutable" -> isGenericAdmissibilityMarker(tokens, index);
             case "where" -> followsNewtypeRepresentation(tokens, index);
             case "matches" -> isMatchesOperator(tokens, index);
@@ -120,6 +122,22 @@ public final class AnsiSyntaxHighlighter {
             }
         }
         return false;
+    }
+
+    private static boolean followsAdmissibilityClause(final List<Token> tokens, final int index) {
+        final var next = nextSignificantIndex(tokens, index);
+        if (next < 0) return false;
+        if (tokens.get(next).type() == TokenType.EFFECT) return true;
+        return tokens.get(next).type() == TokenType.IDENTIFIER
+                && (tokens.get(next).lexeme().equals("nullable")
+                        || tokens.get(next).lexeme().equals("mutable"));
+    }
+
+    private static boolean isLeadingReifiedCapability(final List<Token> tokens, final int index) {
+        final var previous = previousSignificantIndex(tokens, index);
+        if (previous < 0) return false;
+        return tokens.get(previous).type() == TokenType.LESS
+                || tokens.get(previous).type() == TokenType.COMMA;
     }
 
     private static boolean isGenericAdmissibilityMarker(final List<Token> tokens, final int index) {

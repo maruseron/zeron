@@ -103,18 +103,32 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
-    public void highlightsEffectAndNullableAdmissibilityMarkersContextually() {
+    public void highlightsAdmissibilityClausesAndReifiedCapabilities() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 public effect IoFailure {}
                 fn resolveEffects<E admits effect, T: Display admits nullable + mutable>(value: T): String =
                     value.toString();
                 fn resolveRows<E admits effect...>(value: Int): Int = value;
+                fn classify<reified T>(box: Box<reified _:>): Int = 1;
                 let nullable = 1;
                 """);
+        assertEquals(3, occurrences(highlighted, AnsiColor.apply("admits", "35")));
         assertEquals(3, occurrences(highlighted, AnsiColor.apply("effect", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("...", "33")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("nullable", "35")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("mutable", "35")));
+        assertEquals(2, occurrences(highlighted, AnsiColor.apply("reified", "35")));
+    }
+
+    @Test
+    public void leavesAdmitsAndReifiedAsIdentifiersOutsideTheirSyntaxPositions() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                let admits = 1;
+                let reified = 2;
+                """);
+
+        assertFalse(highlighted.contains(AnsiColor.apply("admits", "35")));
+        assertFalse(highlighted.contains(AnsiColor.apply("reified", "35")));
     }
 
     @Test

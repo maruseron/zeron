@@ -17,7 +17,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-/// Validates that a value of type `T: nullable` is possibly null inside a generic body.
+/// Validates that a value of type `T admits nullable` is possibly null inside a generic body.
 /// See `documents/developer_guides/nullable-type-parameters-fix.md`.
 public final class NullableTypeParameterBodyTest {
     private static final String CONTRACTS = """

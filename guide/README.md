@@ -41,6 +41,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Model declarations](34-model-declarations.md)
 1. [Raised effects](22-raised-effects.md)
 1. [Resource management](26-resource-management.md)
+1. [Structured concurrency](43-structured-concurrency.md)
 1. [Advanced functional abstractions](37-functional-abstractions.md)
 
 ## Part V — Use Zeron with the wider platform

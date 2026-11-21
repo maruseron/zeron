@@ -1,0 +1,8 @@
+package java.util.concurrent;
+
+/// The supported `ExecutorService` surface. A scope opened with an injected executor never shuts it
+/// down, so callers retain ownership of its lifecycle.
+public external class ExecutorService = "java.util.concurrent.ExecutorService" {
+    public shutdown(): Unit;
+    public isShutdown(): Boolean;
+}

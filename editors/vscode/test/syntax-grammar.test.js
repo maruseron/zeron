@@ -13,7 +13,7 @@ const handlerDeclarationPattern = grammar.repository.declarations.patterns
 const dataClassPattern = grammar.repository.declarations.patterns
   .find(pattern => pattern.match.includes('(data)') && pattern.match.includes('(class)'));
 const dataClassInitializerPattern = grammar.repository.declarations.patterns
-  .find(pattern => pattern.match.includes('(raises)'));
+  .find(pattern => pattern.match.includes('(performs)'));
 const characterPattern = grammar.repository.characters;
 const stringPattern = grammar.repository.strings;
 
@@ -135,17 +135,36 @@ test('highlights matches only before a pattern', () => {
   assert.equal(matcher.test('matches(value)'), false);
 });
 
-test('highlights nullable only as a generic admissibility marker', () => {
+test('highlights admits clauses and generic admissibility markers', () => {
+  const admitsPattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('(admits)'));
   const markerPattern = grammar.repository['contextual-keywords'].patterns
-    .find(pattern => pattern.match.includes('(nullable)'));
+    .find(pattern => pattern.match.includes('(nullable|mutable)'));
+  assert.ok(admitsPattern);
   assert.ok(markerPattern);
 
-  const matcher = new RegExp(markerPattern.match, 'g');
-  const source = 'fn read<T: nullable + Display<T>, E: effect>(value: T): T = value;';
-  assert.deepEqual(Array.from(source.matchAll(matcher), match => match[1]), ['nullable']);
+  const admits = new RegExp(admitsPattern.match, 'g');
+  assert.deepEqual(
+    Array.from('fn read<T: Display admits nullable + mutable>(value: T): T = value;'
+      .matchAll(admits), match => match[1]),
+    ['admits']);
+  assert.equal(admits.test('let admits = 1;'), false);
 
-  const ordinaryUses = 'let nullable = true; fn read(nullable: Int): Int = 1;';
-  assert.equal(Array.from(ordinaryUses.matchAll(matcher)).length, 0);
+  const markers = new RegExp(markerPattern.match, 'g');
+  const source = 'fn read<T: Display admits nullable + mutable, E admits effect...>(value: T): T = value;';
+  assert.deepEqual(Array.from(source.matchAll(markers), match => match[1]), ['nullable', 'mutable']);
+  assert.equal(markers.test('let nullable = true; fn read(nullable: Int): Int = 1;'), false);
+});
+
+test('highlights reified as a leading capability', () => {
+  const reifiedPattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('(reified)'));
+  assert.ok(reifiedPattern);
+
+  const matcher = new RegExp(reifiedPattern.match, 'g');
+  const source = 'fn classify<reified T>(box: Box<reified _:>): Int = 1;';
+  assert.deepEqual(Array.from(source.matchAll(matcher), match => match[2]), ['reified', 'reified']);
+  assert.equal(matcher.test('let reified = 1;'), false);
 });
 
 test('keeps effect recognized in declaration and generic constraint syntax', () => {
@@ -163,10 +182,10 @@ test('highlights data class declarations and initializer headers', () => {
 
   assert.ok(dataClassInitializerPattern);
   const initializer = new RegExp(dataClassInitializerPattern.match)
-    .exec('Point raises Failure {');
+    .exec('Point performs Failure {');
   assert.ok(initializer);
   assert.equal(initializer[1], 'Point');
-  assert.equal(initializer[3], 'raises');
+  assert.equal(initializer[3], 'performs');
 });
 
 test('highlights named handlers, anonymous handler expressions, and handler types', () => {
@@ -186,11 +205,13 @@ test('highlights named handlers, anonymous handler expressions, and handler type
 
   const operatorPattern = new RegExp(grammar.repository.operators.match, 'g');
   assert.deepEqual(
-    Array.from('String ~> {Failure} raises {}'.matchAll(operatorPattern), match => match[0])
+    Array.from('String ~> {Failure} performs {}'.matchAll(operatorPattern), match => match[0])
       .filter(operator => operator === '~>'),
     ['~>']
   );
-  assert.ok(grammar.repository.keywords.match.includes('|raises|'));
+  assert.ok(grammar.repository.keywords.match.includes('|perform|'));
+  assert.ok(grammar.repository.keywords.match.includes('|performs|'));
+  assert.equal(grammar.repository.keywords.match.includes('|raises|'), false);
 });
 
 test('highlights implementation only before HKT implementation blocks', () => {

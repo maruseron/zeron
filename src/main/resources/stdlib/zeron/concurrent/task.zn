@@ -1,0 +1,49 @@
+package zeron.concurrent;
+
+import com.maruseron.zeron.runtime.TaskSupport;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Cell;
+import zeron.lang.Option;
+
+/// A handle to one task started in a [Scope].
+///
+/// A task is already in flight. It is not a lazy computation and it deliberately has no `map`,
+/// `flatMap`, or `do` surface; monadic composition belongs to a separate deferred abstraction.
+/// `E` records every effect the task body may perform. The task captures those effects at its
+/// boundary and [value] re-raises them in the joining thread.
+public contract Task<T admits nullable + mutable, E admits effect...> {
+    /// Waits for this task and returns its value.
+    ///
+    /// A captured effect is re-raised at this call site, so ordinary handlers and the caller's
+    /// `performs` row apply exactly as they do for a direct call. A cancelled task raises the
+    /// runtime cancellation signal instead of publishing a value.
+    value(): T performs E;
+
+    /// Whether this task has completed, successfully or otherwise.
+    isDone(): Boolean;
+
+    /// Whether cancellation was requested or observed for this task.
+    isCancelled(): Boolean;
+
+    /// Requests cooperative cancellation and interrupts a running task.
+    mut cancel(): Unit;
+}
+
+class TaskImpl<T admits nullable + mutable, E admits effect...> is Task<T, {E}> {
+    runtime: &TaskSupport;
+    result: Cell<Option<T>>;
+
+    public constructor new;
+
+    public value(): T performs E {
+        TaskSupport.await(this.runtime);
+        return unwrapSome(this.result.get());
+    }
+
+    public isDone(): Boolean = this.runtime.isDone();
+
+    public isCancelled(): Boolean = this.runtime.isCancelled();
+
+    public mut cancel(): Unit = this.runtime.cancel();
+}

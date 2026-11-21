@@ -39,6 +39,41 @@ before it exits. It is useful when the result values are needed before the block
 A `Task` deliberately has no `map`, `flatMap`, or `do` surface. It is a handle to running work, not a
 deferred computation. Monadic composition, if it is added later, belongs to a separate abstraction.
 
+## Futures, `spawn`, and `await`
+
+`Future<T, E>` is the direct-style convenience layer over `Task`. `spawn(scope, body)` starts the
+body and returns a future; `await(future)` blocks the current virtual thread and returns its value.
+Neither adds a keyword, a modifier, or a wrapper to the enclosing signature:
+
+```zeron
+import zeron.concurrent.Scope;
+import zeron.concurrent.await;
+import zeron.concurrent.spawn;
+import zeron.resource.DisposeFailure;
+
+public fn loadBoth(): Int performs DisposeFailure {
+    using (let scope = Scope.open()) {
+        let first = spawn(scope, () -> load(1));
+        let second = spawn(scope, () -> load(2));
+        return await(first) + await(second);
+    }
+}
+```
+
+`await` is an ordinary generic function. It calls `Future.join()`, which waits for the task and
+re-raises the body's captured effects at the `await` call site. The future's `E` row therefore has
+the same checking rules as `Task.value()`: the effect belongs to the caller's `performs` clause.
+
+`Future` keeps the primitive surface: `join()` waits, `isDone()` and `isCancelled()` report state,
+and `cancel()` requests cooperative cancellation of that one task. Cancelling a future and calling
+`scope.cancel()` have the same unwind rules as cancelling a task directly, including `using` cleanup
+inside the body. A scope still owns its tasks: close it with `using`, and do not keep a future after
+its scope has exited.
+
+Starting the body does not perform its effects. Only `await` observes the outcome, so a future that
+is started and never awaited still participates in the scope's join and cancellation but does not
+re-raise its effect.
+
 A task failure does not automatically cancel its siblings. `scope.join()` still waits for all of
 them; call `scope.cancel()` when the first failure should stop the rest. `value()` is where a task's
 captured effect is observed, so each caller decides whether to continue or cancel.
@@ -73,10 +108,12 @@ cancellation was being delivered, that failure is attached as a suppressed excep
 
 ## Cancellation and deadlines
 
-`scope.cancel()` interrupts every running task and prevents new tasks from starting. Cancellation is
-cooperative: a task observes the interrupt at a blocking call or by checking
-`Thread.currentThread().isInterrupted()`. The closing join still waits for the task to unwind, so
-`using` cleanup inside the task runs before the scope exits.
+`scope.cancel()` interrupts every running task and prevents new tasks from starting. A cancelled
+`Future` or `Task` raises `java.util.concurrent.CancellationException` at its join point; the scope
+then joins the task so `using` cleanup runs. Cancellation is cooperative: a task observes the
+interrupt at a blocking call or by checking `Thread.currentThread().isInterrupted()`. The closing
+join still waits for the task to unwind, so `using` cleanup inside the task runs before the scope
+exits.
 
 `task.cancel()` cancels one task. A cancelled task never publishes its result, even if its body had
 already produced one when cancellation arrived.

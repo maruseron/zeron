@@ -37,6 +37,16 @@
   The compiler now preserves substituted effects on generic member calls and records effects for
   member calls resolved as arguments. This is a standard-library and runtime addition: no
   suspension syntax, task monad, compiler transform, or runtime ABI change.
+- Implemented the blocking async surface from ZEP-0120. `zeron.concurrent.Future<T, E>` is a
+  contract with `join()`, `isDone()`, `isCancelled()`, and `mut cancel()`; `spawn(scope, body)`
+  starts a body through `Scope.start` and returns a typed future; and `await(future)` is an ordinary
+  generic function that joins it and re-raises the task's captured effects at the await site. Source
+  needs no `async`/`await` keyword, suspend modifier, or wrapper return type, and the caller's
+  `performs` row is checked exactly as it is for `Task.value()`. `Scope.start` now returns
+  `&Task<T, {E}>` so the future can delegate cancellation; the read-only `Task` view is unchanged.
+  Because `await` is a plain blocking call, `main` can await directly with no handler or wrapper.
+  An interceptable `Await` carrier and a blocking entry handler are a separate design in ZEP-0164;
+  `STANDARD_LIBRARY_API_VERSION` is now 21.
 - Fixed syntax highlighting after the `perform`/`performs` and `admits`/leading-`reified` syntax
   changes. The TextMate grammar recognizes the new keywords, data-class `performs` headers, and
   admissibility markers; the ANSI highlighter applies the same contextual rules.

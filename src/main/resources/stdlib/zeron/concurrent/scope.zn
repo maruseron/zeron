@@ -43,7 +43,7 @@ public class Scope is Disposable {
     /// perform `E`; the joining `Task.value()` call does.
     public start<T admits nullable + mutable, E admits effect...>(
         block: () -> T performs E
-    ): Task<T, {E}> {
+    ): &Task<T, {E}> {
         let result = Cell<Option<T>>.new(Option<T>.None());
         let receive: (T) -> Unit = (item) -> result.set(Option.Some(item));
         let task = ScopeSupport.start(this.runtime, block, receive);

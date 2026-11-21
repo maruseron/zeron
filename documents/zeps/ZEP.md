@@ -137,7 +137,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Shipped | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Implemented | Candidate | 0.9.0 |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Candidate | 0.9.0 |
-| [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Candidate | 0.9.0 |
+| [ZEP-0120](./ZEP-0120.md) | Direct-Style Futures with `spawn` and `await` | Implemented | Candidate | 0.9.0 |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Leading Reification | Implemented | Candidate | 0.9.0 |
@@ -181,6 +181,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Candidate | 0.10.0 |
 | [ZEP-0162](./ZEP-0162.md) | Scoped Generic Admissibility | Draft | Unscheduled | — |
 | [ZEP-0163](./ZEP-0163.md) | Automatic Read-Only Widening for Inherited Generic Method Bounds | Draft | Unscheduled | — |
+| [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Draft | Unscheduled | — |
 
 ## Release bundles
 
@@ -195,7 +196,7 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0119, ZEP-0120, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0120 (implemented blocking surface), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft`; ZEP-0164 owns the deferred `Await` carrier |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -346,9 +347,10 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 ### `0.9.0` — effect control and response typing
 
 `0.9.0` is the effect-control bundle. It has fourteen `Candidate` rows; [ZEP-0112](./ZEP-0112.md),
-[ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), and [ZEP-0147](./ZEP-0147.md) are
-implemented, and the remaining designs are `Draft`. The effect-control rows carry the depth, and
-the library rows add surface that does not touch handler typing or code generation:
+[ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), [ZEP-0147](./ZEP-0147.md), and
+[ZEP-0120](./ZEP-0120.md) are implemented, and the remaining designs are `Draft`. The
+effect-control rows carry the depth, and the library rows add surface that does not touch handler
+typing or code generation:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
   an effect declares a response type, `perform` becomes an expression whose value the handler
@@ -366,8 +368,11 @@ the library rows add surface that does not touch handler typing or code generati
 - [ZEP-0112](./ZEP-0112.md) — structured concurrency on virtual threads. Implemented: a
   library-only `Scope` / `Task<T, E>` track with cancellation and deadlines; effect rows are
   captured at the task boundary and re-raised at `value()`. Independent of response typing.
-- [ZEP-0120](./ZEP-0120.md) — async as an effect and the `Future`/`Task` surface. Depends on
-  ZEP-0118 and ZEP-0112.
+- [ZEP-0120](./ZEP-0120.md) — direct-style futures with `spawn` and `await`. Implemented: the
+  blocking `Future<T, E>`, `spawn(scope, body)`, and `await(future)` layer builds on ZEP-0112's
+  `Scope`/`Task`, with no keyword, wrapper return type, or effect carrier. The `Await` carrier and
+  blocking entry handler are a separate design in [ZEP-0164](./ZEP-0164.md), which must ship the
+  entry handler with the carrier so `main` stays ergonomic.
 - [ZEP-0119](./ZEP-0119.md) — one-shot continuations, deep handlers, and cancellation.
   Prototype-gated: candidacy records the intended target, and the backend prototype plus the
   continuation ABI questions must be resolved before acceptance.

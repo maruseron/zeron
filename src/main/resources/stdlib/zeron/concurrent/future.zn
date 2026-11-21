@@ -1,0 +1,63 @@
+package zeron.concurrent;
+
+/// A handle to a task started with [spawn].
+///
+/// A future is a value, not a deferred computation: work starts when `spawn` is called, and the
+/// handle records the task's result type and the effects its body may perform. Joining the future
+/// blocks the current virtual thread and re-raises the task's captured effects in the joining
+/// thread.
+///
+/// `Future` is the direct-style convenience layer over [Task]; a scope's `start` and a task's
+/// `value` remain the primitive operations and keep working unchanged.
+public contract Future<T admits nullable + mutable, E admits effect...> {
+    /// Waits for the task and returns its value.
+    ///
+    /// A captured effect is re-raised at this call site, so ordinary handlers and the caller's
+    /// `performs` row apply exactly as they do for a direct call. A cancelled task raises the
+    /// runtime cancellation signal instead of publishing a value.
+    join(): T performs E;
+
+    /// Whether the task has completed, successfully or otherwise.
+    isDone(): Boolean;
+
+    /// Whether cancellation was requested or observed for the task.
+    isCancelled(): Boolean;
+
+    /// Requests cooperative cancellation and interrupts the running task.
+    mut cancel(): Unit;
+}
+
+class FutureImpl<T admits nullable + mutable, E admits effect...> is Future<T, {E}> {
+    task: &Task<T, {E}>;
+
+    public constructor new;
+
+    public join(): T performs E = this.task.value();
+
+    public isDone(): Boolean = this.task.isDone();
+
+    public isCancelled(): Boolean = this.task.isCancelled();
+
+    public mut cancel(): Unit = this.task.cancel();
+}
+
+/// Starts `body` in `scope` and returns a typed future.
+///
+/// Starting the task does not perform `E`; the body's effects are captured as the task outcome and
+/// re-raised by [await]. Opening, joining, cancelling, and closing the scope are unchanged from
+/// [Scope].
+public fn spawn<T admits nullable + mutable, E admits effect...>(
+    scope: &Scope,
+    body: () -> T performs E
+): &Future<T, {E}> =
+    FutureImpl<T, {E}>.new(scope.start(body));
+
+/// Waits for `future` and returns its value.
+///
+/// `await` is an ordinary blocking function on a virtual thread; it performs the task's effects
+/// `E`, so the caller's `performs` row must cover them. Source does not need an `async` or `await`
+/// keyword, and the enclosing function's return type is not wrapped.
+public fn await<T admits nullable + mutable, E admits effect...>(
+    future: Future<T, E>
+): T performs E =
+    future.join();

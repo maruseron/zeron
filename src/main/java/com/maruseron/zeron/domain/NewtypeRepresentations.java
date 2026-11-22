@@ -98,6 +98,19 @@ public final class NewtypeRepresentations {
         };
     }
 
+    /// Resolves a newtype in a read position to its carrier while leaving the surrounding shape
+    /// intact. Unlike [#resolve], reference, array, and generic wrappers are not rewritten: a
+    /// reference to a newtype stays a reference (so ordinary dereferencing still applies), and
+    /// generic arguments remain invariant.
+    public static TypeDescriptor resolveRead(final TypeDescriptor type) {
+        return switch (type) {
+            case NominalDescriptor nominal when isNewtype(nominal.name()) -> resolve(type);
+            case GenericDescriptor generic when isNewtype(generic.baseType().name()) -> resolve(type);
+            case NullableDescriptor nullable -> resolveRead(nullable.baseType()).toNullable();
+            default -> type;
+        };
+    }
+
     public static boolean containsNewtype(final TypeDescriptor type) {
         return !resolve(type).equals(type);
     }

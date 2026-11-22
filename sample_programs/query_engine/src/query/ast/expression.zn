@@ -6,7 +6,11 @@ public type Expr =
       Column(name: String)
     | Literal(value: Value)
     | Equal(left: Expr, right: Expr)
-    | GreaterThan(left: Expr, right: Expr);
+    | GreaterThan(left: Expr, right: Expr)
+    | And(left: Expr, right: Expr)
+    | Or(left: Expr, right: Expr)
+    | Not(operand: Expr)
+    | NullTest(operand: Expr, isNull: Boolean);
 
 public fn column(name: String): Expr = Expr.Column(name);
 

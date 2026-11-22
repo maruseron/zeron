@@ -158,21 +158,28 @@ but it is a common source of "alias" surprises.
 ### Cases, payloads, construction, and visibility
 
 Qualification remains the unambiguous form, and [ZEP-0128](../zeps/ZEP-0128.md) accepts
-context-resolved unqualified case names as an ergonomic alternative:
+context-resolved unqualified case names inside a match over a concrete sum:
 
 ```zeron
-let missing: Option<Int> = None();
-let present: Option<Int> = Some(42);
 let qualified = Option.Some(42);
-let direction = North();
+let absent: Option<Int> = Option<Int>.None();
+let direction = Direction.North();
+
+fn increment(option: Option<Int>): Option<Int> = match (option) {
+    case Some(value) -> Some(value + 1);
+    case None() -> Option.Some(0);
+};
 ```
 
-An unqualified case name resolves through the expected sum type or the match scrutinee; if two
-visible sums expose the same case name and context does not choose one, the name must be qualified.
-Qualification avoids package-level collisions between common names such as `None`, `Some`, and
-`North`, and remains available for construction and patterns. Payloads are declared as ordered named
-fields, are immutable, and are positional at construction and match sites. Names are
-metadata/documentation only; named arguments and payload defaults are not in the MVP.
+Unqualified construction and patterns are permitted only in the arms of a match whose scrutinee is
+a concrete sum: the pattern, its guard, and the constructed value on the right side of the arm
+resolve against that sum. Outside the match the case name must be qualified; unqualified cases are
+not a package-level facility, so `Some(42)` in a return or argument position is an error. If two
+visible sums expose the same case name, qualification is always required. Qualification avoids
+package-level collisions between common names such as `None`, `Some`, and `North`, and remains
+available for construction and patterns. Payloads are declared as ordered named fields, are
+immutable, and are positional at construction and match sites. Names are metadata/documentation
+only; named arguments and payload defaults are not in the MVP.
 
 All cases have the visibility of their sum. Public sums expose every case and payload type in their
 API; payload types must themselves be publicly nameable. Per-case visibility is excluded. Case-local
@@ -333,15 +340,22 @@ determinism for validator expressions; invariant validity is established at cons
 the built-in representation restriction ensures that the wrapped value cannot later mutate.
 
 Validated newtypes have no source-accessible unchecked constructor. Unvalidated newtypes use the
-ordinary `.new(value)` constructor. There is no `.value` property: the representation is the value.
+ordinary `.new(value)` constructor. There is no `.value` accessor: the representation is the value.
 A newtype-owned extension, witness, or namespace body is a representation context, so `this` and
-newtype-typed parameters have the carrier type directly. Ordinary callers use an explicit extension
-or namespace accessor when they need the representation.
+newtype-typed parameters have the carrier type directly.
 
-Newtypes do not implicitly inherit `Eq`, `Comparable`, or any other evidence from the underlying
-type. Equality and other behavior require explicit ordinary witnesses or extensions. JVM identity
-comparison (`===`) is not defined for newtypes; use value equality only when the corresponding
-evidence is available.
+A newtype has ordinary subtyping with its carrier. In read positions it is covariant with the
+representation: it may be compared with a carrier value, passed where the carrier is expected,
+returned as the carrier, and concatenated, and a function-shaped newtype is invoked directly
+through its function carrier. In write positions it is contravariant: a carrier value is not
+accepted where the newtype is expected, and constructing a newtype from a carrier still requires
+`.new` or the validating `tryNew`. This is a source-level rule; the direct-carrier representation
+does not change.
+
+Newtypes do not implicitly gain a nominal `Eq`, `Comparable`, or other witness from the underlying
+type. Operations that read the carrier use the carrier's built-in behavior or existing evidence;
+behavior that must be specific to the nominal type still requires explicit ordinary witnesses or
+extensions. JVM identity comparison (`===`) is not defined for newtypes.
 
 The implementation uses a direct carrier: concrete fields, parameters, and returns use the
 representation, while generic, nullable, `Any`, array, and other erased positions may box. The

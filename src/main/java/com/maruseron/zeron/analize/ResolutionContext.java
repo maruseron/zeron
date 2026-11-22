@@ -25,6 +25,10 @@ final class ResolutionContext {
     final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
     final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
     boolean representationContext;
+    /// Sums whose case constructors may currently be named without qualification. Only the arms
+    /// of a match over a concrete sum introduce one; unqualified case construction is not a
+    /// package-level facility.
+    private final Deque<Stmt.SumDecl> unqualifiedSumCaseScopes = new ArrayDeque<>();
     final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations = new LinkedHashMap<>();
     final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
     final Deque<Set<String>> selectedWitnessBundles = new ArrayDeque<>();
@@ -113,8 +117,21 @@ final class ResolutionContext {
         frame.dataInitializerOwner = null;
         frame.dataInitializerWritableFields = java.util.Map.of();
         openingScopes.clear();
+        unqualifiedSumCaseScopes.clear();
         resumeTokens.clear();
         resolvingOpeningCondition = false;
+    }
+
+    void pushUnqualifiedSumCases(final Stmt.SumDecl sum) {
+        unqualifiedSumCaseScopes.push(sum);
+    }
+
+    void popUnqualifiedSumCases() {
+        unqualifiedSumCaseScopes.pop();
+    }
+
+    List<Stmt.SumDecl> unqualifiedSumCaseScopes() {
+        return List.copyOf(unqualifiedSumCaseScopes);
     }
 
     void pushOpeningScope(final List<TypeParameterDescriptor> binders) {

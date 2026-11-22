@@ -8,34 +8,72 @@ import query.value.Value;
 import zeron.lang.Result;
 
 public fn evaluate(expression: Expr, row: Row): Result<Value, QueryError> = match (expression) {
-    case Expr.Column(name) -> row.get(name);
-    case Expr.Literal(value) -> Result<Value, QueryError>.Ok(value);
-    case Expr.Equal(left, right) -> match (evaluate(left, row)) {
-        case Result.Ok(leftValue) -> match (evaluate(right, row)) {
-            case Result.Ok(rightValue) ->
+    case Column(name) -> row.get(name);
+    case Literal(value) -> Result<Value, QueryError>.Ok(value);
+    case Equal(left, right) -> match (evaluate(left, row)) {
+        case Ok(leftValue) -> match (evaluate(right, row)) {
+            case Ok(rightValue) ->
                 Result<Value, QueryError>.Ok(Value.Flag(equalValues(leftValue, rightValue)));
-            case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+            case Err(error) -> Result<Value, QueryError>.Err(error);
         };
-        case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+        case Err(error) -> Result<Value, QueryError>.Err(error);
     };
-    case Expr.GreaterThan(left, right) -> match (evaluate(left, row)) {
-        case Result.Ok(leftValue) -> match (evaluate(right, row)) {
-            case Result.Ok(rightValue) -> match (compareValues(leftValue, rightValue)) {
-                case Result.Ok(order) ->
+    case GreaterThan(left, right) -> match (evaluate(left, row)) {
+        case Ok(leftValue) -> match (evaluate(right, row)) {
+            case Ok(rightValue) -> match (compareValues(leftValue, rightValue)) {
+                case Ok(order) ->
                     Result<Value, QueryError>.Ok(Value.Flag(order > 0));
-                case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+                case Err(error) -> Result<Value, QueryError>.Err(error);
             };
-            case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+            case Err(error) -> Result<Value, QueryError>.Err(error);
         };
-        case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+        case Err(error) -> Result<Value, QueryError>.Err(error);
     };
+    case And(left, right) -> asValue(andPredicate(left, right, row));
+    case Or(left, right) -> asValue(orPredicate(left, right, row));
+    case Not(operand) -> asValue(notPredicate(operand, row));
+    case NullTest(operand, isNull) -> asValue(nullTestPredicate(operand, isNull, row));
 };
 
 public fn evaluatePredicate(expression: Expr, row: Row): Result<Boolean, QueryError> =
     match (evaluate(expression, row)) {
-        case Result.Ok(value) -> match (value) {
-            case Value.Flag(flag) -> Result<Boolean, QueryError>.Ok(flag);
+        case Ok(value) -> match (value) {
+            case Flag(flag) -> Result<Boolean, QueryError>.Ok(flag);
             case _ -> Result<Boolean, QueryError>.Err(QueryError.InvalidPredicate());
         };
-        case Result.Err(error) -> Result<Boolean, QueryError>.Err(error);
+        case Err(error) -> Result<Boolean, QueryError>.Err(error);
+    };
+
+fn asValue(result: Result<Boolean, QueryError>): Result<Value, QueryError> = match (result) {
+    case Ok(flag) -> Result<Value, QueryError>.Ok(Value.Flag(flag));
+    case Err(error) -> Result<Value, QueryError>.Err(error);
+};
+
+fn andPredicate(left: Expr, right: Expr, row: Row): Result<Boolean, QueryError> =
+    match (evaluatePredicate(left, row)) {
+        case Ok(flag) ->
+            if (flag) then evaluatePredicate(right, row)
+            else Result<Boolean, QueryError>.Ok(false);
+        case Err(error) -> Result<Boolean, QueryError>.Err(error);
+    };
+
+fn orPredicate(left: Expr, right: Expr, row: Row): Result<Boolean, QueryError> =
+    match (evaluatePredicate(left, row)) {
+        case Ok(flag) ->
+            if (flag) then Result<Boolean, QueryError>.Ok(true)
+            else evaluatePredicate(right, row);
+        case Err(error) -> Result<Boolean, QueryError>.Err(error);
+    };
+
+fn notPredicate(operand: Expr, row: Row): Result<Boolean, QueryError> =
+    match (evaluatePredicate(operand, row)) {
+        case Ok(flag) -> Result<Boolean, QueryError>.Ok(not flag);
+        case Err(error) -> Result<Boolean, QueryError>.Err(error);
+    };
+
+fn nullTestPredicate(operand: Expr, isNull: Boolean, row: Row): Result<Boolean, QueryError> =
+    match (evaluate(operand, row)) {
+        case Ok(value) ->
+            Result<Boolean, QueryError>.Ok(equalValues(value, Value.Null()) == isNull);
+        case Err(error) -> Result<Boolean, QueryError>.Err(error);
     };

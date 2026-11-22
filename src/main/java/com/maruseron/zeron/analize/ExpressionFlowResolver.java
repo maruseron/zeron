@@ -731,7 +731,10 @@ final class ExpressionFlowResolver {
                     binary.setType(TypeDescriptor.ofBoolean());
                     yield TypeDescriptor.ofBoolean();
                 }
-                final var leftType = resolve(context, binary.left);
+                // Binary operands are read positions, so a newtype participates through its
+                // carrier: `tableId == "users"` and numeric or string operations on a newtype
+                // use the representation type.
+                var leftType = NewtypeRepresentations.resolveRead(resolve(context, binary.left));
                 if (binary.operator.type() == TokenType.PLUS
                         && leftType instanceof StringDescriptor) {
                     final var rightType = resolve(context, binary.right);
@@ -765,7 +768,7 @@ final class ExpressionFlowResolver {
                     binary.setType(resultType.type());
                     yield resultType.type();
                 }
-                final var rightType = resolve(context, binary.right);
+                var rightType = NewtypeRepresentations.resolveRead(resolve(context, binary.right));
                 final var refinedLeftType = LambdaResolver.refineInferredType(
                         context, binary.left, leftType, rightType);
                 final var refinedRightType = LambdaResolver.refineInferredType(
@@ -1292,8 +1295,17 @@ final class ExpressionFlowResolver {
     private static TypeDescriptor resolveStringConcatenation(final ResolutionContext context,
                                                              final Expr.Binary binary,
                                                              final TypeDescriptor rightType) {
-        final var nullable = rightType instanceof NullableDescriptor;
-        var valueType = nullable ? ((NullableDescriptor) rightType).baseType() : rightType;
+        final var carrierRight = NewtypeRepresentations.resolveRead(rightType);
+        final var nullable = carrierRight instanceof NullableDescriptor;
+        return resolveStringConcatenationOf(context, binary, carrierRight, nullable);
+    }
+
+    private static TypeDescriptor resolveStringConcatenationOf(final ResolutionContext context,
+                                                               final Expr.Binary binary,
+                                                               final TypeDescriptor rightType,
+                                                               final boolean nullable) {
+        var valueType = rightType instanceof NullableDescriptor nullableType
+                ? nullableType.baseType() : rightType;
         if (valueType instanceof ReferenceDescriptor reference) valueType = reference.baseType();
         binary.setNullableStringification(nullable || valueType instanceof NullDescriptor);
         if (valueType instanceof NullDescriptor || valueType instanceof StringDescriptor
@@ -1361,8 +1373,9 @@ final class ExpressionFlowResolver {
                 ? reference.baseType() : operandType;
         final var nullableBaseType = operandBaseType instanceof NullableDescriptor nullable
                 ? nullable.baseType() : operandBaseType;
-        final var comparableType = nullableBaseType instanceof ReferenceDescriptor reference
-                ? reference.baseType() : nullableBaseType;
+        final var comparableType = NewtypeRepresentations.resolveRead(
+                nullableBaseType instanceof ReferenceDescriptor reference
+                        ? reference.baseType() : nullableBaseType);
         if (comparableType instanceof IntDescriptor || comparableType instanceof CharDescriptor
                 || comparableType instanceof LongDescriptor
                 || comparableType instanceof FloatDescriptor
@@ -2183,6 +2196,10 @@ final class ExpressionFlowResolver {
                 || rootKind == MatchRootKind.CONCRETE_LITERAL
                 ? new LinkedHashSet<>(Set.of(scrutineeType.name()))
                 : new LinkedHashSet<String>();
+        // Arms of a match over a concrete sum may name that sum's cases without qualification,
+        // for both patterns and constructed values. The permission does not outlive the match.
+        final var scrutineeSum = context.sums.get(matchDomainType.name());
+        if (scrutineeSum != null) context.pushUnqualifiedSumCases(scrutineeSum);
         final var matchedNames = new LinkedHashSet<String>();
         final var matchedApplications = new LinkedHashSet<TypeDescriptor>();
         final var coveredNames = new LinkedHashSet<String>();
@@ -2300,6 +2317,8 @@ final class ExpressionFlowResolver {
                 }
             }
         }
+
+        if (scrutineeSum != null) context.popUnqualifiedSumCases();
 
         if (!rootCovered) {
             final var missing = rootKind == MatchRootKind.SEALED

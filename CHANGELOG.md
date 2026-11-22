@@ -4,6 +4,21 @@
 
 ### Compiler and language work
 
+- Corrected newtype subtyping. A newtype is now covariant with its carrier in read positions, so
+  `table == "users"`, passing a `UserId` where an `Int` is expected, returning it as the carrier,
+  and string-concatenating it are all valid without an accessor. The write direction stays nominal:
+  a carrier value is still rejected where the newtype is expected, and construction goes through
+  `.new` or the validating `tryNew`. The synthetic `.value` accessor is gone, including for
+  function-shaped newtypes, which are now invoked directly through their carrier
+  (`Doubler.new(f)(21)` and `formatter(record)`). The now-redundant `HttpMethod.value` and
+  `HttpUri.value` standard-library accessors are removed, so callers pass those newtypes directly
+  where a `String` is expected. This is a source-level correction of the direct-carrier
+  representation from ZEP-0070; the runtime representation is unchanged.
+- Unqualified sum case construction is now limited to the arms of a match over a concrete sum.
+  Patterns, guards, and the constructed values on the right side of an arm may omit the sum
+  qualifier, while `Some(42)`, `None()`, and similar constructions anywhere else require the
+  qualified form such as `Option.Some(42)`. This narrows the context-resolved spelling accepted by
+  ZEP-0128 and keeps unqualified case names from acting as package-level values.
 - Implemented ZEP-0118 response-typed effects and tail-resumptive handlers. An effect may declare
   `responds R`; `perform` then has type `R`, and an inline `handle` case may bind a resume token
   with `case Ask<Int>, k -> k.resume(8);`. The handler answer returns directly to the perform site

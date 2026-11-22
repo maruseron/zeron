@@ -1,0 +1,68 @@
+package query.dsl;
+
+import query.ast.Expr;
+import query.schema.User;
+import query.value.Value;
+
+import zeron.compiler.CodeCapture;
+import zeron.compiler.CodeLiteral;
+import zeron.compiler.CodeModel;
+import zeron.compiler.CodeNode;
+import zeron.compiler.CodeShape;
+import zeron.compiler.ComparisonOperator;
+
+/// Reifies a typed predicate lambda into the query expression AST.
+///
+/// The lambda's parameter type describes the columns available at that stage, while execution
+/// still reads the dynamic row by column name. A property access becomes a column read, so
+/// `user -> user.age > 18` translates to `age > 18` with no string literal in the query.
+public fn predicateExpr(predicate: CodeModel<(User) -> Boolean>): Expr =
+    translate(predicate.body, predicate.captures);
+
+fn translate(node: CodeNode, captures: Array<CodeCapture>): Expr = match (node.shape) {
+    case CodeShape.PropertyAccessNode(_, propertyId) -> Expr.Column(propertyId.name);
+    case CodeShape.LiteralNode(literal) -> Expr.Literal(valueOf(literal));
+    case CodeShape.CaptureNode(slot) -> Expr.Literal(captureValue(slot, captures));
+    case CodeShape.ComparisonNode(operator, left, right) ->
+        comparison(operator, translate(left, captures), translate(right, captures));
+    case CodeShape.AndNode(left, right) ->
+        Expr.And(translate(left, captures), translate(right, captures));
+    case CodeShape.OrNode(left, right) ->
+        Expr.Or(translate(left, captures), translate(right, captures));
+    case CodeShape.NotNode(operand) -> Expr.Not(translate(operand, captures));
+    case CodeShape.NullTestNode(operand, isNull) ->
+        Expr.NullTest(translate(operand, captures), isNull);
+    // A bare parameter cannot be part of a Boolean expression; the type checker rules it out.
+    case CodeShape.ParameterNode(_) -> Expr.Literal(Value.Null());
+};
+
+fn comparison(operator: ComparisonOperator, left: Expr, right: Expr): Expr = match (operator) {
+    case Equal() -> Expr.Equal(left, right);
+    case NotEqual() -> Expr.Not(Expr.Equal(left, right));
+    case GreaterThan() -> Expr.GreaterThan(left, right);
+    case LessThan() -> Expr.GreaterThan(right, left);
+    case GreaterThanOrEqual() -> Expr.Not(Expr.GreaterThan(right, left));
+    case LessThanOrEqual() -> Expr.Not(Expr.GreaterThan(left, right));
+};
+
+fn valueOf(literal: CodeLiteral): Value = match (literal) {
+    case NullLiteral() -> Value.Null();
+    case BooleanLiteral(flag) -> Value.Flag(flag);
+    case StringLiteral(text) -> Value.Text(text);
+    case IntegerLiteral(decimalText) -> Value.Integer(decimalText.toInt().getOrElse(0));
+    case DecimalLiteral(decimalText) -> Value.Decimal(decimalText.toFloat().getOrElse(0.0));
+    case FloatLiteral(number) -> Value.Decimal(number);
+};
+
+fn captureValue(slot: Int, captures: Array<CodeCapture>): Value {
+    for (let capture in captures) {
+        if (capture.slot == slot) {
+            return match (capture.value) {
+                case LiteralCapture(literal) -> valueOf(literal);
+                // Opaque captures hold domain values the row model cannot represent.
+                case OpaqueCapture(_) -> Value.Null();
+            };
+        }
+    }
+    return Value.Null();
+}

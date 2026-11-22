@@ -4,41 +4,39 @@ import query.error.QueryError;
 import query.value.Value;
 import query.value.Value.render;
 
-import zeron.collections.List;
+import zeron.collections.ArrayList;
 import zeron.lang.Result;
 
 public class Row {
-    columns: List<String>;
-    values: List<Value>;
+    columns: ArrayList<String>;
+    values: ArrayList<Value>;
 
     public get(column: String): Result<Value, QueryError> {
         let mut index = 0;
         while (index < this.columns.size) {
-            if (this.columns.at(index) == column) {
-                return Result<Value, QueryError>.Ok(this.values.at(index));
-            }
-            index = index + 1;
+            if (this.columnAt(index) == column) return Result.Ok(this.valueAt(index));
+            index += 1;
         }
         return Result<Value, QueryError>.Err(QueryError.MissingColumn(column));
     }
 
     public project(selected: Array<String>): Result<Row, QueryError> =
-        projectColumns(this, selected, 0, List<String>.empty(), List<Value>.empty());
+        projectColumns(this, selected, 0, ArrayList<String>.empty(), ArrayList<Value>.empty());
 
     public merge(other: Row): Row {
-        let mut mergedColumns = List<String>.empty();
-        let mut mergedValues = List<Value>.empty();
+        let mergedColumns = ArrayList<String>.empty();
+        let mergedValues = ArrayList<Value>.empty();
         let mut index = 0;
         while (index < this.columns.size) {
-            mergedColumns.add(this.columns.at(index));
-            mergedValues.add(this.values.at(index));
-            index = index + 1;
+            mergedColumns.add(this.columnAt(index));
+            mergedValues.add(this.valueAt(index));
+            index += 1;
         }
         index = 0;
         while (index < other.columns.size) {
-            mergedColumns.add(other.columns.at(index));
-            mergedValues.add(other.values.at(index));
-            index = index + 1;
+            mergedColumns.add(other.columnAt(index));
+            mergedValues.add(other.valueAt(index));
+            index += 1;
         }
         return Row.new(mergedColumns, mergedValues);
     }
@@ -48,24 +46,30 @@ public class Row {
         let mut index = 0;
         while (index < this.columns.size) {
             if (index > 0) text = text + ", ";
-            text = text + this.columns.at(index) + "=" + this.values.at(index).render();
-            index = index + 1;
+            text = text + this.columnAt(index) + "=" + this.valueAt(index).render();
+            index += 1;
         }
         return text + "}";
     }
+
+    /// Returns the column name at an in-range index. Callers guard with `size`.
+    private columnAt(index: Int): String = this.columns.at(index).getOrElse("");
+
+    /// Returns the value at an in-range index. Callers guard with `size`.
+    private valueAt(index: Int): Value = this.values.at(index).getOrElse(Value.Null());
 }
 
 fn projectColumns(
     row: Row,
     selected: Array<String>,
     index: Int,
-    projectedColumns: &List<String>,
-    projectedValues: &List<Value>
+    projectedColumns: &ArrayList<String>,
+    projectedValues: &ArrayList<Value>
 ): Result<Row, QueryError> =
     if (index >= selected.length) then
         Result<Row, QueryError>.Ok(Row.new(projectedColumns, projectedValues))
     else match (row.get(selected[index])) {
-        case Result.Ok(value) ->
+        case Ok(value) ->
             projectColumns(
                 row,
                 selected,
@@ -73,15 +77,15 @@ fn projectColumns(
                 appendColumn(projectedColumns, selected[index]),
                 appendValue(projectedValues, value)
             );
-        case Result.Err(error) -> Result<Row, QueryError>.Err(error);
+        case Err(error) -> Result<Row, QueryError>.Err(error);
     };
 
-fn appendColumn(columns: &List<String>, column: String): &List<String> {
+fn appendColumn(columns: &ArrayList<String>, column: String): &ArrayList<String> {
     columns.add(column);
     return columns;
 }
 
-fn appendValue(values: &List<Value>, value: Value): &List<Value> {
+fn appendValue(values: &ArrayList<Value>, value: Value): &ArrayList<Value> {
     values.add(value);
     return values;
 }

@@ -6,31 +6,46 @@ import query.value.Value;
 import zeron.lang.Result;
 
 public fn equalValues(left: Value, right: Value): Boolean = match (left) {
-    case Value.Integer(leftNumber) -> match (right) {
-        case Value.Integer(rightNumber) -> leftNumber == rightNumber;
+    case Integer(leftNumber) -> match (right) {
+        case Integer(rightNumber) -> leftNumber == rightNumber;
         case _ -> false;
     };
-    case Value.Text(leftText) -> match (right) {
-        case Value.Text(rightText) -> leftText == rightText;
+    case Decimal(leftNumber) -> match (right) {
+        case Decimal(rightNumber) -> leftNumber == rightNumber;
         case _ -> false;
     };
-    case Value.Flag(leftFlag) -> match (right) {
-        case Value.Flag(rightFlag) -> leftFlag == rightFlag;
+    case Text(leftText) -> match (right) {
+        case Text(rightText) -> leftText == rightText;
         case _ -> false;
     };
-    case Value.Null() -> match (right) {
-        case Value.Null() -> true;
+    case Flag(leftFlag) -> match (right) {
+        case Flag(rightFlag) -> leftFlag == rightFlag;
+        case _ -> false;
+    };
+    case Null() -> match (right) {
+        case Null() -> true;
         case _ -> false;
     };
 };
 
 public fn compareValues(left: Value, right: Value): Result<Int, QueryError> = match (left) {
-    case Value.Integer(leftNumber) -> match (right) {
-        case Value.Integer(rightNumber) ->
-            if (leftNumber < rightNumber) then Result<Int, QueryError>.Ok(-1)
-            else if (leftNumber > rightNumber) then Result<Int, QueryError>.Ok(1)
-            else Result<Int, QueryError>.Ok(0);
+    case Integer(leftNumber) -> match (right) {
+        case Integer(rightNumber) -> compareIntegers(leftNumber, rightNumber);
+        case _ -> Result<Int, QueryError>.Err(QueryError.InvalidComparison());
+    };
+    case Decimal(leftNumber) -> match (right) {
+        case Decimal(rightNumber) -> compareDecimals(leftNumber, rightNumber);
         case _ -> Result<Int, QueryError>.Err(QueryError.InvalidComparison());
     };
     case _ -> Result<Int, QueryError>.Err(QueryError.InvalidComparison());
 };
+
+fn compareIntegers(left: Int, right: Int): Result<Int, QueryError> =
+    if (left < right) then Result<Int, QueryError>.Ok(-1)
+    else if (left > right) then Result<Int, QueryError>.Ok(1)
+    else Result<Int, QueryError>.Ok(0);
+
+fn compareDecimals(left: Float, right: Float): Result<Int, QueryError> =
+    if (left < right) then Result<Int, QueryError>.Ok(-1)
+    else if (left > right) then Result<Int, QueryError>.Ok(1)
+    else Result<Int, QueryError>.Ok(0);

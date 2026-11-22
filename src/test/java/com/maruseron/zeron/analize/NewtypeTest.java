@@ -185,7 +185,7 @@ public final class NewtypeTest {
     }
 
     @Test
-    public void functionNewtypeValueCallInvokesTheCarrier() throws Exception {
+    public void functionNewtypeInvocationUsesTheCarrier() throws Exception {
         final var output = Files.createTempDirectory("zeron-function-newtype-value-");
         final var programName = "FunctionNewtypeValue" + UUID.randomUUID().toString().replace("-", "");
         final var unit = parse("function-newtype-value.zn", """
@@ -194,9 +194,9 @@ public final class NewtypeTest {
                     doubler: Doubler;
                     private constructor new;
                     public constructor of(doubler: Doubler) = Calculator.new(doubler);
-                    public apply(value: Int): Int = this.doubler.value(value);
+                    public apply(value: Int): Int = this.doubler(value);
                 }
-                fn direct(): Int = Doubler.new(value -> value * 2).value(21);
+                fn direct(): Int = Doubler.new(value -> value * 2)(21);
                 fn throughField(): Int =
                     Calculator.of(Doubler.new(value -> value + 1)).apply(41);
                 """);
@@ -271,10 +271,6 @@ public final class NewtypeTest {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("identity.zn", """
                 newtype UserId = String where value != "";
                 fn invalid(first: UserId, second: UserId): Boolean = first === second;
-                """).declarations()));
-        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("equality.zn", """
-                newtype UserId = String;
-                fn invalid(first: UserId, second: UserId): Boolean = first == second;
                 """).declarations()));
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("validator.zn", """
                 newtype UserId = String where value;
@@ -413,6 +409,51 @@ public final class NewtypeTest {
             deleteTree(clientOutput);
             deleteTree(libraryOutput);
         }
+    }
+
+    @Test
+    public void newtypeReadsWidenToTheirCarrier() throws Exception {
+        final var output = Files.createTempDirectory("zeron-newtype-widening-");
+        final var programName = "NewtypeWidening" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("widening.zn", """
+                public newtype TableId = String;
+                public newtype UserId = Int;
+                fn describe(value: String): String = value;
+                fn equalsLiteral(table: TableId): Boolean = table == "users";
+                fn literalEquals(table: TableId): Boolean = "users" == table;
+                fn asText(table: TableId): String = table;
+                fn asArgument(table: TableId): String = describe(table);
+                fn asInt(userId: UserId): Int = userId;
+                fn concatenated(table: TableId): String = "table: " + table;
+                fn constructedEquality(): Boolean = TableId.new("users") == "users";
+                fn constructedInequality(): Boolean = TableId.new("guest") == "users";
+                """);
+        final var compiler = new CompilationService(unit.declarations(), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertTrue((Boolean) program.getMethod("constructedEquality").invoke(null));
+                assertFalse((Boolean) program.getMethod("constructedInequality").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void carrierValuesDoNotSubstituteForTheNewtype() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("write.zn", """
+                newtype TableId = String;
+                fn invalid(): TableId = "users";
+                """).declarations()));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("argument.zn", """
+                newtype TableId = String;
+                fn takes(table: TableId): Boolean = true;
+                fn invalid(): Boolean = takes("users");
+                """).declarations()));
     }
 
     private static CompilationUnit parse(final String sourcePath, final String source) {

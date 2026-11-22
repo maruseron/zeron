@@ -35,6 +35,21 @@ final class TypeCompatibility implements TypeProjector {
             return TypeDescriptor.ofInfer();
         }
         if (typeA.isWellFormed() && typeB.isWellFormed() && typeA.equals(typeB)) return typeA;
+        // Newtype reads are covariant with their carrier, so exact comparison (used by equality
+        // and relational operators) may compare a newtype against its representation type.
+        if (NewtypeRepresentations.containsNewtype(typeA)
+                || NewtypeRepresentations.containsNewtype(typeB)) {
+            final var carrierA = NewtypeRepresentations.resolveRead(typeA);
+            final var carrierB = NewtypeRepresentations.resolveRead(typeB);
+            if (carrierA.equals(carrierB)) return typeA;
+            // A reference to a newtype is a reference to its carrier; ordinary dereferencing
+            // applies before the operand types are compared.
+            final var dereferencedA = carrierA instanceof ReferenceDescriptor referenceA
+                    ? NewtypeRepresentations.resolveRead(referenceA.baseType()) : carrierA;
+            final var dereferencedB = carrierB instanceof ReferenceDescriptor referenceB
+                    ? NewtypeRepresentations.resolveRead(referenceB.baseType()) : carrierB;
+            if (dereferencedA.equals(dereferencedB)) return typeA;
+        }
 
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                 where, "Types are not exact."));
@@ -75,6 +90,10 @@ final class TypeCompatibility implements TypeProjector {
     boolean canAssign(final TypeDescriptor expectedType, final TypeDescriptor resolvedType) {
         if (expectedType.equals(resolvedType)) return true;
         if (resolvedType instanceof NeverDescriptor) return true;
+        // A newtype is a subtype of its carrier in read positions. The opposite direction stays
+        // nominal: a carrier value is never silently accepted as the newtype.
+        final var carrier = NewtypeRepresentations.resolveRead(resolvedType);
+        if (!carrier.equals(resolvedType)) return canAssign(expectedType, carrier);
         if (expectedType instanceof TypeParameterDescriptor expectedParameter
                 && expectedParameter.openedActualType() != null) {
             return canAssign(expectedParameter.openedActualType(), resolvedType);

@@ -203,6 +203,11 @@ A `Shape` is exactly one of `Circle`, `Square`, or `Point`. Cases with payloads 
 components; construction supplies them in declaration order, and the payloads are immutable. A
 case without a payload, such as `Point`, is a singleton value.
 
+Case constructors are normally written with their sum qualifier. Inside the arms of a match whose
+scrutinee is a concrete sum, the cases need no qualifier: patterns, guards, and the constructed
+values on the right side of an arm resolve against that sum. The permission ends with the match;
+outside it, write `Shape.Circle(...)` rather than `Circle(...)`.
+
 Choose a sum when a value must represent one of several alternatives, such as the possible states
 of a task or the outcomes of an operation. Because the set of cases is closed, a `match` can handle
 each alternative and the compiler can check that the cases are covered. Adding a public case
@@ -245,10 +250,16 @@ returns `Option<Newtype>` and constructs a value only when the Boolean validator
 validator sees an immutable local named `value`. A newtype may use any statically known admissible
 representation, including primitives, `String`, type parameters, nominal classes, products, sums,
 and function types. The representation is the runtime value: there is no wrapper object and no
-generated `.value` property.
+`.value` accessor.
+
+A newtype is a subtype of its representation in read positions. You can compare a `UserId` with a
+`String`, pass it where a `String` is expected, return it as a `String`, and use string operations
+on it. The reverse direction stays nominal: a plain `String` is not accepted where a `UserId` is
+expected, so writes and raw values must still go through `.new` or `.tryNew`. Function-shaped
+newtypes are invoked directly through their representation, as in `IO.new(() -> 42)()`.
 
 Inside a newtype-owned extension, witness, or namespace body, `this` and newtype-typed parameters
-are the representation directly. Callers use an explicit operation when they need the value:
+are the representation directly:
 
 ```zeron
 public newtype IO<A admits mutable> = () -> A;
@@ -263,15 +274,16 @@ public extension<A admits mutable> IO<A> {
 let answer: Int = IO.new(() -> 42).run();
 ```
 
-Newtypes remain nominal: the representation is visible only in newtype-owned bodies, and ordinary
-code must construct the newtype explicitly. Products still require at least two components; use a
-newtype to name a single value, or a one-field data class when record-like component access and
-structural equality are wanted.
+Newtypes remain nominal in the write direction: reading a newtype yields its representation, but
+only construction produces a newtype from a representation value. Products still require at least
+two components; use a newtype to name a single value, or a one-field data class when record-like
+component access and structural equality are wanted.
 
 Use a newtype to make a domain distinction explicit—for example, separating a distance from an
-ordinary `Float`, or a user identifier from an arbitrary `String`. Newtypes do not implicitly
-inherit equality, ordering, or other contract evidence from their representation, so those domain
-semantics remain explicit.
+ordinary `Float`, or a user identifier from an arbitrary `String`. Operations that read the
+representation use the representation's built-in behavior or evidence. Newtypes do not gain a
+nominal `Eq`, `Comparable`, or other witness from their representation, and `===` identity remains
+undefined for them, so those domain semantics remain explicit.
 
 In short, products group components that belong together, sums represent one of several
 alternatives, and newtypes distinguish a value by what it means. These forms and their current

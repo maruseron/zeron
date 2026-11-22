@@ -12,7 +12,7 @@ class ConsoleSink is LogSink {
     public enabled(level: Level, target: String): Boolean = true;
 
     public mut write(record: Record): Unit {
-        let line = formatter.value(record);
+        let line = formatter(record);
         if (record.level.severity >= Level.Warn().severity) {
             System.err?.println(line);
         } else {

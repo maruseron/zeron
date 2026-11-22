@@ -32,7 +32,10 @@ final class CallResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     spread.token(), "An indirect function-value call does not accept a spread argument."));
         }
-        final var calleeType = ExpressionFlowResolver.resolveExpression(context, invoke.callee);
+        // A function-shaped newtype is invoked through its carrier, so `doubler(21)` needs no
+        // `.value` accessor.
+        final var calleeType = NewtypeRepresentations.resolve(
+                ExpressionFlowResolver.resolveExpression(context, invoke.callee));
         var unwrapped = calleeType;
         while (unwrapped instanceof ReferenceDescriptor reference) unwrapped = reference.baseType();
         if (unwrapped instanceof NullableDescriptor nullable) {
@@ -147,9 +150,11 @@ final class CallResolver {
             descriptor = declaration.typeDescriptor();
         } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
-            final var symbol = context.symbols.getSymbol(callableSymbol).type();
+            final var declaredCalleeType = context.symbols.getSymbol(callableSymbol).type();
+            final var symbol = NewtypeRepresentations.resolve(declaredCalleeType);
             call.setResolvedCalleeType(symbol);
-            context.recordReference(call.callee, context.symbols.getSymbol(callableSymbol).name(), symbol);
+            context.recordReference(call.callee, context.symbols.getSymbol(callableSymbol).name(),
+                    declaredCalleeType);
             if (symbol instanceof FunctionDescriptor function) {
                 descriptor = function;
             } else if (symbol instanceof ReferenceDescriptor reference
@@ -272,31 +277,30 @@ final class CallResolver {
                         .anyMatch(constructor -> constructor.name().lexeme().equals(name));
     }
 
-    /// Resolves an unqualified case constructor when no function or value owns the name. The
-    /// expected sum type fixes the case namespace; without one, exactly one visible sum may expose
-    /// the case name.
+    /// Resolves an unqualified case constructor when no function or value owns the name.
+    /// Unqualified construction is only permitted inside the arms of a match over a concrete sum,
+    /// where that sum fixes the case namespace; anywhere else the case name must be qualified.
     private TypeDescriptor resolveUnqualifiedSumCase(final Expr.Call call,
                                                      final TypeDescriptor expectedType) {
-        var expected = expectedType;
-        if (expected instanceof ReferenceDescriptor reference) expected = reference.baseType();
-        if (expected instanceof NullableDescriptor nullable) expected = nullable.baseType();
-        Stmt.SumDecl selected = null;
-        if (expected != null && context.sums.containsKey(expected.name())) {
-            selected = context.sums.get(expected.name());
-        } else {
-            final var candidates = context.sums.values().stream()
+        final var permitted = context.unqualifiedSumCaseScopes().stream()
+                .filter(sum -> sum.cases().stream()
+                        .anyMatch(sumCase -> sumCase.name().lexeme().equals(call.callee.lexeme())))
+                .findFirst().orElse(null);
+        Stmt.SumDecl selected = permitted;
+        if (selected == null) {
+            final var visible = context.sums.values().stream()
                     .filter(sum -> sum.cases().stream()
                             .anyMatch(sumCase -> sumCase.name().lexeme().equals(call.callee.lexeme())))
                     .toList();
-            if (candidates.size() > 1) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, call.callee,
-                        "Unqualified sum case '" + call.callee.lexeme()
-                                + "' is ambiguous; qualify it with the sum type."));
-                return TypeDescriptor.ofInfer();
-            }
-            if (candidates.size() == 1) selected = candidates.getFirst();
+            if (visible.isEmpty()) return null;
+            Zeron.resolutionError(ResolutionError.withHelp(DiagnosticCatalog.NAME_NOT_FOUND,
+                    call.callee,
+                    "Unqualified sum case '" + call.callee.lexeme()
+                            + "' is only permitted inside a match on that sum.",
+                    new DiagnosticHelp("Write the case with its sum qualifier, for example '"
+                            + visible.getFirst().name().lexeme() + "." + call.callee.lexeme() + "'.")));
+            return TypeDescriptor.ofInfer();
         }
-        if (selected == null) return null;
         final var sumCase = selected.cases().stream()
                 .filter(candidate -> candidate.name().lexeme().equals(call.callee.lexeme()))
                 .findFirst().orElse(null);

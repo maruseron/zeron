@@ -115,15 +115,19 @@ final class DeclarationRegistry {
         }
         NewtypeRepresentations.register(newtype.name().lexeme(), newtype.typeParameters(),
                 newtype.underlyingType());
-        final var valueName = new Token(TokenType.IDENTIFIER, "value", null, newtype.name().span());
-        final var property = new Stmt.Property(valueName, newtype.underlyingType(), null,
-                true, false, null, null, null, true);
+        // A newtype exposes no `value` member: its representation is the value itself, and reads
+        // are admitted through carrier subtyping instead. The synthetic class keeps one
+        // unreachable canonical parameter so the ordinary constructor path still sees the carrier
+        // type; no source spelling can name it.
+        final var representationParameter = new Stmt.Property(
+                new Token(TokenType.IDENTIFIER, "$zeron$newtype$representation", null, newtype.name().span()),
+                newtype.underlyingType(), null, false, false, null, null, null, true);
         final var constructor = new Stmt.Constructor(
                 new Token(TokenType.IDENTIFIER, "new", null, newtype.name().span()),
                 newtype.validator() == null);
         classes.put(newtype.name().lexeme(), new Stmt.ClassDecl(newtype.name(),
                 newtype.typeParameters(), List.of(),
-                List.of(), List.of(property), constructor, List.of(), List.of(), List.of(),
+                List.of(), List.of(representationParameter), constructor, List.of(), List.of(), List.of(),
                 newtype.isPublic(), false));
     }
 

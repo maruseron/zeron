@@ -483,14 +483,6 @@ final class BytecodeEmitter {
                     emitIntrinsicOperation(context, composer, property, true);
                 } else if (property.resolvedAsProperty()) {
                     final var ownerName = property.resolvedOwnerName();
-                    if (isNewtypeValueAccess(context, ownerName, property)) {
-                        // A newtype's representation is the value itself, so reading `value` is
-                        // identity: leave the receiver carrier on the stack and skip the accessor
-                        // of the synthetic newtype class, which is never emitted.
-                        emitExpr(context, composer, property.receiver);
-                        context.lastEmittedType = property.getType();
-                        break;
-                    }
                     final var declaredType = declarationPropertyType(context, ownerName, property.name.lexeme());
                     final var erasedType = TypeSubstitution.erase(declaredType);
                     emitExpr(context, composer, property.receiver);
@@ -1665,9 +1657,10 @@ final class BytecodeEmitter {
         }
 
         final var binding = context.symbols.getSymbol(call.resolvedSymbolToken());
-        final var bindingType = binding.type() instanceof ReferenceDescriptor reference
+        final var carrierType = NewtypeRepresentations.resolve(binding.type());
+        final var bindingType = carrierType instanceof ReferenceDescriptor reference
             ? reference.baseType()
-            : binding.type();
+            : carrierType;
         if (!(bindingType instanceof FunctionDescriptor functionType)) {
             throw new IllegalStateException("Resolved call target is not a function");
         }
@@ -2491,9 +2484,10 @@ final class BytecodeEmitter {
                                                  final Expr.MemberCall call,
                                                  final boolean receiverOnStack) {
         final var property = call.functionProperty();
-        final var propertyType = property.getType() instanceof ReferenceDescriptor reference
+        final var carrier = NewtypeRepresentations.resolveRead(property.getType());
+        final var propertyType = carrier instanceof ReferenceDescriptor reference
                 ? reference.baseType()
-                : property.getType();
+                : carrier;
         if (!(propertyType instanceof FunctionDescriptor functionType)) {
             throw new IllegalStateException("Resolved callable property is not a function.");
         }
@@ -2521,16 +2515,6 @@ final class BytecodeEmitter {
                 toJavaMethodDescriptor(runtimeType));
         emitConversion(context, composer, runtimeType.returnType(), TypeSubstitution.erase(call.getType()));
         context.lastEmittedType = call.getType();
-    }
-
-    /// Whether `property` is the synthetic `value` accessor of a newtype. Newtypes have no emitted
-    /// class or accessor; the representation is the value itself.
-    private static boolean isNewtypeValueAccess(final CompilationContext context,
-                                                final String ownerName,
-                                                final Expr.Property property) {
-        return ownerName != null
-                && property.name.lexeme().equals("value")
-                && context.resolution.newtypes().containsKey(ownerName);
     }
 
     private static void emitFunctionPropertyValueWithReceiverOnStack(final CompilationContext context,
@@ -2562,10 +2546,6 @@ final class BytecodeEmitter {
         }
         if (property.resolvedAsProperty()) {
             final var owner = property.resolvedOwnerName();
-            if (isNewtypeValueAccess(context, owner, property)) {
-                context.lastEmittedType = property.getType();
-                return;
-            }
             final var declaredType = declarationPropertyType(context, owner, property.name.lexeme());
             final var erasedType = TypeSubstitution.erase(declaredType);
             emitPropertyGetterCall(context, composer, owner, property.name.lexeme(), declaredType);

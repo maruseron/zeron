@@ -1119,9 +1119,11 @@ final class MemberInteropResolver {
         final var property = new Expr.Property(call.receiver, call.name, TypeDescriptor.ofInfer());
         final var propertyType = resolveProperty(context, property, receiverType, true);
         if (propertyType == null) return null;
-        final var callableType = propertyType instanceof ReferenceDescriptor reference
+        // A function-shaped newtype is invoked through its carrier.
+        final var carrierType = NewtypeRepresentations.resolve(propertyType);
+        final var callableType = carrierType instanceof ReferenceDescriptor reference
                 ? reference.baseType()
-                : propertyType;
+                : carrierType;
         if (!(callableType instanceof FunctionDescriptor functionType)) return null;
         if (functionType.isReceiverFunction()) return null;
         if (!call.explicitTypeArguments.isEmpty()) {
@@ -1174,8 +1176,9 @@ final class MemberInteropResolver {
         final var property = new Expr.Property(call.receiver, call.name, TypeDescriptor.ofInfer());
         final var propertyType = resolveProperty(context, property, receiverType, true);
         if (propertyType == null) return null;
-        final var callableType = propertyType instanceof ReferenceDescriptor reference
-                ? reference.baseType() : propertyType;
+        final var carrierType = NewtypeRepresentations.resolve(propertyType);
+        final var callableType = carrierType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : carrierType;
         if (!(callableType instanceof FunctionDescriptor functionType)
                 || !functionType.isReceiverFunction()
                 || !context.typeCompatibility.canAssign(functionType.receiverType(), receiverType)) {

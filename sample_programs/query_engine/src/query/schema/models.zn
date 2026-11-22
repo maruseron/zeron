@@ -1,0 +1,11 @@
+package query.schema;
+
+import query.value.UserId;
+
+/// Typed views over the dynamic row columns.
+///
+/// Values are never constructed at runtime: the types describe the columns a query stage can name,
+/// so a `CodeModel` predicate or selector over `User` or `Order` can be translated to column reads.
+public data class User(id: UserId, name: String, age: Int) {}
+
+public data class Order(id: Int, userId: UserId, amount: Int) {}

@@ -4,16 +4,16 @@ import query.error.QueryError;
 import query.schema.Row;
 import query.value.TableId;
 
-import zeron.collections.List;
+import zeron.collections.ArrayList;
 import zeron.lang.Result;
 
 public class MemoryDatabase {
-    users: &List<Row>;
-    orders: &List<Row>;
+    users: ArrayList<Row>;
+    orders: ArrayList<Row>;
 
-    public rowsFor(table: TableId): Result<&List<Row>, QueryError> {
-        if (table.value == "users") return Result.Ok(this.users);
-        if (table.value == "orders") return Result.Ok(this.orders);
-        return Result<&List<Row>, QueryError>.Err(QueryError.UnknownTable(table.value));
+    public rowsFor(table: TableId): Result<ArrayList<Row>, QueryError> {
+        if (table == "users") return Result.Ok(this.users);
+        if (table == "orders") return Result.Ok(this.orders);
+        return Result<ArrayList<Row>, QueryError>.Err(QueryError.UnknownTable(table));
     }
 }

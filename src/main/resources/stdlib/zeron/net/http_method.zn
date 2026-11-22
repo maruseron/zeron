@@ -10,8 +10,6 @@ public type HttpMethodError = InvalidMethod(value: String);
 public newtype HttpMethod = String where httpValidateMethod(value);
 
 namespace HttpMethod {
-    public fn value(method: HttpMethod): String = method;
-
     public fn parse(value: String): Result<HttpMethod, HttpMethodError> =
         match (HttpMethod.tryNew(value)) {
             case Option.Some(method) -> Result<HttpMethod, HttpMethodError>.Ok(method);

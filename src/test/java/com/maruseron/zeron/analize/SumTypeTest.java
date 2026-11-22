@@ -721,7 +721,7 @@ public final class SumTypeTest {
                     import %s.IO;
                     import %s.Sorted;
                     fn inc(x: Int): IO<Int> = IO.Pure(x + 1);
-                    fn make(): IO<Int> = Bind<Int>(IO.Pure(1), inc);
+                    fn make(): IO<Int> = IO.Bind<Int>(IO.Pure(1), inc);
                     fn read(io: IO<Int>): Int = match (io) {
                         case IO.Pure(value) -> value;
                         case Bind<let B>(source, transform) -> 1;
@@ -799,7 +799,7 @@ public final class SumTypeTest {
                 type IO<A> = Pure(value: A) | Bind<B>(source: IO<A>, transform: (A) -> IO<B>);
                 fn sorted(): Sorted<Int> = Sorted.Cons(1, Sorted.Empty());
                 fn bound<A: Comparable<A>>(value: A): Sorted<A> = Sorted.Cons(value, Sorted.Empty());
-                fn tagged(): Tagged<Int> = Tag<Int>(42);
+                fn tagged(): Tagged<Int> = Tagged.Tag<Int>(42);
                 fn read(tagged: Tagged<Int>): Int = match (tagged) {
                     case Tagged.Value(value) -> value;
                     case Tagged.Tag<let B>(value) -> 1;
@@ -836,6 +836,54 @@ public final class SumTypeTest {
             Files.deleteIfExists(Path.of("dist", "IO.class"));
             Files.deleteIfExists(Path.of("dist", "IO$$sum$Pure.class"));
             Files.deleteIfExists(Path.of("dist", "IO$$sum$Bind.class"));
+        }
+    }
+
+    @Test
+    public void restrictsUnqualifiedCaseConstructionToMatchArms() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Choice = Some(value: Int) | Empty;
+                fn invalid(): Choice = Some(42);
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Choice = Some(value: Int) | Empty;
+                fn invalid(): Choice = Empty();
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Choice = Some(value: Int) | Empty;
+                fn wraps(choice: Choice): Choice = pass(Some(1));
+                fn pass(choice: Choice): Choice = choice;
+                """)));
+    }
+
+    @Test
+    public void permitsUnqualifiedCaseConstructionInsideMatchArms() throws Exception {
+        final var programName = "ArmConstruction" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                type Choice = Some(value: Int) | Empty;
+                fn shift(choice: Choice): Choice = match (choice) {
+                    case Some(value) -> Some(value + 1);
+                    case Empty() -> Some(0);
+                };
+                fn read(choice: Choice): Int = match (choice) {
+                    case Some(value) -> value;
+                    case Empty() -> -1;
+                };
+                fn result(): Int = read(shift(Choice.Some(41)));
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(programName).getMethod("result").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Choice.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Some.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Empty.class"));
         }
     }
 

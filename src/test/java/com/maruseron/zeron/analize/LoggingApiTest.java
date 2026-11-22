@@ -108,7 +108,7 @@ public final class LoggingApiTest {
                     let fields = HashMap<String, Value>.empty();
                     fields.put("key", Value.Text("value"));
                     fields.put("list", Value.List(items));
-                    return LogFormatter.plain().value(
+                    return LogFormatter.plain()(
                         Record.new(Instant.now(), Level.Info(), "app", "message", fields,
                             Option.None()));
                 }

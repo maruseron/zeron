@@ -1,43 +1,36 @@
 package query.demo;
 
-import query.ast.Expr.gt;
-import query.ast.column;
-import query.ast.literal;
-import query.codec.*;
-import query.dsl.Query.join;
-import query.dsl.Query.orderBy;
-import query.dsl.Query.select;
-import query.dsl.Query.where;
 import query.dsl.from;
 import query.engine.execute;
 import query.error.QueryError;
 import query.schema.Row;
 import query.value.TableId;
 
-import zeron.collections.List;
-import zeron.lang.Result;
+import zeron.collections.ArrayList;
 
-fn printRows(rows: &List<Row>): Unit {
+fn printRows(rows: ArrayList<Row>): Unit {
     for (let row in rows) println(row.render());
 }
 
 fn printError(error: QueryError): Unit = match (error) {
-    case QueryError.UnknownTable(name) -> println("Unknown table: " + name);
-    case QueryError.MissingColumn(name) -> println("Missing column: " + name);
-    case QueryError.InvalidComparison() -> println("Invalid comparison");
-    case QueryError.InvalidPredicate() -> println("Invalid predicate");
+    case UnknownTable(name)  -> println("Unknown table: " + name);
+    case MissingColumn(name) -> println("Missing column: " + name);
+    case InvalidComparison() -> println("Invalid comparison");
+    case InvalidPredicate()  -> println("Invalid predicate");
 };
 
 fn main() {
     let database = sampleDatabase();
+    // The predicate and selector are inline lambdas over the typed schema views. The compiler
+    // reifies them as CodeModels, and the DSL translates property reads to column names.
     let query = from(TableId.new("users"))
         .join(from(TableId.new("orders")), "id", "user_id")
-        .where(column("age").gt(literal(encode(18))))
+        .where(user -> user.age <= 19 or user.name == "Ada")
         .select(["name", "amount"])
-        .orderBy("amount");
+        .orderBy(order -> order.amount);
 
     match (execute(query, database)) {
-        case Result.Ok(rows) -> printRows(rows);
-        case Result.Err(error) -> printError(error);
+        case Ok(rows) -> printRows(rows);
+        case Err(error) -> printError(error);
     };
 }

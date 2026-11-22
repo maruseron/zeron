@@ -2,26 +2,41 @@ package query.dsl;
 
 import query.ast.Expr;
 import query.ast.QueryPlan;
+import query.schema.Order;
+import query.schema.User;
 import query.value.TableId;
 
+import zeron.compiler.CodeModel;
+import zeron.compiler.selectedProperty;
+
+public fn from(table: TableId): Query = Query.new(QueryPlan.Scan(table));
+
+/// An immutable query builder. Operations return a new `Query` sharing the unchanged plan parts.
 public class Query {
     plan: QueryPlan;
 
     public toPlan(): QueryPlan = this.plan;
-}
 
-public fn from(table: TableId): Query = Query.new(QueryPlan.Scan(table));
+    /// Filters with a typed predicate lambda. The lambda is reified as a code model, so property
+    /// reads become column reads instead of string names: `.where(user -> user.age > 18)`.
+    public where(predicate: CodeModel<(User) -> Boolean>): Query =
+        Query.new(QueryPlan.Filter(this.toPlan(), predicateExpr(predicate)));
 
-public extension Query {
-    public fn where(predicate: Expr): Query =
+    /// Filters with a hand-built expression, for predicates a code model cannot express.
+    public whereExpr(predicate: Expr): Query =
         Query.new(QueryPlan.Filter(this.toPlan(), predicate));
 
-    public fn select(columns: Array<String>): Query =
+    public select(columns: Array<String>): Query =
         Query.new(QueryPlan.Project(this.toPlan(), columns));
 
-    public fn join(other: Query, leftKey: String, rightKey: String): Query =
+    public join(other: Query, leftKey: String, rightKey: String): Query =
         Query.new(QueryPlan.Join(this.toPlan(), other.toPlan(), leftKey, rightKey));
 
-    public fn orderBy(column: String): Query =
-        Query.new(QueryPlan.OrderBy(this.toPlan(), column));
+    /// Orders by an integer property selector such as `order -> order.amount`. A non-property
+    /// selector leaves the plan unchanged, since the plan orders by a column name.
+    public orderBy(selector: CodeModel<(Order) -> Int>): Query {
+        let selected = selectedProperty(selector);
+        if (selected == null) return this;
+        return Query.new(QueryPlan.OrderBy(this.toPlan(), selected.name));
+    }
 }

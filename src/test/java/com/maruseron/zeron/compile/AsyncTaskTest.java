@@ -17,7 +17,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-public final class AsyncFutureTest {
+public final class AsyncTaskTest {
+    private static final String AWAIT_HANDLER =
+            "case Await as awaited, k -> k.resume(awaited.pending.awaitDone());";
+
     @Test
     public void spawnAndAwaitReturnValuesOnVirtualThreads() throws Exception {
         final var packageName = "asyncValues" + UUID.randomUUID().toString().replace("-", "");
@@ -25,21 +28,69 @@ public final class AsyncFutureTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 import java.lang.Thread;
+                import zeron.concurrent.Await;
                 import zeron.concurrent.Scope;
                 import zeron.concurrent.await;
+                import zeron.concurrent.blocking;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
-                public fn totals(): Int performs DisposeFailure {
+                fn totalsBody(): Int performs Await, DisposeFailure {
                     using (let scope = Scope.open()) {
                         let first = spawn(scope, () -> 20);
                         let second = spawn(scope, () -> 22);
                         return await(first) + await(second);
                     }
                 }
-                public fn virtualThread(): Boolean performs DisposeFailure {
+                public fn totals(): Int performs DisposeFailure =
+                    handle (totalsBody()) with { %s };
+                fn virtualThreadBody(): Boolean performs Await, DisposeFailure {
                     using (let scope = Scope.open()) {
-                        let future = spawn(scope, () -> unsafe Thread.currentThread()!!.isVirtual());
-                        return await(future);
+                        let task = spawn(scope, () -> unsafe Thread.currentThread()!!.isVirtual());
+                        return await(task);
+                    }
+                }
+                public fn virtualThread(): Boolean performs DisposeFailure =
+                    handle (virtualThreadBody()) with { %s };
+                fn primitiveBody(): Int performs Await, DisposeFailure {
+                    using (let scope = Scope.open()) {
+                        return await(scope.start(() -> 42));
+                    }
+                }
+                public fn directlyFromPrimitive(): Int performs DisposeFailure =
+                    handle (primitiveBody()) with { %s };
+                public fn viaBlocking(): Int performs DisposeFailure = blocking(primitiveBody);
+                """.formatted(packageName, AWAIT_HANDLER, AWAIT_HANDLER, AWAIT_HANDLER));
+
+        try {
+            final var compiler = compiler(unit, packageName, output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = loader(output)) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(42, main.getMethod("totals").invoke(null));
+                assertEquals(true, main.getMethod("virtualThread").invoke(null));
+                assertEquals(42, main.getMethod("directlyFromPrimitive").invoke(null));
+                assertEquals(42, main.getMethod("viaBlocking").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void entryInstallsTheBlockingAwaitHandler() throws Exception {
+        final var packageName = "asyncEntry" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-entry-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                import zeron.concurrent.Scope;
+                import zeron.concurrent.await;
+                import zeron.concurrent.spawn;
+                import zeron.resource.DisposeFailure;
+                public fn main(): Unit performs DisposeFailure {
+                    using (let scope = Scope.open()) {
+                        let task = spawn(scope, () -> 42);
+                        let value = await(task);
                     }
                 }
                 """.formatted(packageName));
@@ -50,8 +101,7 @@ public final class AsyncFutureTest {
             compiler.compile();
             try (final var loader = loader(output)) {
                 final var main = loader.loadClass(packageName + ".Main");
-                assertEquals(42, main.getMethod("totals").invoke(null));
-                assertEquals(true, main.getMethod("virtualThread").invoke(null));
+                main.getMethod("main", String[].class).invoke(null, (Object) new String[0]);
             }
         } finally {
             deleteTree(output);
@@ -64,6 +114,7 @@ public final class AsyncFutureTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-effects-");
         final var unit = parse("Main.zn", """
                 package %s;
+                import zeron.concurrent.Await;
                 import zeron.concurrent.Scope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
@@ -72,17 +123,19 @@ public final class AsyncFutureTest {
                     public property code: Int;
                 }
                 fn fire(): Int performs Boom = perform Boom.new(7);
-                fn captured(): Int performs Boom, DisposeFailure {
+                fn capturedBody(): Int performs Await, Boom, DisposeFailure {
                     using (let scope = Scope.open()) {
-                        let future = spawn(scope, () -> fire());
-                        return await(future);
+                        let task = spawn(scope, () -> fire());
+                        return await(task);
                     }
                 }
+                fn captured(): Int performs Boom, DisposeFailure =
+                    handle (capturedBody()) with { %s };
                 public fn handled(): Int performs DisposeFailure =
                     handle (captured()) with {
                         case Boom as boom -> boom.code;
                     };
-                """.formatted(packageName));
+                """.formatted(packageName, AWAIT_HANDLER));
 
         try {
             final var compiler = compiler(unit, packageName, output);
@@ -108,8 +161,7 @@ public final class AsyncFutureTest {
                 fn fire(): Int performs Boom = perform Boom.new(7);
                 fn unhandled(): Int performs DisposeFailure {
                     using (let scope = Scope.open()) {
-                        let future = spawn(scope, () -> fire());
-                        return await(future);
+                        return await(spawn(scope, () -> fire()));
                     }
                 }
                 """.formatted(packageName));
@@ -119,12 +171,39 @@ public final class AsyncFutureTest {
     }
 
     @Test
+    public void nonEntryAwaitRequiresTheAwaitRow() throws Exception {
+        final var packageName = "asyncRow" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-row-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                import zeron.concurrent.Scope;
+                import zeron.concurrent.await;
+                import zeron.concurrent.spawn;
+                import zeron.resource.DisposeFailure;
+                public fn missingRow(): Int performs DisposeFailure {
+                    using (let scope = Scope.open()) {
+                        return await(spawn(scope, () -> 1));
+                    }
+                }
+                """.formatted(packageName));
+
+        try {
+            final var errors = compiler(unit, packageName, output).resolveWithDiagnostics().errors();
+            assertTrue(errors.toString(), errors.stream().anyMatch(error ->
+                    error.message().contains("zeron.concurrent.Await")));
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void cancellationSurfacesAtTheAwaitAndRunsUsingCleanup() throws Exception {
         final var packageName = "asyncCancel" + UUID.randomUUID().toString().replace("-", "");
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-cancel-");
         final var unit = parse("Main.zn", """
                 package %s;
                 import java.lang.Thread;
+                import zeron.concurrent.Await;
                 import zeron.concurrent.Scope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
@@ -136,10 +215,10 @@ public final class AsyncFutureTest {
                         this.state[0] = this.state[0] + 1;
                     }
                 }
-                public fn cancelled(): Int performs DisposeFailure {
+                fn cancelledBody(): Int performs Await, DisposeFailure {
                     using (let scope = Scope.open()) {
                         let state: &Array<Int> = [0];
-                        let future = spawn(scope, () -> {
+                        let task = spawn(scope, () -> {
                             using (let cleanup = Cleanup.new(state)) {
                                 while (not unsafe Thread.currentThread()!!.isInterrupted()) {
                                     // Wait for cancellation.
@@ -147,10 +226,12 @@ public final class AsyncFutureTest {
                             }
                             return 1;
                         });
-                        future.cancel();
-                        return await(future);
+                        task.cancel();
+                        return await(task);
                     }
                 }
+                public fn cancelled(): Int performs DisposeFailure =
+                    handle (cancelledBody()) with { %s };
                 public fn cleanupRan(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
                     using (let scope = Scope.open()) {
@@ -170,7 +251,7 @@ public final class AsyncFutureTest {
                     }
                     return state[0];
                 }
-                """.formatted(packageName));
+                """.formatted(packageName, AWAIT_HANDLER));
 
         try {
             final var compiler = compiler(unit, packageName, output);
@@ -198,7 +279,7 @@ public final class AsyncFutureTest {
 
     private static URLClassLoader loader(final Path output) throws Exception {
         return new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
-                AsyncFutureTest.class.getClassLoader());
+                AsyncTaskTest.class.getClassLoader());
     }
 
     private static CompilationUnit parse(final String sourceName, final String source) {

@@ -171,6 +171,27 @@ final class DeclarationEmitter {
                     MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String.arrayType()),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
                     composer -> {
+                        final var handlesAwait = entryPoint.awaits();
+                        final var entrySupport = ClassDesc.of("zeron.runtime.EntrySupport");
+                        final Label start;
+                        final Label end;
+                        final Label handler;
+                        final Label done;
+                        if (handlesAwait) {
+                            composer.ldc(ClassDesc.of(context.currentHolderName));
+                            composer.invokestatic(entrySupport, "pushAwaitHandler",
+                                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Class));
+                            start = composer.newLabel();
+                            end = composer.newLabel();
+                            handler = composer.newLabel();
+                            done = composer.newLabel();
+                            composer.labelBinding(start);
+                        } else {
+                            start = null;
+                            end = null;
+                            handler = null;
+                            done = null;
+                        }
                         if (passArguments) composer.aload(0);
                         if (entryPoint.runEvidence() == null) {
                             composer.invokestatic(composer.constantPool().methodRefEntry(
@@ -180,22 +201,31 @@ final class DeclarationEmitter {
                                             ? List.of(ConstantDescs.CD_Object.arrayType())
                                             : List.of())));
                             composer.pop();
-                            composer.return_();
-                            return;
+                        } else {
+                            composer.invokestatic(composer.constantPool().methodRefEntry(
+                                    ClassDesc.of(context.currentHolderName),
+                                    "main",
+                                    MethodTypeDesc.of(valueClass, passArguments
+                                            ? List.of(ConstantDescs.CD_Object.arrayType())
+                                            : List.of())));
+                            final var kind = TypeKind.fromDescriptor(valueClass.descriptorString());
+                            composer.storeLocal(kind, 1);
+                            emitEvidenceArguments(context, composer, List.of(entryPoint.runEvidence()));
+                            composer.loadLocal(kind, 1);
+                            composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
+                                    MethodTypeDesc.of(UNIT_CLASS, valueClass));
+                            composer.pop();
                         }
-                        composer.invokestatic(composer.constantPool().methodRefEntry(
-                                ClassDesc.of(context.currentHolderName),
-                                "main",
-                                MethodTypeDesc.of(valueClass, passArguments
-                                        ? List.of(ConstantDescs.CD_Object.arrayType())
-                                        : List.of())));
-                        final var kind = TypeKind.fromDescriptor(valueClass.descriptorString());
-                        composer.storeLocal(kind, 1);
-                        emitEvidenceArguments(context, composer, List.of(entryPoint.runEvidence()));
-                        composer.loadLocal(kind, 1);
-                        composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                                MethodTypeDesc.of(UNIT_CLASS, valueClass));
-                        composer.pop();
+                        if (handlesAwait) {
+                            composer.invokestatic(entrySupport, "popAwaitHandler", emptyVoidMethod());
+                            composer.goto_(done);
+                            composer.labelBinding(end);
+                            composer.labelBinding(handler);
+                            composer.invokestatic(entrySupport, "popAwaitHandler", emptyVoidMethod());
+                            composer.athrow();
+                            composer.labelBinding(done);
+                            composer.exceptionCatch(start, end, handler, ConstantDescs.CD_Throwable);
+                        }
                         composer.return_();
                     });
         }

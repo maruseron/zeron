@@ -52,16 +52,21 @@
   The compiler now preserves substituted effects on generic member calls and records effects for
   member calls resolved as arguments. This is a standard-library and runtime addition: no
   suspension syntax, task monad, compiler transform, or runtime ABI change.
-- Implemented the blocking async surface from ZEP-0120. `zeron.concurrent.Future<T, E>` is a
-  contract with `join()`, `isDone()`, `isCancelled()`, and `mut cancel()`; `spawn(scope, body)`
-  starts a body through `Scope.start` and returns a typed future; and `await(future)` is an ordinary
-  generic function that joins it and re-raises the task's captured effects at the await site. Source
-  needs no `async`/`await` keyword, suspend modifier, or wrapper return type, and the caller's
-  `performs` row is checked exactly as it is for `Task.value()`. `Scope.start` now returns
-  `&Task<T, {E}>` so the future can delegate cancellation; the read-only `Task` view is unchanged.
-  Because `await` is a plain blocking call, `main` can await directly with no handler or wrapper.
-  An interceptable `Await` carrier and a blocking entry handler are a separate design in ZEP-0164;
-  `STANDARD_LIBRARY_API_VERSION` is now 21.
+- Implemented ZEP-0165 by unifying the async surface on `Task`. `zeron.concurrent.Future` and
+  `FutureImpl` are removed; `spawn(scope, body)` now returns `&Task<T, {E}>`, and `await(task)`
+  accepts a `Task<T, E>` and reads it through `Task.value()`. The handle keeps `value()`,
+  `isDone()`, `isCancelled()`, and `mut cancel()`, and a scope still owns every task it starts.
+  Source needs no `async`/`await` keyword, suspend modifier, wrapper return type, or second handle
+  type.
+- Implemented ZEP-0164's interceptable await policy. `zeron.concurrent.Await` is a non-generic
+  effect that responds `Unit` and carries a `Completion`; `await(task)` performs `Await`, then
+  returns `task.value()`, so the value comes from the typed handle rather than an effect response.
+  `blocking(body)` installs the default waiting handler for explicit boundaries, and the generated
+  program entry installs the same host-side frame so `main` can await without declaring `Await`.
+  Because the effect no longer returns the value, there is no erased join and no unchecked recovery
+  cast. Outside the entry point, a function that awaits must declare `Await` in its `performs` row
+  or handle it; task-body awaits are not resumable in this slice. `STANDARD_LIBRARY_API_VERSION`
+  remains 21 in this unreleased cycle.
 - Fixed syntax highlighting after the `perform`/`performs` and `admits`/leading-`reified` syntax
   changes. The TextMate grammar recognizes the new keywords, data-class `performs` headers, and
   admissibility markers; the ANSI highlighter applies the same contextual rules.

@@ -455,7 +455,8 @@ public final class Resolver {
         }
         final var valueType = effectiveEntryType(context, selected).returnType();
         if (valueType instanceof UnitDescriptor) {
-            return new ResolutionResult.EntryPoint(selected, passArguments, valueType, null);
+            return new ResolutionResult.EntryPoint(selected, passArguments, valueType, null,
+                    context.entryAwaits);
         }
         final var evidence = TypeClassEvidence.selectEntryEvidence(context, valueType, selected.name());
         if (evidence == null) {
@@ -464,7 +465,8 @@ public final class Resolver {
                             + "', but no Main<" + TypeFormatter.format(valueType)
                             + "> evidence is available. Declare a witness for that type or return Unit.");
         }
-        return new ResolutionResult.EntryPoint(selected, passArguments, valueType, evidence);
+        return new ResolutionResult.EntryPoint(selected, passArguments, valueType, evidence,
+                context.entryAwaits);
     }
 
     private static FunctionDescriptor effectiveEntryType(final ResolutionContext context,

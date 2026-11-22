@@ -1524,9 +1524,14 @@ final class ExpressionFlowResolver {
                     ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
                 }
                 final var armType = resolve(context, arm.expression());
-                if (resumeType != null) validateTailResume(context, arm);
-                resultType = resultType == null ? armType
-                        : ensureCommonParent(context, arm.keyword(), resultType, armType);
+                if (resumeType != null) {
+                    validateTailResume(context, arm);
+                    // A resuming arm supplies the perform response, not the handle result. Execution
+                    // continues inside the protected expression after the handler resumes.
+                } else {
+                    resultType = resultType == null ? armType
+                            : ensureCommonParent(context, arm.keyword(), resultType, armType);
+                }
                 armsFlow.add(context.frame.flowState.copy());
             } finally {
                 if (arm.resumeBinding() != null) popResumeToken(context, arm.resumeBinding());

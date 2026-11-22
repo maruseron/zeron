@@ -34,7 +34,8 @@ public record ResolutionResult(
         List<Stmt.Witness> witnesses) {
 
     public record EntryPoint(Stmt.FunctionDeclaration main, boolean passArguments,
-                             TypeDescriptor valueType, Expr.EvidenceArgument runEvidence) {}
+                             TypeDescriptor valueType, Expr.EvidenceArgument runEvidence,
+                             boolean awaits) {}
 
     public ResolutionResult {
         Objects.requireNonNull(globalSymbolTable);

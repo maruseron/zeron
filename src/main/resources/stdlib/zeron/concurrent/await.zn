@@ -1,0 +1,44 @@
+package zeron.concurrent;
+
+/// The awaiting policy effect.
+///
+/// `Await` is non-generic. Its payload holds a `Completion`, a view that exposes only whether the
+/// task is finished, so a handler can choose a waiting policy without recovering the task's value.
+/// The typed caller still holds the `Task<T, E>` and reads the value with `Task.value()` after the
+/// handler resumes it.
+///
+/// Because the payload is not generic, the effect has no applied descriptor, no runtime row, and
+/// no reified type argument. A handler case is the ordinary nominal `case Await`.
+public effect Await responds Unit {
+    public property pending: Completion;
+}
+
+/// Waits for `task` under the `Await` policy and returns its value.
+///
+/// `await` is an ordinary blocking function on a virtual thread. It performs `Await` first, which
+/// lets an enclosing handler choose the waiting policy, and then reads the finished task. The
+/// second step does not block; it re-raises the task's captured effects `E` at this call site.
+///
+/// The caller's `performs` row must cover `Await + E`. No `async`/`await` keyword, suspend
+/// modifier, or wrapper return type is involved.
+public fn await<T admits nullable + mutable, E admits effect...>(
+    task: Task<T, E>
+): T performs Await, E {
+    perform Await.new(task.completion());
+    return task.value();
+}
+
+/// Runs `body` with the default blocking `Await` policy.
+///
+/// This is an explicit boundary for non-entry code and tests. The handler waits for the task's
+/// completion without reading its result; the awaiting caller then joins the typed handle and
+/// re-raises its effects. The task's `E` therefore remains on `blocking`'s row.
+///
+/// The program entry point installs the same policy implicitly, so `main` does not need this
+/// wrapper.
+public fn blocking<T admits nullable + mutable, E admits effect...>(
+    body: () -> T performs Await, E
+): T performs E =
+    handle (body()) with {
+        case Await as awaited, k -> k.resume(awaited.pending.awaitDone());
+    };

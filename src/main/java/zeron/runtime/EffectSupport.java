@@ -41,8 +41,11 @@ public final class EffectSupport {
             frames.removeLast();
             var restore = true;
             try {
+                final var handlerLoader = frame.handler() instanceof Class<?> owner
+                        ? owner.getClassLoader()
+                        : frame.handler().getClass().getClassLoader();
                 return frame.invoke().invoke(frame.handler(),
-                        raisedEffect(payload, frame.handler().getClass().getClassLoader()));
+                        raisedEffect(payload, handlerLoader));
             } catch (final Throwable failure) {
                 if (!(failure instanceof EffectCarrier carrier)) {
                     return sneakyThrow(failure);

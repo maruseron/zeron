@@ -15,6 +15,7 @@ public external class ScopeSupport = "com.maruseron.zeron.runtime.ScopeSupport" 
 /// Host-side task handle. The public Zeron surface is `zeron.concurrent.Task`.
 public external class TaskSupport = "com.maruseron.zeron.runtime.TaskSupport" {
     public static await(task: &TaskSupport): Unit;
+    public static waitDone(task: &TaskSupport): Unit;
     public isDone(): Boolean;
     public isCancelled(): Boolean;
     public mut cancel(): Unit;

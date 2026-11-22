@@ -25,6 +25,7 @@ final class ResolutionContext {
     final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
     final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
     boolean representationContext;
+    boolean entryAwaits;
     /// Sums whose case constructors may currently be named without qualification. Only the arms
     /// of a match over a concrete sum introduce one; unqualified case construction is not a
     /// package-level facility.

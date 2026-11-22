@@ -43,7 +43,12 @@ public final class TaskSupport {
         return scope;
     }
 
-    /// Waits for a task without re-throwing its outcome.
+    /// Waits for a task without re-throwing its outcome. This is the operation an `Await`
+    /// handler uses; the typed join still reports failure and cancellation.
+    public static void waitDone(final TaskSupport task) {
+        task.awaitFinished();
+    }
+
     void awaitFinished() {
         var interrupted = false;
         for (;;) {

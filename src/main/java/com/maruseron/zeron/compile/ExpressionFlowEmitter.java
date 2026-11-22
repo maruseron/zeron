@@ -1011,7 +1011,8 @@ final class ExpressionFlowEmitter {
         composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
         storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
 
-        final var orderedArms = orderedHandlerArms(context, handle.arms);
+        final var orderedArms = orderedHandlerArms(context, handle.arms).stream()
+                .filter(arm -> arm.resumeBinding() == null).toList();
         for (final var arm : orderedArms) {
             final var next = composer.newLabel();
             beginScope(context);
@@ -1035,7 +1036,12 @@ final class ExpressionFlowEmitter {
                 }
                 emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
                 emitExpr(context, composer, arm.expression());
-                emitConversion(context, composer, context.lastEmittedType, handle.getType());
+                // A resuming arm produces the perform response, not the protected expression's
+                // result. Its value returns to EffectSupport.perform; execution then continues
+                // inside the protected expression.
+                if (arm.resumeBinding() == null) {
+                    emitConversion(context, composer, context.lastEmittedType, handle.getType());
+                }
             } finally {
                 endScope(context);
             }
@@ -1096,7 +1102,8 @@ final class ExpressionFlowEmitter {
         composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
         storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
 
-        final var orderedArms = orderedHandlerArms(context, handle.arms);
+        final var orderedArms = orderedHandlerArms(context, handle.arms).stream()
+                .filter(arm -> arm.resumeBinding() == null).toList();
         for (final var arm : orderedArms) {
             final var next = composer.newLabel();
             beginScope(context);
@@ -1120,7 +1127,12 @@ final class ExpressionFlowEmitter {
                 }
                 emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
                 emitExpr(context, composer, arm.expression());
-                emitConversion(context, composer, context.lastEmittedType, handle.getType());
+                // A resuming arm produces the perform response, not the protected expression's
+                // result. Its value returns to EffectSupport.perform; execution then continues
+                // inside the protected expression.
+                if (arm.resumeBinding() == null) {
+                    emitConversion(context, composer, context.lastEmittedType, handle.getType());
+                }
             } finally {
                 endScope(context);
             }

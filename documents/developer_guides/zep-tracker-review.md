@@ -26,7 +26,7 @@ ZEP-0123, and ZEP-0147 implemented; ZEP-0164 and ZEP-0165 accepted; remaining de
 | `0.6.0` | Stabilization of already implemented work | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 15 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0165 (accepted; unifies `Task`/`Future`), ZEP-0164 (accepted; erased `Await` carrier and blocking entry handler), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 15 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0165 (accepted; unifies `Task`/`Future`), ZEP-0164 (accepted; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
@@ -136,8 +136,8 @@ typing and added no runtime control-flow mechanism. Per-row detail lives in the 
 
 `0.9.0` is the effect-control bundle plus a library track. It has fifteen `Candidate` rows;
 ZEP-0112, ZEP-0118, ZEP-0123, and ZEP-0147 are implemented, and ZEP-0165 and ZEP-0164 are accepted.
-ZEP-0165 supersedes ZEP-0120's `Future` surface, and ZEP-0164 adds the erased `Await` carrier over
-`Task` plus the blocking entry handler building on ZEP-0126. The other rows retain `Draft` designs,
+ZEP-0165 supersedes ZEP-0120's `Future` surface, and ZEP-0164 adds the non-generic `Await` carrier
+over `Completion` plus the blocking entry handler building on ZEP-0126. The other rows retain `Draft` designs,
 so their candidacy records the intended target rather than an approved scope; ZEP-0000 requires
 acceptance before a row becomes `Planned`. ZEP-0107 is `Accepted` but is `Unscheduled` outside the
 bundle.
@@ -149,8 +149,8 @@ bundle.
 | ZEP-0123 | Admissibility Clauses and Leading Reification | Implemented / `Candidate` | `admits` clause (`nullable`, `mutable`, `effect`, `effect...`) and leading `reified`; response constraints stay `Responds<R>` |
 | ZEP-0112 | Structured Concurrency on Virtual Threads | Implemented / `Candidate` | Library-only `Scope`, `Task<T, E>`, cancellation, deadlines, effect capture at joins |
 | ZEP-0165 | Unify `Task` and `Future` into a Single Async Handle | Accepted / `Candidate` | Collapse `Future` into `Task`; `spawn` returns `&Task`; `await` accepts `Task`; supersedes ZEP-0120's `Future` surface |
-| ZEP-0164 | Erased `Await` Carrier and Blocking Entry Handler | Accepted / `Candidate` | Non-generic responding `Await` over `Task<Any?, Effect>`; `blocking` handler installed at the entry boundary |
-| ZEP-0119 | One-Shot Continuations, Deep Handlers, and Cancellation | Draft / `Candidate` | Prototype-gated continuation work; acceptance waits on the backend prototype |
+| ZEP-0164 | Erased `Await` Carrier and Blocking Entry Handler | Accepted / `Candidate` | Non-generic `Await responds Unit` carrying a `Completion`; host-side entry frame; `await` joins the typed `Task` |
+| ZEP-0119 | One-Shot Continuations, Deep Handlers, and Cancellation | Draft / `Candidate` | Settled owner-thread v1 semantics and standard-library generator surface; prototype-gated backend choice and public cross-thread handoff API |
 | ZEP-0066 | Standard Library TOML Parser | Draft / `Candidate` | Additive `zeron.parsers.toml` package; independent of effect work |
 | ZEP-0067 | Standard Library XML Parser | Draft / `Candidate` | Additive `zeron.parsers.xml` package; independent of effect work |
 | ZEP-0152 | Standard Library Randomness | Draft / `Candidate` | Seedable PRNG, bounded values, pick and shuffle |

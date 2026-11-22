@@ -918,12 +918,19 @@ final class LambdaResolver {
                 context.symbols.setResolvedReturnType(
                         MemberInteropResolver.functionSymbolToken(context, function.name()), resolvedType);
             }
-            final var inferredEntryEffects = function.name().lexeme().equals("main")
-                    && function.typeDescriptor().returnType() instanceof InferDescriptor
-                    && function.typeDescriptor().raisedEffects().isEmpty()
+            final var entryMain = function.name().lexeme().equals("main")
+                    && context.currentNamespaceName == null
                     && Objects.equals(context.currentSourcePath, context.entrySourcePath);
+            if (entryMain) {
+                context.entryAwaits = context.frame.raisedEffects.stream()
+                        .anyMatch(effect -> effect.name().equals("zeron.concurrent.Await"));
+            }
+            final var inferredEntryEffects = entryMain
+                    && function.typeDescriptor().returnType() instanceof InferDescriptor
+                    && function.typeDescriptor().raisedEffects().isEmpty();
             if (!inferredEntryEffects) {
-                RaisedEffectFlow.verifyCallable(context, function.typeDescriptor().raisedEffects(), function.name());
+                RaisedEffectFlow.verifyCallable(context, function.typeDescriptor().raisedEffects(),
+                        function.name(), entryMain ? Set.of("zeron.concurrent.Await") : Set.of());
             }
 
                 Zeron.debug(" resolved function " + function.name().lexeme()

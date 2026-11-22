@@ -197,7 +197,7 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 15 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0165 (accepted; unifies `Task`/`Future`), ZEP-0164 (accepted; erased `Await` carrier and blocking entry handler), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 15 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0165 (accepted; unifies `Task`/`Future`), ZEP-0164 (accepted; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -374,14 +374,16 @@ add surface that does not touch handler typing or code generation:
   ZEP-0120's `Future` type. The blocking direct-style policy, effect capture, cancellation, and
   structured-scope semantics are retained. Its companion [ZEP-0164](./ZEP-0164.md) supplies the
   `Await` carrier and must ship the blocking entry handler with it so `main` stays ergonomic.
-- [ZEP-0164](./ZEP-0164.md) — erased `Await` carrier and blocking entry handler. Accepted: adds a
-  non-generic responding `Await` effect whose payload carries `Task<Any?, Effect>`, changes `await`
-  to `performs Await + E`, and installs a blocking handler at the program entry boundary. It stays
-  identity-erased, so no effect-application ABI, wildcard handler, or class reification is needed.
-  It depends on ZEP-0165's unified `Task` handle and ZEP-0126's entry contract.
+- [ZEP-0164](./ZEP-0164.md) — non-generic `Await` carrier over `Completion` and blocking entry
+  handler. Accepted: adds a non-generic `Await` effect that responds `Unit` and carries a `Completion` view, changes `await`
+  to `performs Await, E` followed by `Task.value()`, and installs a host-side blocking frame around
+  the program entry. It stays identity-erased, so no effect-application ABI, wildcard handler,
+  erased join, or class reification is needed. It depends on ZEP-0165's unified `Task` handle and
+  ZEP-0126's entry contract.
 - [ZEP-0119](./ZEP-0119.md) — one-shot continuations, deep handlers, and cancellation.
-  Prototype-gated: candidacy records the intended target, and the backend prototype plus the
-  continuation ABI questions must be resolved before acceptance.
+  Prototype-gated: defines level-3 handlers for pull generators and general effect handlers, keeps
+  blocking `await` as the default, unifies continuation cancellation with ZEP-0112, and compares
+  backends A, B, and public-API C before a shipping decision.
 - [ZEP-0066](./ZEP-0066.md) — standard-library TOML parser. A `zeron.parsers.toml` package with
   explicit value, date/time, and diagnostic semantics, following the shipped JSON parser.
 - [ZEP-0067](./ZEP-0067.md) — standard-library XML parser. A `zeron.parsers.xml` package with

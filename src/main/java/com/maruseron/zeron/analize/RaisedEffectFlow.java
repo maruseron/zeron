@@ -22,8 +22,16 @@ final class RaisedEffectFlow {
 
     static void verifyCallable(final ResolutionContext context, final List<TypeDescriptor> declared,
                                final Token where) {
+        verifyCallable(context, declared, where, Set.of());
+    }
+
+    /// Verifies a callable whose boundary installs handlers for the named effects. The entry
+    /// point uses this for `Await`; every other callable must declare or handle it.
+    static void verifyCallable(final ResolutionContext context, final List<TypeDescriptor> declared,
+                               final Token where, final Set<String> handledAtBoundary) {
         final var missing = new LinkedHashSet<TypeDescriptor>();
         for (final var effect : context.frame.raisedEffects) {
+            if (handledAtBoundary.contains(effect.name())) continue;
             if (!EffectRows.coveredBy(effect, declared, context.effectHierarchy)) missing.add(effect);
         }
         if (!missing.isEmpty()) {

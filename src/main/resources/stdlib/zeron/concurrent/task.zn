@@ -6,6 +6,28 @@ import zeron.internal.unwrapSome;
 import zeron.lang.Cell;
 import zeron.lang.Option;
 
+/// A non-generic view of a task's completion state.
+///
+/// `Completion` is what an `Await` handler receives. It deliberately erases the task's result
+/// type and effect row: a handler chooses an awaiting policy, while the awaiting caller keeps the
+/// statically typed `Task` and recovers its value and effects after the policy resumes it.
+public contract Completion {
+    /// Waits until the task is finished without re-raising its outcome.
+    ///
+    /// This is the only operation a blocking `Await` handler needs. It returns normally for a
+    /// failed or cancelled task; the typed join reports the failure.
+    awaitDone(): Unit;
+
+    /// Whether the task has completed, successfully or otherwise.
+    isDone(): Boolean;
+
+    /// Whether cancellation was requested or observed for the task.
+    isCancelled(): Boolean;
+
+    /// Requests cooperative cancellation and interrupts a running task.
+    mut cancel(): Unit;
+}
+
 /// A handle to one task started in a [Scope].
 ///
 /// A task is already in flight. It is not a lazy computation and it deliberately has no `map`,
@@ -28,9 +50,12 @@ public contract Task<T admits nullable + mutable, E admits effect...> {
 
     /// Requests cooperative cancellation and interrupts a running task.
     mut cancel(): Unit;
+
+    /// Returns the non-generic completion view used by `Await` handlers.
+    completion(): Completion;
 }
 
-class TaskImpl<T admits nullable + mutable, E admits effect...> is Task<T, {E}> {
+class TaskImpl<T admits nullable + mutable, E admits effect...> is Task<T, {E}>, Completion {
     runtime: &TaskSupport;
     result: Cell<Option<T>>;
 
@@ -46,4 +71,19 @@ class TaskImpl<T admits nullable + mutable, E admits effect...> is Task<T, {E}> 
     public isCancelled(): Boolean = this.runtime.isCancelled();
 
     public mut cancel(): Unit = this.runtime.cancel();
+
+    public completion(): Completion = this;
+
+    public awaitDone(): Unit = TaskSupport.waitDone(this.runtime);
 }
+
+/// Starts `body` in `scope` and returns a typed task handle.
+///
+/// Starting the task does not perform `E`; the body's effects are captured as the task outcome and
+/// re-raised by [value] or [await]. Opening, joining, cancelling, and closing the scope are
+/// unchanged from [Scope]. The returned mutable view lets the caller cancel that one task.
+public fn spawn<T admits nullable + mutable, E admits effect...>(
+    scope: &Scope,
+    body: () -> T performs E
+): &Task<T, {E}> =
+    scope.start(body);

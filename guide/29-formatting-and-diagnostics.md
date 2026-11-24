@@ -63,10 +63,11 @@ Warnings use the same catalog codes and source spans as errors but do not block 
 initial warning set covers unused local variables, imports, and private functions (`ZR3011` to
 `ZR3013`), unreachable statements (`ZR3014`), unnecessary mutable projections (`ZR3015`),
 `while (true)` loops that can be written as `loop` (`ZR3016`), shadowed locals (`ZR3017`), and
-nullable returns from public APIs (`ZR3018`), and deprecated anonymous witness declarations
-(`ZR3010`); the nullable-return warning suggests `Option<T>` or `Result<T, _>`, and the
-anonymous-witness warning's help
-names the named form that replaces the declaration.
+nullable returns from public APIs (`ZR3018`), deprecated anonymous witness declarations
+(`ZR3010`), and direct `Task.value()` joins (`ZR3019`); the nullable-return warning suggests
+`Option<T>` or `Result<T, _>`, the anonymous-witness warning's help names the named form that
+replaces the declaration, and the direct-join warning reports only tasks whose effect row is
+concretely empty, where `await(task)` would perform `Await` first.
 
 Warnings are advisory by default. Pass `--deny-warnings` to `zeron build`, `zeron run`, or a direct
 compilation to report the warnings and then fail the invocation if any were produced:

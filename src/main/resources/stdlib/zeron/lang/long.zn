@@ -25,9 +25,9 @@ default witness Hashable<Long> for Long {
 
 default witness Comparable<Long> for Long {
     fn compareTo(other: Long): Ordering {
-             if (this == other) return Ordering.EQ();
-        else if (this  < other) return Ordering.LT();
-        else                    return Ordering.GT();
+             if (this == other) return Ordering.Equal();
+        else if (this  < other) return Ordering.Less();
+        else                    return Ordering.Greater();
     }
 }
 

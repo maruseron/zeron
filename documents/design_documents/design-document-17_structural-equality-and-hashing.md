@@ -138,9 +138,9 @@ helpers; mutually recursive declaration groups and runtime object-cycle detectio
 ## Relational comparison operators
 
 Custom types opt into `<`, `<=`, `>`, and `>=` through `zeron.lang.Comparable<T>`, whose
-`compareTo(other: T): Ordering` returns the `zeron.lang.Ordering` sum with nullary cases `LT`, `EQ`,
-and `GT`. The operators preserve their conventional meanings: `<` accepts only `LT`, `<=` accepts
-`LT` or `EQ`, `>` accepts only `GT`, and `>=` accepts `GT` or `EQ`.
+`compareTo(other: T): Ordering` returns the `zeron.lang.Ordering` sum with nullary cases `Less`, `Equal`,
+and `Greater`. The operators preserve their conventional meanings: `<` accepts only `Less`, `<=` accepts
+`Less` or `Equal`, `>` accepts only `Greater`, and `>=` accepts `Greater` or `Equal`.
 
 Integer and floating-point relational comparisons continue to use their existing built-in lowering.
 Other operands require applicable `Comparable<T>` evidence, including an explicit

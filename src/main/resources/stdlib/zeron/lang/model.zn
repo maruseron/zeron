@@ -43,38 +43,26 @@ public contract Model<T admits nullable + mutable> {
 
 /// A mapped field with its property's value type erased.
 ///
-/// `Model.fields` enumerates mappings through this class, so a consumer can read every external
+/// `Model.fields` enumerates mappings through this type, so a consumer can read every external
 /// name without knowing the value types. A typed view of one mapping is a `Field`. A model
-/// declaration creates the `AnyField` instances it exposes.
-public class AnyField<T admits nullable + mutable> {
-    /// The name this field has in the external representation.
-    public property externalName: String;
-
-    /// The identity of the mapped source property.
-    public property sourceId: PropertyId;
-
-    public constructor new;
-}
+/// declaration creates the `AnyField` values it exposes.
+public type AnyField<T admits nullable + mutable> = (
+    externalName: String,
+    sourceId: PropertyId
+);
 
 /// A typed view of one mapped field.
 ///
+/// `externalName` is the name in the external representation, and `sourceId` equals `source.id`.
 /// `source` is the mapped property reference, so `get` reads the property without a cast and
-/// without runtime type information, and `sourceId` equals `source.id`.
-public class Field<T admits nullable + mutable, V admits nullable + mutable> {
-    /// The name this field has in the external representation.
-    public property externalName: String;
-
-    /// The identity of the mapped source property.
-    public property sourceId: PropertyId;
-
-    /// The mapped property.
-    public property source: PropertyRef<T, V>;
-
-    /// Writes the mapped property, present when the property has an accessible setter.
-    public property writer: Option<(&T, V) -> Unit>;
-
-    public constructor new;
-
+/// without runtime type information. `writer` is present when the property has an accessible
+/// setter.
+public data class Field<T admits nullable + mutable, V admits nullable + mutable>(
+    externalName: String,
+    sourceId: PropertyId,
+    source: PropertyRef<T, V>,
+    writer: Option<(&T, V) -> Unit>
+) {
     /// Reads the mapped property from `owner`.
     public get(owner: T): V = this.source.get(owner);
 }

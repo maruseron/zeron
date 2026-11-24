@@ -331,7 +331,7 @@ re-raises it in the joining thread:
 
 ```zeron
 fn loadAll(): Array<User> performs NotFound, DisposeFailure {
-    using (let scope = Scope.open()) {
+    using (let scope = ConcurrentScope.open()) {
         let first = scope.start(() -> find(1));
         let second = scope.start(() -> find(2));
         return [first.value(), second.value()];

@@ -544,7 +544,7 @@ public fn getErrorOffset(error: JsonError): Option<Int> = match (error) {
 /// A syntax error becomes a `DecodeError` whose `position` is the source offset reported by the
 /// parser.
 public fn parseAs<T: Decode<T, {}> admits nullable + mutable>(text: String): Result<T, DecodeError> =
-    match (parse(text)) {
+    match (Json.parse(text)) {
         case Ok(value) -> decodeValue<T>(value);
         case Err(error) -> Result<T, DecodeError>.Err(DecodeError.new(
             getErrorMessage(error), [], getErrorOffset(error)));
@@ -553,7 +553,7 @@ public fn parseAs<T: Decode<T, {}> admits nullable + mutable>(text: String): Res
 /// Encodes `value` and writes the result as compact JSON text.
 public fn stringifyAs<T: Encode<T, {}> admits nullable + mutable>(value: T): Result<String, EncodeError> =
     match (encodeValue<T>(value)) {
-        case Ok(json) -> match (stringify(json)) {
+        case Ok(json) -> match (Json.stringify(json)) {
             case Ok(text) -> Result<String, EncodeError>.Ok(text);
             case Err(error) -> Result<String, EncodeError>.Err(
                 EncodeError.new(getErrorMessage(error), []));

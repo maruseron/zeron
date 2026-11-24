@@ -310,12 +310,12 @@ fn siftDownArrayList<T admits mutable>(
         if (child + 1 < end) {
             let left = unwrapSome(values.at(child));
             let right = unwrapSome(values.at(child + 1));
-            if (compare(left, right) matches Ordering.LT()) child += 1;
+            if (compare(left, right) matches Ordering.Less()) child += 1;
         }
 
         let rootValue = unwrapSome(values.at(root));
         let childValue = unwrapSome(values.at(child));
-        if (not (compare(rootValue, childValue) matches Ordering.LT())) return;
+        if (not (compare(rootValue, childValue) matches Ordering.Less())) return;
 
         swapArrayList(values, root, child);
         root = child;

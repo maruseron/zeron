@@ -24,12 +24,15 @@ public type Result<out T admits nullable + mutable, out E admits nullable + muta
       Ok(value: T)
     | Err(error: E);
 
-/// Constructors of `Result` that leave the other type argument to the caller.
+/// Type-inference helpers for `Result`.
+///
+/// The canonical constructors are `Result.Ok` and `Result.Err`; these functions exist only when the
+/// other type argument must stay inferable from the surrounding context.
 namespace Result {
-    /// Wraps `value` in a successful result.
+    /// Wraps `value` in a successful result, leaving the error type to inference.
     public fn ok<T admits mutable, E admits mutable>(value: T): Result<T, E> = Result<T, E>.Ok(value);
 
-    /// Wraps `error` in a failed result.
+    /// Wraps `error` in a failed result, leaving the success type to inference.
     public fn err<T admits mutable, E admits mutable>(error: E): Result<T, E> = Result<T, E>.Err(error);
 }
 

@@ -17,10 +17,10 @@ public class HashSet<T: Hashable<T>>
     private constructor new;
 
     /// Wraps `values`, taking its keys as the set's elements.
-    public constructor withMap(values: &HashMap<T, Unit>) = HashSet<T>.new(values);
+    public constructor fromMap(values: &HashMap<T, Unit>) = HashSet<T>.new(values);
 
     /// Creates an empty set.
-    public constructor empty() = HashSet<T>.withMap(HashMap.empty<T, Unit>());
+    public constructor empty() = HashSet<T>.fromMap(HashMap.empty<T, Unit>());
 
     /// Creates a set holding each distinct element of `elements`.
     public constructor of(elements: T...) {

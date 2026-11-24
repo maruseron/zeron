@@ -99,19 +99,47 @@ public final class GenericEffectCompilationTest {
     }
 
     @Test
-    public void openApplicationsAreRejected() {
-        final var unit = parse("Bad.zn", """
-                effect Failure<T> {
+    public void openApplicationsSubstituteAtCallSites() throws Exception {
+        final var packageName = "openEffects" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-open-effect-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public effect Failure<T> {
                     public property value: T;
                 }
-                fn bad<T>(): Unit performs Failure<T> = perform Failure<T>(value);
-                """);
-        final var compiler = CompilationService.forCompilationUnits(List.of(unit),
-                "bad.Main", "bad", List.of(), true, List.of(),
-                Path.of("target", "zeron-generic-effect-invalid"));
-        final var resolution = compiler.resolveWithDiagnostics();
-        assertTrue(resolution.errors().toString(), resolution.errors().stream()
-                .anyMatch(diagnostic -> diagnostic.message().contains("must be closed")));
+                fn forward<T>(body: () -> Unit performs Failure<T>): Unit performs Failure<T> =
+                    body();
+                fn nested<T>(body: () -> Unit performs Failure<Array<T>>): Unit
+                        performs Failure<Array<T>> = body();
+                public fn handled(): Int = handle (perform Failure<Int>(5)) with {
+                    case Failure<Int> as failure -> failure.value;
+                };
+                fn makeBody(): () -> Unit performs Failure<Int> = () -> {
+                    perform Failure<Int>(9);
+                };
+                public fn inferred(): Unit performs Failure<Int> = forward(() -> {
+                    perform Failure<Int>(8);
+                });
+                public fn inferredFromValue(): Unit performs Failure<Int> = forward(makeBody());
+                public fn inferredNested(): Unit performs Failure<Array<Int>> = nested(() -> {
+                    perform Failure<Array<Int>>([8]);
+                });
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            final var resolution = compiler.resolveWithDiagnostics();
+            assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+            final var compilation = compiler.compileWithDiagnostics();
+            assertTrue(compilation.diagnostics().toString(), compilation.successful());
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(5, loader.loadClass(packageName + ".Main")
+                        .getMethod("handled").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
     }
 
     @Test
@@ -159,6 +187,65 @@ public final class GenericEffectCompilationTest {
                 assertEquals(21, loader.loadClass(clientPackage + ".Client")
                         .getMethod("handled").invoke(null));
             }
+        } finally {
+            deleteTree(libraryOutput);
+            deleteTree(clientOutput);
+        }
+    }
+
+    @Test
+    public void openAppliedEffectsSurviveSeparateCompilation() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "openEffectLibrary" + suffix;
+        final var clientPackage = "openEffectClient" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-open-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-open-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                public effect Failure<T> {
+                    public property value: T;
+                }
+                public fn forward<T>(body: () -> Unit performs Failure<T>): Unit
+                        performs Failure<T> = body();
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                    libraryPackage + ".Library", libraryPackage, List.of(), true, List.of(),
+                    libraryOutput);
+            final var libraryResolution = libraryCompiler.resolveWithDiagnostics();
+            assertTrue(libraryResolution.errors().toString(), libraryResolution.errors().isEmpty());
+            libraryCompiler.compile();
+
+            final var index = com.maruseron.zeron.domain.ZeronLibraryIndex
+                    .readFromDirectory(libraryOutput);
+            final var forward = index.declarations().stream()
+                    .filter(com.maruseron.zeron.domain.ZeronLibraryIndex.FunctionExport.class::isInstance)
+                    .map(com.maruseron.zeron.domain.ZeronLibraryIndex.FunctionExport.class::cast)
+                    .filter(function -> function.qualifiedName().equals(libraryPackage + ".forward"))
+                    .findFirst().orElseThrow();
+            assertTrue(forward.signature().raisedEffects().getFirst()
+                    instanceof com.maruseron.zeron.domain.GenericDescriptor);
+            final var effect = (com.maruseron.zeron.domain.GenericDescriptor)
+                    forward.signature().raisedEffects().getFirst();
+            final var argument = (com.maruseron.zeron.domain.TypeParameterDescriptor)
+                    effect.typeParameters().getFirst();
+            assertEquals("T", argument.name());
+            assertEquals(forward.signature().typeParameters().getFirst(), argument);
+
+            final var clientUnit = parse("Client.zn", """
+                    package %s;
+                    import %s.Failure;
+                    import %s.forward;
+                    public fn inferred(): Unit performs Failure<Int> = forward(() -> {
+                        perform Failure<Int>(44);
+                    });
+                    """.formatted(clientPackage, libraryPackage, libraryPackage));
+            final var clientCompiler = CompilationService.forCompilationUnits(List.of(clientUnit),
+                    clientPackage + ".Client", clientPackage, List.of(index), true, List.of(),
+                    clientOutput);
+            final var clientResolution = clientCompiler.resolveWithDiagnostics();
+            assertTrue(clientResolution.errors().toString(), clientResolution.errors().isEmpty());
+            clientCompiler.compile();
         } finally {
             deleteTree(libraryOutput);
             deleteTree(clientOutput);

@@ -1,0 +1,93 @@
+package zeron.math;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Iterable;
+import zeron.lang.Option;
+
+/// Descriptive statistics over finite `Float` sequences.
+///
+/// Every operation returns `None` when its result is undefined: an empty input for a population
+/// statistic, or fewer than two values for a sample statistic. Values are accumulated in `Float`,
+/// so results inherit binary floating-point rounding.
+namespace Statistics {
+    /// Returns the arithmetic mean of `values`, or `None` when the input is empty.
+    public fn mean(values: Iterable<Float>): Option<Float> {
+        let mut total = 0.0;
+        let mut count = 0;
+        for (let value in values) {
+            total = total + value;
+            count = count + 1;
+        }
+        if (count == 0) return Option<Float>.None();
+        return Option.Some(total / count.toFloat());
+    }
+
+    /// Returns the median of `values`, or `None` when the input is empty.
+    ///
+    /// An even count averages the two middle values after sorting.
+    public fn median(values: Iterable<Float>): Option<Float> {
+        let sorted = ArrayList<Float>.empty();
+        for (let value in values) sorted.add(value);
+        if (sorted.isEmpty()) return Option<Float>.None();
+        let mut outer = 1;
+        while (outer < sorted.size) {
+            let value = sorted.at(outer).getOrElse(0.0);
+            let mut inner = outer - 1;
+            while (inner >= 0 and sorted.at(inner).getOrElse(0.0) > value) {
+                sorted.replaceAt(inner + 1, sorted.at(inner).getOrElse(0.0));
+                inner = inner - 1;
+            }
+            sorted.replaceAt(inner + 1, value);
+            outer = outer + 1;
+        }
+        let middle = sorted.size / 2;
+        if (sorted.size % 2 == 1) return sorted.at(middle);
+        let lower = sorted.at(middle - 1).getOrElse(0.0);
+        let upper = sorted.at(middle).getOrElse(0.0);
+        return Option.Some((lower + upper) / 2.0);
+    }
+
+    /// Returns the population variance of `values`, or `None` when the input is empty.
+    ///
+    /// The divisor is the element count. The two-pass form subtracts each value from the mean
+    /// before squaring, avoiding the cancellation of the `E[x²] - E[x]²` shortcut.
+    public fn variance(values: Iterable<Float>): Option<Float> {
+        let meanValue = mean(values);
+        if (meanValue matches Option.None()) return Option<Float>.None();
+        let average = meanValue.getOrElse(0.0);
+        let mut squaredDeviations = 0.0;
+        let mut count = 0;
+        for (let value in values) {
+            let deviation = value - average;
+            squaredDeviations = squaredDeviations + deviation * deviation;
+            count = count + 1;
+        }
+        return Option.Some(squaredDeviations / count.toFloat());
+    }
+
+    /// Returns the sample variance of `values`, or `None` when the input has fewer than two values.
+    ///
+    /// The divisor is `count - 1`.
+    public fn sampleVariance(values: Iterable<Float>): Option<Float> {
+        let meanValue = mean(values);
+        if (meanValue matches Option.None()) return Option<Float>.None();
+        let average = meanValue.getOrElse(0.0);
+        let mut squaredDeviations = 0.0;
+        let mut count = 0;
+        for (let value in values) {
+            let deviation = value - average;
+            squaredDeviations = squaredDeviations + deviation * deviation;
+            count = count + 1;
+        }
+        if (count < 2) return Option<Float>.None();
+        return Option.Some(squaredDeviations / (count - 1).toFloat());
+    }
+
+    /// Returns the population standard deviation, the square root of `variance`.
+    public fn standardDeviation(values: Iterable<Float>): Option<Float> =
+        variance(values).map(value -> value.sqrt());
+
+    /// Returns the sample standard deviation, the square root of `sampleVariance`.
+    public fn sampleStandardDeviation(values: Iterable<Float>): Option<Float> =
+        sampleVariance(values).map(value -> value.sqrt());
+}

@@ -28,7 +28,7 @@ public contract Completion {
     mut cancel(): Unit;
 }
 
-/// A handle to one task started in a [Scope].
+/// A handle to one task started in a [ConcurrentScope].
 ///
 /// A task is already in flight. It is not a lazy computation and it deliberately has no `map`,
 /// `flatMap`, or `do` surface; monadic composition belongs to a separate deferred abstraction.
@@ -81,9 +81,9 @@ class TaskImpl<T admits nullable + mutable, E admits effect...> is Task<T, {E}>,
 ///
 /// Starting the task does not perform `E`; the body's effects are captured as the task outcome and
 /// re-raised by [value] or [await]. Opening, joining, cancelling, and closing the scope are
-/// unchanged from [Scope]. The returned mutable view lets the caller cancel that one task.
+/// unchanged from [ConcurrentScope]. The returned mutable view lets the caller cancel that one task.
 public fn spawn<T admits nullable + mutable, E admits effect...>(
-    scope: &Scope,
+    scope: &ConcurrentScope,
     body: () -> T performs E
 ): &Task<T, {E}> =
     scope.start(body);

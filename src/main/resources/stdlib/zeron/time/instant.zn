@@ -17,9 +17,9 @@ public class Instant is Comparable<Instant> deriving Eq, Hashable {
     // Difference-based ordering follows nanoTime wraparound for intervals shorter than 2^63 ns.
     public compareTo(other: Instant): Ordering {
         let difference = this.ticks - other.ticks;
-        if (difference < 0L) return Ordering.LT();
-        if (difference > 0L) return Ordering.GT();
-        return Ordering.EQ();
+        if (difference < 0L) return Ordering.Less();
+        if (difference > 0L) return Ordering.Greater();
+        return Ordering.Equal();
     }
 
     public elapsedSince(earlier: Instant): Duration =

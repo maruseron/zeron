@@ -4,7 +4,7 @@ package zeron.lang;
 ///
 /// A tail-resumptive handler answers with `Unit`, after which the perform expression continues with
 /// the resumed value.
-public effect Yield<T> responds Unit {
+public effect Yield<T admits mutable> responds Unit {
     public property value: T;
 }
 

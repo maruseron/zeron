@@ -149,6 +149,8 @@ Each set has a different job. Keep them separate:
   surface a syntax change touches.
 - [`registries-and-modules.md`](./documents/developer_guides/registries-and-modules.md) — bindings,
   intrinsics, and standard-library modules.
+- [`style-conventions.md`](./documents/developer_guides/style-conventions.md) — naming, feature
+  grouping, declaration choice, data modeling, and API shape.
 - [`diagnostics-and-error-codes.md`](./documents/developer_guides/diagnostics-and-error-codes.md) —
   adding or changing a diagnostic.
 - [`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md) — test

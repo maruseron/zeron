@@ -15,7 +15,7 @@ public class Logger {
     public constructor of(name: String, sink: &LogSink) =
         Logger.new(name, sink, Clock.system(), HashMap.empty());
 
-    public constructor withClock(name: String, sink: &LogSink, clock: Clock) =
+    public constructor fromClock(name: String, sink: &LogSink, clock: Clock) =
         Logger.new(name, sink, clock, HashMap.empty());
 
     /// Whether `level` would be written by this logger's sink.

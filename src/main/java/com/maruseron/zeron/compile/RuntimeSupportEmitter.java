@@ -39,6 +39,7 @@ final class RuntimeSupportEmitter {
     private static final ClassDesc THROWABLE_CLASS = ClassDesc.of("java.lang.Throwable");
     private static final ClassDesc ARRAY_LIST_CLASS = ClassDesc.of("java.util.ArrayList");
     private static final ClassDesc DISPOSABLE_CLASS = ClassDesc.of("zeron.resource.Disposable");
+    private static final ClassDesc DISPOSE_GUARD_CLASS = ClassDesc.of("zeron.runtime.DisposeGuard");
     private static final ClassDesc ARRAY_ITERABLE_CLASS = ClassDesc.of("zeron.runtime.ArrayIterable");
     private static final ClassDesc ITERABLE_CLASS = ClassDesc.of("zeron.collections.Iterable");
     private static final ClassDesc ARRAY_ITERATOR_CLASS = ClassDesc.of("zeron.collections.ArrayIterator");
@@ -65,8 +66,10 @@ final class RuntimeSupportEmitter {
             new SupportUnit("zeron/runtime/EntrySupport", List.of("zeron/runtime/EntrySupport"),
                     Set.of("zeron/runtime/EffectSupport"),
                     context -> emitRuntimeClass(context.outputDirectory, "EntrySupport")),
+            new SupportUnit("zeron/runtime/DisposeGuard", List.of("zeron/runtime/DisposeGuard"),
+                    Set.of(), context -> emitRuntimeClass(context.outputDirectory, "DisposeGuard")),
             new SupportUnit("zeron/runtime/ResourceSupport", List.of("zeron/runtime/ResourceSupport"),
-                    Set.of("zeron/runtime/RaisedEffect", "zeron/lang/Unit"),
+                    Set.of("zeron/runtime/RaisedEffect", "zeron/lang/Unit", "zeron/runtime/DisposeGuard"),
                     context -> emitResourceSupportClass(context.outputDirectory)),
             new SupportUnit("zeron/runtime/EqSupport", List.of("zeron/runtime/EqSupport"),
                     Set.of("zeron/lang/Unit"),
@@ -623,6 +626,7 @@ final class RuntimeSupportEmitter {
                         code.iload(3);
                         code.iflt(end);
                         code.labelBinding(startDispose);
+                        code.invokestatic(DISPOSE_GUARD_CLASS, "enter", emptyVoidMethod());
                         code.aload(0);
                         code.iload(3);
                         code.aaload();
@@ -630,11 +634,13 @@ final class RuntimeSupportEmitter {
                         code.invokeinterface(DISPOSABLE_CLASS, "dispose",
                                 MethodTypeDesc.of(UNIT_CLASS));
                         code.pop();
+                        code.invokestatic(DISPOSE_GUARD_CLASS, "exit", emptyVoidMethod());
                         code.labelBinding(endDispose);
                         code.goto_(next);
 
                         code.labelBinding(handler);
                         code.astore(4);
+                        code.invokestatic(DISPOSE_GUARD_CLASS, "exit", emptyVoidMethod());
                         code.aload(2);
                         code.ifnonnull(hasPrimary);
                         code.aload(4);

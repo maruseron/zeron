@@ -1,6 +1,6 @@
 # Zeron: Suspendable Effects and One-Shot Continuations
 
-*Design document. Summarizes the discussion on async/await, generators and resumability in Zeron. Syntax marked as a proposal does not exist in the language yet. Revised 2026-11-22 to align with the settled ZEP-0119 revision; the corrections are recorded in §0.*
+*Design document. Summarizes the discussion on async/await, generators and resumability in Zeron. Syntax marked as a proposal does not exist in the language yet. Revised 2026-11-22 to align with the settled ZEP-0119 revision and its backend prototype; the corrections are recorded in §0.*
 
 ## 0. Status and relationship to proposals
 
@@ -9,7 +9,9 @@ This is a design exploration, not an approved design. Its decisions are split in
 - [ZEP-0118](../zeps/ZEP-0118.md) — response-typed effects and tail-resumptive handlers;
 - [ZEP-0119](../zeps/ZEP-0119.md) — one-shot continuations, deep handlers, and cancellation;
 - [ZEP-0164](../zeps/ZEP-0164.md), [ZEP-0165](../zeps/ZEP-0165.md) — the non-generic `Await`
-  carrier, `Completion`, and unified `Task` surface; ZEP-0120 is the superseded history.
+  carrier, `Completion`, and unified `Task` surface; ZEP-0120 is the superseded history;
+- [ZEP-0173](../zeps/ZEP-0173.md) — source-level debug metadata and IDE stepping, deferred from the
+  continuation work.
 
 [ZEP-0007](../zeps/ZEP-0007.md) is superseded and remains the historical mechanism comparison, not
 an active design home. Multi-shot continuations, the only scope not covered by the split, are
@@ -19,7 +21,8 @@ document and a ZEP disagree, the ZEP is authoritative.
 
 Corrections recorded in this revision:
 
-- Loom continuations are not implicit delimited control and are not a shipping foundation (§9.2).
+- Loom continuations are not implicit delimited control. A is the preferred backend subject to a
+  provider/launcher gate, with B as fallback (§9.2).
 - The handler ABI is not a blocker for reified generics (§9.3).
 - A `handle` that implicitly cancels continuations does **not** gain `DisposeFailure` in its result
   row. Only an explicit `k.cancel()` reports cleanup failures through ordinary effect typing (§8.3,
@@ -32,7 +35,8 @@ Corrections recorded in this revision:
 - The main use case is pull generators and general resumable handlers, not non-blocking `await`
   (§6.1, §9.2).
 - Backend C (a public-API virtual-thread/park implementation) is part of the prototype and is
-  recommended first (§9.2).
+  rejected for per-element generator yields; A ships behind the provider boundary, and the portable
+  compiler-managed backend is split into ZEP-0172 (§9.2).
 - The generator surface is an ordinary standard-library `generator` function taking a trailing
   `() -> Unit performs Yield<T>` lambda; there is no generator declaration kind (§7.3).
 - A replayable `GeneratorSource<T>` is an `Iterable<T>`; the one-shot `Generator<T>` cursor is an
@@ -168,7 +172,7 @@ fn spawn<T, E admits effect...>(scope: Scope, body: () -> T performs E): &Task<T
     // start a task in a ZEP-0112 scope
 
 fn main() {                                            // entry installs the blocking Await handler
-    using (scope = Scope.open()) {
+    using (scope = ConcurrentScope.open()) {
         let task = spawn(scope, () -> doAsync(op));
         println(await(task));
     }
@@ -506,14 +510,37 @@ internal JDK API or descriptor change. Its costs are one extra virtual thread pe
 context switch per effect, fragmented stack traces/profiling, and the requirement to wake both the
 body and owning threads on cancellation.
 
-Recommendation: **prototype C first**, because it is public-API-only and exercises the source
-semantics without an ABI commitment. Use A as a semantic probe for stack capture and scope
-resolution, and B as the portable fallback if C's cost is unacceptable. The source language and the
-`Cont` contract must be identical under A, B, and C, so the backend remains an implementation choice.
-The prototype must answer: can the perform site resolve the handler scope without an ABI change; can
-handler state survive owner-thread handoff; does cancellation run `using` and Java `finally` cleanup;
-what happens across monitors, native frames, and unaware Java callbacks; and does tail transfer keep
-a long generator's stack bounded?
+**Decision: A ships; the portable backend is split out.** The standalone prototype in
+[`prototypes/level3`](../../prototypes/level3/Level3BackendPrototype.java) measured a pull generator
+on JDK 26: a hand-written state machine at 3.1–3.6 ns/pull, A's Loom continuation at 68.6–81.4
+ns/pull, and C's virtual-thread rendezvous at 1.5–4.2 µs/pull. C also creates one virtual thread per
+suspended generator, takes 31–37 µs to create it, and retains about 824 B versus A's 308 B. C is
+rejected for per-element generator yields.
+
+A preserves real stacks and descriptors and has the best debug story. Its internal API is a
+packaging risk, not a semantic disqualification: it is isolated behind a `ContinuationProvider`,
+compiled from `src/continuation/java` by a separate Maven step, and selected at startup.
+`distribution/bin/zeron`, `zeron.cmd`, and the generated-program child process pass
+`--add-exports java.base/jdk.internal.vm=ALL-UNNAMED`; a plain `java -jar` cannot carry that export
+implicitly, so external packaging remains a contract to cover. The provider also owns the API-shape
+adapter and the supported-JDK matrix; a shape change should require a new adapter, not runtime-wide
+edits. The provider boundary, launcher tests, the `Cont<R, T>` lifecycle, the `Level3Support`
+perform-to-`Cont` bridge, tail-resume transfer, per-`handle` generation tokens, task cancellation,
+the cancellation token, the `dispose` marker, and compiler lowering are implemented. JDK 25 is
+covered by compilation plus the provider shape probe. The IDE debugger check moved to
+[ZEP-0173](../zeps/ZEP-0173.md), because it needs compiler line and local metadata, which is not
+emitted yet and is independent of the continuation runtime.
+
+The portable compiler-managed backend is no longer a fallback in the continuation proposal. Its
+transform, descriptor and API-index cost, cleanup states, and 1 µs/1 KB gate moved to
+[ZEP-0172](../zeps/ZEP-0172.md), which is unscheduled. If A fails its gate, do not silently pay the
+descriptor cost; decide the portable backend on its own terms. Do not fall back to C for generator
+yields.
+
+The prototype did not cover full handler scope resolution, monitors, native frames, unaware Java
+callbacks, stack traces, source-level debugger support, JFR beyond the smoke check, or
+external-event waits. Those remain implementation questions for A and B; debug metadata is
+[ZEP-0173](../zeps/ZEP-0173.md)'s scope.
 
 A blocking `await` does not need any of this machinery. Its handler calls
 `Completion.awaitDone()` and resumes in tail position, which is level 2 in §6.1. Only a pull generator
@@ -524,12 +551,14 @@ or a general resumable handler needs the resumable backend.
 With Loom continuations the descriptor problem shrinks, because suspension does not add a
 continuation parameter to every function. With strategy B you would have to choose between
 specializing by row, a dynamic `bind`, or a hybrid.
-This decision does **not** have to be fixed before closing reified generics: generics, existentials,
-and the current handler ABI can ship without a continuation parameter. The handler and closure
-representations should reserve an extension point, but they must not depend on this feature. If B
-ships later, every function that may suspend changes its descriptor and the API index needs a schema
-change; if A ships, the descriptor does not change but the runtime depends on the internal API. The
-backend decision is deferred until the prototype reports.
+Generics, existentials, and the current handler ABI can still ship without a continuation parameter.
+The handler and closure representations should reserve an extension point, but they must not depend on
+this feature. A is preferred, so suspension does not change descriptors or the API index on the
+primary path. If A fails its provider/launcher gate and B becomes the default, every function that may
+suspend changes its descriptor and the API index needs a schema addition. The B descriptor shape must
+reserve the state/resume parameter without making reified generics depend on it. Do not bump
+`API_INDEX_SCHEMA_VERSION` in advance; bump it once only if the B path is actually adopted. C avoids
+both but is rejected for generator yields on cost.
 
 ### 9.4 Boundaries where the row must forbid suspension
 
@@ -593,8 +622,10 @@ document and a ZEP disagree, the ZEP is authoritative.
 4. The async surface as a blocking handler on virtual threads
    ([ZEP-0164](../zeps/ZEP-0164.md), [ZEP-0165](../zeps/ZEP-0165.md)); this needs no continuation
    capture.
-5. `Cont<R, T>` with dynamic one-shot `resume`/`cancel`, first as a runtime state machine and a
-   backend C spike, then A and B ([ZEP-0119](../zeps/ZEP-0119.md)).
+5. `Cont<R, T>` with dynamic one-shot `resume`/`cancel`, as a runtime state machine. The backend
+   prototype rejects C for generator yields and ships A behind the continuation-provider and
+   launcher gate; the portable backend moved to [ZEP-0172](../zeps/ZEP-0172.md)
+   ([ZEP-0119](../zeps/ZEP-0119.md)).
 6. Pull generators and general resumable handlers: `Generator`/`GeneratorSource`, `Iterator.close`,
    the standard-library `generator` function, and `for`/Stream close propagation. Any cross-thread or
    multiplexing handoff remains a follow-up.

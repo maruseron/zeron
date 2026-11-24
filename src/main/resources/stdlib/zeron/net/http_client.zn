@@ -20,7 +20,7 @@ public class HttpClient is Disposable {
 
     private constructor new;
 
-    public constructor with(config: HttpClientConfig) =
+    public constructor fromConfig(config: HttpClientConfig) =
         HttpClient.new(httpCreateClient(config.connectTimeout.nanoseconds), config);
 
     public send(request: HttpRequest): HttpResponse performs HttpFailure {

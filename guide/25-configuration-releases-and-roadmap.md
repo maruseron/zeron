@@ -134,6 +134,12 @@ should keep the launcher,
 standard library, and diagnostic descriptions from the same compatible build, so users receive
 matching runtime support and actionable errors.
 
+Programs that use continuations, including generators and general level-3 handlers, need the JVM
+export `--add-exports java.base/jdk.internal.vm=ALL-UNNAMED`. The `zeron` launcher adds it; a plain
+`java -jar` invocation does not. External packagers must add the export themselves or launch through
+`zeron`; otherwise the program fails at the first suspension with a message naming the required
+export.
+
 Zeron is evolving. Examples of current limits include no class inheritance, no general Java
 generics, Java callback conversion only for explicitly written functional interfaces, no dependency
 fetching or incremental build, no `Stable` generic constraint for hash-key admissibility, and

@@ -83,8 +83,8 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
-| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Candidate | 0.9.0 |
-| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Candidate | 0.9.0 |
+| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Implemented | Candidate | 0.9.0 |
+| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Implemented | Candidate | 0.9.0 |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Implemented | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Shipped | 0.8.0 |
@@ -136,7 +136,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
 | [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Shipped | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Implemented | Candidate | 0.9.0 |
-| [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Candidate | 0.9.0 |
+| [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Implemented | Candidate | 0.9.0 |
 | [ZEP-0120](./ZEP-0120.md) | Direct-Style Futures with `spawn` and `await` | Superseded | Unscheduled | — |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
@@ -169,20 +169,28 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Shipped | 0.8.0 |
 | [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Shipped | 0.8.0 |
-| [ZEP-0152](./ZEP-0152.md) | Standard Library Randomness | Draft | Candidate | 0.9.0 |
-| [ZEP-0153](./ZEP-0153.md) | Descriptive Statistics in `zeron.math` | Draft | Candidate | 0.9.0 |
-| [ZEP-0154](./ZEP-0154.md) | Ordered Collections | Draft | Candidate | 0.9.0 |
-| [ZEP-0155](./ZEP-0155.md) | Binary Buffers and Encodings | Draft | Candidate | 0.9.0 |
-| [ZEP-0156](./ZEP-0156.md) | Text Formatting and Regular Expressions | Draft | Candidate | 0.9.0 |
-| [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Draft | Candidate | 0.9.0 |
+| [ZEP-0152](./ZEP-0152.md) | Standard Library Randomness | Implemented | Candidate | 0.9.0 |
+| [ZEP-0153](./ZEP-0153.md) | Descriptive Statistics in `zeron.math` | Implemented | Candidate | 0.9.0 |
+| [ZEP-0154](./ZEP-0154.md) | Ordered Collections | Implemented | Candidate | 0.9.0 |
+| [ZEP-0155](./ZEP-0155.md) | Binary Buffers and Encodings | Implemented | Candidate | 0.9.0 |
+| [ZEP-0156](./ZEP-0156.md) | Text Formatting and Regular Expressions | Implemented | Candidate | 0.9.0 |
+| [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Implemented | Candidate | 0.9.0 |
 | [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Candidate | 0.10.0 |
 | [ZEP-0159](./ZEP-0159.md) | Generated Standard-Library Reference | Draft | Unscheduled | — |
 | [ZEP-0160](./ZEP-0160.md) | Scoped Projection Types | Draft | Candidate | 0.10.0 |
 | [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Candidate | 0.10.0 |
 | [ZEP-0162](./ZEP-0162.md) | Scoped Generic Admissibility | Draft | Unscheduled | — |
 | [ZEP-0163](./ZEP-0163.md) | Automatic Read-Only Widening for Inherited Generic Method Bounds | Draft | Unscheduled | — |
-| [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Accepted | Candidate | 0.9.0 |
-| [ZEP-0165](./ZEP-0165.md) | Unify `Task` and `Future` into a Single Async Handle | Accepted | Candidate | 0.9.0 |
+| [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Implemented | Candidate | 0.9.0 |
+| [ZEP-0165](./ZEP-0165.md) | Unify `Task` and `Future` into a Single Async Handle | Implemented | Candidate | 0.9.0 |
+| [ZEP-0166](./ZEP-0166.md) | Open Generic Effect Applications | Implemented | Candidate | 0.9.0 |
+| [ZEP-0167](./ZEP-0167.md) | Capability Requirements in Generic Type Arguments | Draft | Unscheduled | — |
+| [ZEP-0168](./ZEP-0168.md) | Return Covariance in Contract Inheritance | Draft | Unscheduled | — |
+| [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Accepted | Candidate | 0.9.0 |
+| [ZEP-0170](./ZEP-0170.md) | For-Expression and Do-Notation Boundary | Draft | Unscheduled | — |
+| [ZEP-0171](./ZEP-0171.md) | Fail-Fast Concurrent Scopes and the `concurrent` Helper | Implemented | Candidate | 0.9.0 |
+| [ZEP-0172](./ZEP-0172.md) | Portable Compiler-Managed Continuation Backend | Draft | Unscheduled | — |
+| [ZEP-0173](./ZEP-0173.md) | Source-Level Debug Metadata and IDE Stepping | Draft | Unscheduled | — |
 
 ## Release bundles
 
@@ -197,7 +205,7 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 15 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0165 (accepted; unifies `Task`/`Future`), ZEP-0164 (accepted; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0119, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 18 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0166 (implemented; open generic effect applications), ZEP-0165 (implemented; unifies `Task`/`Future`), ZEP-0164 (implemented; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0169 (accepted; library portion implemented), ZEP-0171 (implemented; fail-fast scopes and the `concurrent` helper), ZEP-0119 (implemented; continuations, tail transfer, generation tokens, task cancellation), ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157 (implemented) |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -347,11 +355,13 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 
 ### `0.9.0` — effect control and response typing
 
-`0.9.0` is the effect-control bundle. It has fifteen `Candidate` rows; [ZEP-0112](./ZEP-0112.md),
-[ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), and [ZEP-0147](./ZEP-0147.md) are
-implemented, [ZEP-0165](./ZEP-0165.md) and [ZEP-0164](./ZEP-0164.md) are accepted, and the
-remaining designs are `Draft`. The effect-control rows carry the depth, and the library rows
-add surface that does not touch handler typing or code generation:
+`0.9.0` is the effect-control bundle. It has eighteen `Candidate` rows; [ZEP-0112](./ZEP-0112.md),
+[ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), [ZEP-0147](./ZEP-0147.md),
+[ZEP-0166](./ZEP-0166.md), [ZEP-0165](./ZEP-0165.md), [ZEP-0164](./ZEP-0164.md), and
+[ZEP-0119](./ZEP-0119.md) are implemented, [ZEP-0169](./ZEP-0169.md) is accepted with its library
+portion implemented, and the remaining library rows and [ZEP-0171](./ZEP-0171.md) are implemented.
+The effect-control rows carry the depth, and the library rows add surface that does not touch
+handler typing or code generation:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
   an effect declares a response type, `perform` becomes an expression whose value the handler
@@ -366,8 +376,12 @@ add surface that does not touch handler typing or code generation:
   available"; it
   moves `reified` to a leading capability and leaves response constraints to ZEP-0118's
   `Responds<R>` bound.
+- [ZEP-0166](./ZEP-0166.md) — open generic effect applications. Implemented: the generator body is
+  typed openly, inference unifies applied effects structurally, and existing index type-parameter
+  references preserve the open form across separate compilation without a schema bump. Open runtime
+  construction from a non-reified generic body remains unsupported.
 - [ZEP-0112](./ZEP-0112.md) — structured concurrency on virtual threads. Implemented: a
-  library-only `Scope` / `Task<T, E>` track with cancellation and deadlines; effect rows are
+  library-only `ConcurrentScope` / `Task<T, E>` track with cancellation and deadlines; effect rows are
   captured at the task boundary and re-raised at `value()`. Independent of response typing.
 - [ZEP-0165](./ZEP-0165.md) — unify `Task` and `Future` into a single async handle. Accepted:
   collapses the eager `Future` wrapper into `Task`, keeps `spawn`/`await` on `Task`, and supersedes
@@ -381,25 +395,55 @@ add surface that does not touch handler typing or code generation:
   erased join, or class reification is needed. It depends on ZEP-0165's unified `Task` handle and
   ZEP-0126's entry contract.
 - [ZEP-0119](./ZEP-0119.md) — one-shot continuations, deep handlers, and cancellation.
-  Prototype-gated: defines level-3 handlers for pull generators and general effect handlers, keeps
-  blocking `await` as the default, unifies continuation cancellation with ZEP-0112, and compares
-  backends A, B, and public-API C before a shipping decision.
-- [ZEP-0066](./ZEP-0066.md) — standard-library TOML parser. A `zeron.parsers.toml` package with
-  explicit value, date/time, and diagnostic semantics, following the shipped JSON parser.
-- [ZEP-0067](./ZEP-0067.md) — standard-library XML parser. A `zeron.parsers.xml` package with
-  explicit namespace, document-model, and resource-handling semantics and safe defaults.
+  Implemented: defines level-3 handlers for pull generators and general effect handlers, keeps
+  blocking `await` as the default, unifies continuation cancellation with ZEP-0112, ships the Loom
+  backend behind the provider boundary, and implements tail-resume transfer, per-`handle`
+  generation tokens, and task cancellation delivered to a suspended continuation. The portable
+  compiler-managed backend moved to the unscheduled [ZEP-0172](./ZEP-0172.md); public-API C stays
+  rejected for generator yields. Source-level debug metadata and IDE stepping moved to
+  [ZEP-0173](./ZEP-0173.md), because the gap is compiler debug output rather than continuation
+  semantics.
+- [ZEP-0066](./ZEP-0066.md) — standard-library TOML parser. Implemented: `zeron.parsers.toml`
+  exposes an ordered table model, scalar/date-time/array/table values, and typed parse errors on
+  top of `tomlj`.
+- [ZEP-0067](./ZEP-0067.md) — standard-library XML parser. Implemented: `zeron.parsers.xml`
+  exposes elements, namespaces, ordered attributes, direct text, child elements, and typed errors;
+  DOCTYPE and external resources are disabled.
 - [ZEP-0152](./ZEP-0152.md) — standard-library randomness. A seedable `Random` with primitive and
   bounded generation, uniform collection picking, and in-place shuffling.
 - [ZEP-0153](./ZEP-0153.md) — descriptive statistics in `zeron.math`. Mean, median, variance, and
   standard deviation with explicit population and sample variants and explicit empty-input results.
-- [ZEP-0154](./ZEP-0154.md) — ordered collections. A binary-heap `PriorityQueue` and red–black-tree
-  `SortedSet` and `SortedMap` ordered by `Comparable`.
+- [ZEP-0154](./ZEP-0154.md) — ordered collections. Implemented: a binary-heap `PriorityQueue`
+  and `SortedSet`/`SortedMap` ordered by `Comparable`. The ordered map and set currently use
+  sorted parallel arrays with `O(n)` insertion and removal; replacing them with the proposed
+  red–black tree does not change the public surface.
 - [ZEP-0155](./ZEP-0155.md) — binary buffers and encodings. `ByteBuffer`, `ByteReader`, endianness,
   LEB128 varints, bit helpers, and checked hex and Base64 codecs in `zeron.buffer`.
 - [ZEP-0156](./ZEP-0156.md) — text formatting and regular expressions. A placeholder `Formatter`
   and a compiled `Regex` with matches, group access, replacement, and match iteration.
 - [ZEP-0157](./ZEP-0157.md) — collection building APIs. `List.build`, `Set.build`, `Map.build`, and
   `Stream.build` receiver-lambda blocks over curated builder types.
+- [ZEP-0169](./ZEP-0169.md) — standard-library test split and `@CompileFailure`. Accepted:
+  moves library runtime behavior to a `zeron.test` target, keeps diagnostics, ABI/API-index,
+  separate compilation, CLI, packaging, and process-isolation tests in the Java suite, and adds
+  expected-compilation-failure fixtures plus runner reporting and filtering. Release support for
+  the expanded library surface, not a language feature.
+- [ZEP-0171](./ZEP-0171.md) — fail-fast concurrent scopes and the `concurrent` helper.
+  Implemented: makes fail-fast the default for `ConcurrentScope`, adds `openManual`/`openManualWith` as the
+  caller-coordinated escape hatch, narrows `dispose` to effect-free `Unit`, and adds
+  `concurrent`/`concurrentWith` receiver-lambda blocks that install the blocking `Await` handler
+  and cancel-and-join leftovers on exit. The first genuine task failure cancels siblings and is
+  reported at a join or at close if unobserved. A fully typed close-time failure needs
+  binder-dependent effect rows and remains future compiler work.
+- [ZEP-0172](./ZEP-0172.md) — portable compiler-managed continuation backend. Draft,
+  `Unscheduled`, split out of ZEP-0119: owns the state-machine transform, the descriptor and
+  API-index schema change, cleanup states, stack-trace costs, and the 1 µs/1 KB gate. It is not part
+  of this bundle and does not change ZEP-0119's shipping backend.
+- [ZEP-0173](./ZEP-0173.md) — source-level debug metadata and IDE stepping. Draft, `Unscheduled`,
+  split out of ZEP-0119's validation: owns `SourceFile`/line/local metadata, readable generated
+  names or a source map, support-frame presentation, and the manual IDE stepping check. It affects
+  every compiled Zeron program rather than the continuation contract, so it is not part of this
+  bundle.
 
 The library rows are additive and independent of the effect work. They are preferred over
 bytecode-quality rows here because ZEP-0095 is a compiler-wide emission program and ZEP-0096 is

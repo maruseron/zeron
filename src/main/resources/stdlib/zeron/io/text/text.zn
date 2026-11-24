@@ -22,7 +22,7 @@ public class TextWriter is Disposable {
 
     private constructor new;
 
-    public constructor with(writer: &Writer) = TextWriter.new(writer);
+    public constructor fromWriter(writer: &Writer) = TextWriter.new(writer);
 
     public mut write(value: String): Unit performs IoFailure {
         let bytes = stringGetBytes(value, StandardCharsets.UTF_8);
@@ -41,7 +41,7 @@ public class TextReader is Disposable {
 
     private constructor new;
 
-    public constructor with(reader: &Reader) = TextReader.new(reader);
+    public constructor fromReader(reader: &Reader) = TextReader.new(reader);
 
     public mut readAll(): String performs IoFailure {
         let mut buffer: &ByteArray = allocateByteArray(4096);
@@ -71,10 +71,10 @@ public fn readText(path: Path): String performs IoFailure =
     Files.readString(File.new(path.toString()).toPath());
 
 public fn openTextReader(path: Path): &TextReader performs IoFailure =
-    TextReader.with(openReader(path));
+    TextReader.fromReader(openReader(path));
 
 public fn openTextWriter(path: Path): &TextWriter performs IoFailure =
-    TextWriter.with(openWriter(path));
+    TextWriter.fromWriter(openWriter(path));
 
 public fn writeText(path: Path, value: String): Unit performs IoFailure, DisposeFailure {
     using (let writer: &TextWriter = openTextWriter(path)) {

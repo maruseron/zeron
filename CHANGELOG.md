@@ -2,8 +2,96 @@
 
 ## [0.9.0] - Unreleased
 
+### Standard library
+
+- Added the ZEP-0152–ZEP-0157 library modules. `zeron.random` provides seeded xoshiro256**
+  generation, bounded values, `pick`, and `shuffle`; `zeron.math.Statistics` provides population and
+  sample descriptive statistics; `zeron.collections` adds `PriorityQueue`, `SortedSet`, `SortedMap`,
+  and receiver-lambda builders; `zeron.buffer` adds byte buffers and readers, endianness, LEB128
+  varints, bit helpers, and checked hex/Base64 codecs; and `zeron.text` adds `Formatter` and a
+  compiled `Regex` wrapper with typed errors, groups, iteration, and replacement. Ordered maps and
+  sets currently use sorted parallel arrays, so insertion and removal are `O(n)` rather than the
+  proposed red–black-tree cost.
+- Added the ZEP-0066 TOML parser and ZEP-0067 XML parser. `zeron.parsers.toml` exposes ordered
+  tables and a typed value/diagnostic model over `tomlj`; `zeron.parsers.xml` exposes namespaced
+  elements, attributes, direct text, and children with DOCTYPE and external-resource access
+  disabled.
+- Added the ZEP-0171 concurrency surface. `ConcurrentScope` is fail-fast by default, `openManual`
+  and `openManualWith` preserve caller-coordinated failure handling, `dispose` is effect-free, and
+  `concurrent`/`concurrentWith` run a read-only receiver body with the blocking `Await` handler and
+  cancel-and-join leftovers on exit. Task cancellation causes and failure observation are tracked,
+  siblings are cancelled by the first genuine failure, and an unobserved failure is reported at
+  close.
+- Extended `zeron.test` with `@CompileFailure` and the `assertContains`, `assertNotContains`,
+  `assertStartsWith`, `assertEndsWith`, `assertGreaterThan`, and `assertLessThan` helpers. The
+  compile-failure runner, fixture roots, filtering, and JSON reporting are still pending under
+  ZEP-0169. `STANDARD_LIBRARY_API_VERSION` is now 23 for this `0.9.0` cycle's public library
+  additions.
+
 ### Compiler and language work
 
+- Added the ZEP-0119 pull-generator surface and cleanup rules. `zeron.collections` gains
+  `Generator<T>` (an `Iterator<T>` with `cancel` and `isDone`), a replayable `GeneratorSource<T>`,
+  and `generator<T>(body)`. A body suspends at each `perform Yield<T>(...)` and resumes on the next
+  pull; `cancel` stops it with explicit `DisposeFailure`, while `close` is the quiet path. Open
+  generic effect applications are accepted in function types, so `body` is a typed
+  `() -> Unit performs Yield<T>, DisposeFailure` value and the direct `generator<Int> { ... }`
+  trailing-lambda form infers `T`. The body's cleanup effect is delivered through `cancel()` or
+  logged by `close()`, leaving `next()` effect-free. `Iterator<T>` gains an idempotent
+  `close` default, and `for` plus the `Stream` adapters now close the cursor they own on exhaustion,
+  `break`, `return`, and exceptional exit. `Cont` gains source-level `isDone` and `cancel`; `GeneratorSupport` drives the provider session
+  without the level-2 frame. `DisposeGuard` rejects `Await` performs and new continuations during
+  `dispose`, and a `dispose` implementation cannot declare `Await` or install a continuation-capturing
+  handler. `STANDARD_LIBRARY_API_VERSION` is now 22.
+- Completed the remaining ZEP-0119 runtime work. A level-3 handler case whose body is exactly
+  `k.resume(value)`, or a block whose yielded value is that call, now lowers to a tail-resume
+  transfer: the case frame is discarded and `Level3Support` drives the body and later cases from one
+  loop, so a user-written handler keeps a bounded stack across suspensions. Each `handle` also owns
+  a generation token that invalidates every `Cont` it created when the handle exits, and task
+  cancellation now reaches a suspended continuation through `CancellationSupport`: `Task.cancel` and
+  scope cancellation set a private token, the continuation unwinds its `using` cleanup in LIFO order,
+  and `Task.value()` raises a `CancellationException` with cleanup failures suppressed. A task
+  cancelled before its body starts does not run it.
+- Added the ZEP-0119 suspension-boundary runtime check. `zeron.runtime.SuspensionGuard` records a
+  thread-local host-region depth; a level-3 or generator frame snapshots that depth when installed,
+  and suspension is rejected with `BoundaryException` when host regions were entered afterwards. The
+  compiler marks a Java call that hands a Zeron callback to host code with `enter`/`exit` in a
+  `try`/`finally`, covering synchronous Java, JNI, and native callbacks, while a handler installed
+  inside the callback still suspends. `DisposeGuard` remains the stricter cleanup marker.
+- Added `ZR3019`, a warning on a direct `Task.value()` join whose task effect row is concretely empty.
+  The join bypasses `Await`, so an enclosing handler cannot apply its waiting policy; `await(task)`
+  is the async-facing spelling. Tasks with a non-empty row keep re-raising their effects from
+  `value()` and are not reported.
+- Completed ZEP-0166 open generic effect applications. Effect applications such as `Yield<T>` now
+  infer their arguments structurally from lambdas and function values, including nested forms like
+  `Failure<Array<T>>`, and nested applied effects keep their identity through substitution. The
+  existing API-index type-parameter reference encoding preserves the open application across
+  separate compilation, so no schema bump was required. `generator` uses this path for its typed
+  body, and a separately compiled client can infer `T` from the same exported signature.
+- Enforced the immutable-capture rule for explicitly typed lambdas. A lambda passed to a typed
+  function parameter now rejects reassignable local captures just like an inferred lambda, closing
+  a path that previously skipped capture validation. Mutable object references remain the supported
+  way to share state.
+- Fixed `continue` inside a `for` loop over an intrinsic array. The array-loop emitter now records
+  the iterator depth expected by break/continue cleanup, so such loops compile instead of failing
+  with a missing-loop-state error.
+- Added the ZEP-0119 continuation-provider gate. `zeron.runtime.ContinuationProvider` is a
+  backend-neutral boundary; the Loom implementation lives in the isolated `src/continuation/java`
+  source set and is compiled with the internal `jdk.internal.vm` export. `-Dzeron.continuation.backend`
+  accepts `auto`, `a`, or `b`: `auto` uses A when the export is present and otherwise reaches the
+  placeholder owned by ZEP-0172, while explicit A fails with a launcher hint. The distribution
+  launchers and `zeron run`'s generated-program process pass the export; plain `java -jar` must
+  carry it for A. The portable compiler-managed backend is now a separate unscheduled proposal
+  (ZEP-0172), not a fallback in ZEP-0119.
+  `zeron.runtime.Cont<R, T>` adds the one-shot lifecycle wrapper with owner confinement, terminal
+  states, idempotent cancellation, and stack-trace delegation. `zeron.runtime.Level3Support` adds the
+  perform-to-`Cont` runtime bridge: a perform suspends the A session, the owner constructs the `Cont`
+  for the handler, and later suspensions re-enter the same handler. The compiler now lowers a
+  general resuming `handle` case to that frame: `k` is a `zeron.runtime.Cont<Response, T>`, a case
+  may do work around `k.resume`, and the resume drives the protected body and returns its result.
+  Exact-tail cases keep the level-2 lowering and do not capture continuations. Storing a
+  continuation and resuming it through its inferred type works. The cancellation token, the
+  runtime `dispose` marker, and the generator surface are now implemented as described above.
 - Corrected newtype subtyping. A newtype is now covariant with its carrier in read positions, so
   `table == "users"`, passing a `UserId` where an `Int` is expected, returning it as the carrier,
   and string-concatenating it are all valid without an accessor. The write direction stays nominal:
@@ -43,7 +131,12 @@
   `reified` is now a leading capability (`reified T`), and legacy marker spellings such as
   `T: mut` or `T: nullable` produce migration diagnostics. Response constraints remain the
   `Responds<R>` bound, and effect markers do not take response type arguments.
-- Implemented ZEP-0112 structured concurrency on virtual threads. `zeron.concurrent.Scope` opens a
+- Renamed the structured-concurrency entry point from `zeron.concurrent.Scope` to
+  `zeron.concurrent.ConcurrentScope`. `Scope` was overloaded with lexical scopes and `using`
+  blocks; the noun ending in `Scope` reads as the concurrency type in context, while the
+  `using (let scope = ConcurrentScope.open())` declaration keeps the local short. `Task`, `spawn`,
+  cancellation, and the runtime support classes are otherwise unchanged.
+- Implemented ZEP-0112 structured concurrency on virtual threads. `zeron.concurrent.ConcurrentScope` opens a
   `using`-scoped lifetime over virtual threads (or an injected `ExecutorService`), starts
   `Task<T, E>` handles, and joins or cancels them on close; `Task.value()` blocks and re-raises the
   task body's captured effects at the join point, so the caller's `performs` row covers them.
@@ -65,14 +158,29 @@
   program entry installs the same host-side frame so `main` can await without declaring `Await`.
   Because the effect no longer returns the value, there is no erased join and no unchecked recovery
   cast. Outside the entry point, a function that awaits must declare `Await` in its `performs` row
-  or handle it; task-body awaits are not resumable in this slice. `STANDARD_LIBRARY_API_VERSION`
-  remains 21 in this unreleased cycle.
+  or handle it; task-body awaits are not resumable in this slice. The entry launch is covered in a
+  child process, and the `Task`/`spawn`/`await` surface round-trips through the API index.
+  `STANDARD_LIBRARY_API_VERSION` is 22 for this unreleased cycle.
 - Fixed syntax highlighting after the `perform`/`performs` and `admits`/leading-`reified` syntax
   changes. The TextMate grammar recognizes the new keywords, data-class `performs` headers, and
   admissibility markers; the ANSI highlighter applies the same contextual rules.
 - Stopped reporting `ZR3017` shadowing warnings for compiler-generated anonymous-object capture
   bindings. Resolving an object expression no longer makes captured locals such as `l` and `r` in
   the standard library look like user-authored shadowing.
+
+### Standard library
+
+- Completed the standard-library style pass. `Json` value operations now live in the `Json`
+  namespace (`Json.parse`, `Json.stringify`, `Json.build`, `Json.model`, `Json.emptyArray`,
+  `Json.emptyObject`), constructors that adapt an existing value use `from`
+  (`HttpClient.fromConfig`, `TextWriter.fromWriter`, `TextReader.fromReader`, `HashSet.fromMap`,
+  `HashMap.fromOperations`, `HashTable.fromOperations`, `StringJoiner.fromConfig`,
+  `Logger.fromClock`), and `String.at` is the canonical character accessor with `charAt` retained
+  as a compatibility bridge. `Ordering` cases are now `Less`, `Equal`, and `Greater`. `AnyField`
+  is a product, and `Field` and `Vector2` are data classes. `Option` gains `flatMap`, and
+  `Array.fold` is canonical with `foldLeft` as the `Foldable` bridge. The concurrent-scope source
+  file follows the `snake_case` convention. `STANDARD_LIBRARY_API_VERSION` stays 22 because this
+  remains the same unreleased 0.9.0 API cycle.
 
 ## [0.8.0] - 2026, 20 NOV
 

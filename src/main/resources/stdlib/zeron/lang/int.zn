@@ -25,9 +25,9 @@ default witness Hashable<Int> for Int {
 
 default witness Comparable<Int> for Int {
     fn compareTo(other: Int): Ordering {
-             if (this == other) return Ordering.EQ();
-        else if (this  < other) return Ordering.LT();
-        else                    return Ordering.GT();
+             if (this == other) return Ordering.Equal();
+        else if (this  < other) return Ordering.Less();
+        else                    return Ordering.Greater();
     }
 }
 

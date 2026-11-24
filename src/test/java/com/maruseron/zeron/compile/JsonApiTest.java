@@ -17,31 +17,29 @@ public final class JsonApiTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-json-api-");
         final var source = """
                 package json.client;
-                import zeron.serialization.json.number;
-                import zeron.serialization.json.parse;
-                import zeron.serialization.json.stringify;
+                import zeron.serialization.json.Json;
                 import zeron.serialization.json.getErrorMessage;
                 import zeron.serialization.json.getErrorOffset;
 
                 fn kind(): String =
-                    parse("[1,true,null]").fold(
+                    Json.parse("[1,true,null]").fold(
                         (value) -> value.kind(),
                         (error) -> getErrorMessage(error)
                     );
 
                 fn roundTrip(): String =
-                    parse("[-0.00e+12]").fold(
-                        (value) -> stringify(value).fold(
+                    Json.parse("[-0.00e+12]").fold(
+                        (value) -> Json.stringify(value).fold(
                             (text) -> text,
                             (error) -> getErrorMessage(error)
                         ),
                         (error) -> getErrorMessage(error)
                     );
 
-                fn rejectsInvalidNumber(): Boolean = number("01").isErr();
+                fn rejectsInvalidNumber(): Boolean = Json.number("01").isErr();
 
                 fn syntaxOffset(): Int =
-                    parse("[1,]").fold(
+                    Json.parse("[1,]").fold(
                         (_) -> -1,
                         (error) -> getErrorOffset(error).getOrElse(-1)
                     );
@@ -174,7 +172,6 @@ public final class JsonApiTest {
                 import zeron.serialization.Encode;
                 import zeron.serialization.json.Json;
                 import zeron.serialization.json.getErrorMessage;
-                import zeron.serialization.json.parse;
 
                 public type Point deriving Encode, Decode = (x: Int, y: Int);
 
@@ -197,7 +194,7 @@ public final class JsonApiTest {
                     Json.pretty(2).decodeFromString<Point>(text)
                         .fold((point) -> point.x + point.y, (error) -> -1);
 
-                fn indentedValue(): String = parse("[1]").fold(
+                fn indentedValue(): String = Json.parse("[1]").fold(
                     (value) -> Json.pretty(2).stringifyValue(value)
                         .fold((text) -> text, (error) -> getErrorMessage(error)),
                     (error) -> getErrorMessage(error));

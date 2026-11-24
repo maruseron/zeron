@@ -1,0 +1,186 @@
+package zeron.collections;
+
+import zeron.lang.Hashable;
+import zeron.lang.Option;
+import zeron.lang.Pair;
+
+/// A receiver-lambda builder for `ArrayList` values.
+///
+/// Prefer `List.build`; this class is public so the entry point can name the receiver type.
+public class ListBuilder<T admits mutable> {
+    values: &ArrayList<T>;
+
+    private constructor new;
+
+    /// Creates an empty builder.
+    public constructor empty() = ListBuilder<T>.new(ArrayList<T>.empty());
+
+    /// Appends `value` and reports whether the list accepted it.
+    public mut add(value: T): Boolean = values.add(value);
+
+    /// Appends every element of `source`, in order.
+    public mut addAll(source: Iterable<T>): Unit {
+        for (let value in source) values.add(value);
+    }
+
+    /// The number of elements added so far.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether no elements have been added.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// Removes every element added so far.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns the finished list. `List.build` calls this after the body.
+    public build(): &ArrayList<T> = this.values;
+}
+
+/// A receiver-lambda builder for `HashSet` values.
+///
+/// Prefer `Set.build`; this class is public so the entry point can name the receiver type.
+public class SetBuilder<T: Hashable<T>> {
+    values: &HashSet<T>;
+
+    private constructor new;
+
+    /// Creates an empty builder.
+    public constructor empty() = SetBuilder<T>.new(HashSet<T>.empty());
+
+    /// Adds `value`, reporting whether it was new to the set.
+    public mut add(value: T): Boolean = values.add(value);
+
+    /// Adds every element of `source`, in order.
+    public mut addAll(source: Iterable<T>): Unit {
+        for (let value in source) values.add(value);
+    }
+
+    /// The number of distinct elements added so far.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether no elements have been added.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// Removes every element added so far.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns the finished set. `Set.build` calls this after the body.
+    public build(): &HashSet<T> = this.values;
+}
+
+/// A receiver-lambda builder for `HashMap` values.
+///
+/// Prefer `Map.build`; this class is public so the entry point can name the receiver type.
+public class MapBuilder<K: Hashable<K>, V admits mutable> {
+    values: &HashMap<K, V>;
+
+    private constructor new;
+
+    /// Creates an empty builder.
+    public constructor empty() = MapBuilder<K, V>.new(HashMap<K, V>.empty());
+
+    /// Stores `value` for `key`, returning the value it replaced, if any.
+    public mut put(key: K, value: V): Option<V> = values.put(key, value);
+
+    /// Stores every entry of `source`, in order. A later duplicate key wins.
+    public mut putAll(source: Iterable<Pair<K, V>>): Unit {
+        for (let entry in source) values.put(entry.fst, entry.snd);
+    }
+
+    /// Removes the entry for `key`, returning its previous value, if any.
+    public mut remove(key: K): Option<V> = values.remove(key);
+
+    /// The number of entries added so far.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether no entries have been added.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// Removes every entry added so far.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns the finished map. `Map.build` calls this after the body.
+    public build(): &HashMap<K, V> = this.values;
+}
+
+/// A receiver-lambda builder for `Stream` values.
+///
+/// Prefer `Stream.build`; this class is public so the entry point can name the receiver type.
+public class StreamBuilder<T admits mutable> {
+    values: &ArrayList<T>;
+
+    private constructor new;
+
+    /// Creates an empty builder.
+    public constructor empty() = StreamBuilder<T>.new(ArrayList<T>.empty());
+
+    /// Appends `value` to the future stream.
+    public mut add(value: T): Boolean = values.add(value);
+
+    /// Appends every element of `source`, in order.
+    public mut addAll(source: Iterable<T>): Unit {
+        for (let value in source) values.add(value);
+    }
+
+    /// The number of elements added so far.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether no elements have been added.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// Removes every element added so far.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns a stream over the finished elements. `Stream.build` calls this after the body.
+    public build(): Stream<T> = Stream<T>.from(this.values);
+}
+
+/// Builder entry point for lists.
+namespace List {
+    /// Creates an `ArrayList` by running `body` with a fresh `ListBuilder` receiver.
+    public fn build<T admits mutable>(body: &ListBuilder<T>.() -> Unit): &ArrayList<T> {
+        let builder = ListBuilder<T>.empty();
+        builder.body();
+        return builder.build();
+    }
+}
+
+/// Builder entry point for sets.
+namespace Set {
+    /// Creates a `HashSet` by running `body` with a fresh `SetBuilder` receiver.
+    public fn build<T: Hashable<T>>(body: &SetBuilder<T>.() -> Unit): &HashSet<T> {
+        let builder = SetBuilder<T>.empty();
+        builder.body();
+        return builder.build();
+    }
+}
+
+/// Builder entry point for maps.
+namespace Map {
+    /// Creates a `HashMap` by running `body` with a fresh `MapBuilder` receiver.
+    public fn build<K: Hashable<K>, V admits mutable>(
+        body: &MapBuilder<K, V>.() -> Unit
+    ): &HashMap<K, V> {
+        let builder = MapBuilder<K, V>.empty();
+        builder.body();
+        return builder.build();
+    }
+}
+
+/// Builder entry point for streams.
+namespace Stream {
+    /// Creates a `Stream` by running `body` with a fresh `StreamBuilder` receiver.
+    public fn build<T admits mutable>(body: &StreamBuilder<T>.() -> Unit): Stream<T> {
+        let builder = StreamBuilder<T>.empty();
+        builder.body();
+        return builder.build();
+    }
+}

@@ -1,0 +1,25 @@
+package com.maruseron.zeron.runtime.parsers.toml;
+
+public external class TomlNode = "com.maruseron.zeron.runtime.parsers.toml.TomlNode" {
+    public kind(): String;
+    public text(): String;
+    public integer(): Long;
+    public decimal(): Float;
+    public flag(): Boolean;
+    public arraySize(): Int;
+    public arrayAt(index: Int): &TomlNode?;
+    public tableKeys(): Array<String>;
+    public child(key: String): &TomlNode?;
+}
+
+public external class TomlParseResult = "com.maruseron.zeron.runtime.parsers.toml.TomlParseResult" {
+    public isSuccess(): Boolean;
+    public root(): &TomlNode;
+    public message(): String;
+    public line(): Int;
+    public column(): Int;
+}
+
+public external class TomlSupport = "com.maruseron.zeron.runtime.parsers.toml.TomlSupport" {
+    public static parse(text: String): &TomlParseResult;
+}

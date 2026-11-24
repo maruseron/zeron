@@ -1,0 +1,132 @@
+package zeron.collections;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Comparable;
+import zeron.lang.Option;
+import zeron.lang.Ordering;
+
+class PriorityQueueIterator<T: Comparable<T>> is Iterator<T> {
+    values: &ArrayList<T>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(values: &ArrayList<T>) = PriorityQueueIterator<T>.new(values, 0);
+
+    public mut next(): Step<T> {
+        if (this.position >= this.values.size) return Step<T>.Done();
+        let value = unwrapSome(this.values.at(this.position));
+        this.position = this.position + 1;
+        return Step.Yield(value);
+    }
+}
+
+/// A mutable binary min-heap ordered by `Comparable`.
+///
+/// `peek` is constant time, and `add` and `poll` are `O(log n)`. Iteration yields the backing heap
+/// array order, not sorted order. Removing by value is linear.
+public class PriorityQueue<T: Comparable<T>> is Sized<T> {
+    values: &ArrayList<T>;
+
+    private constructor new;
+
+    /// Creates an empty queue.
+    public constructor empty() = PriorityQueue<T>.new(ArrayList<T>.empty());
+
+    /// The number of elements in the queue.
+    public property size: Int {
+        get = this.values.size;
+    }
+
+    /// Whether the queue has no elements.
+    public isEmpty(): Boolean = this.values.size == 0;
+
+    private mut swap(left: Int, right: Int): Unit {
+        let leftValue = unwrapSome(this.values.at(left));
+        let rightValue = unwrapSome(this.values.at(right));
+        this.values.replaceAt(left, rightValue);
+        this.values.replaceAt(right, leftValue);
+    }
+
+    private mut siftUp(start: Int): Unit {
+        let mut index = start;
+        while (index > 0) {
+            let parent = (index - 1) / 2;
+            let childValue = unwrapSome(this.values.at(index));
+            let parentValue = unwrapSome(this.values.at(parent));
+            if (childValue.compareTo(parentValue) matches Ordering.Less()) {
+                this.swap(index, parent);
+                index = parent;
+            } else {
+                return;
+            }
+        }
+    }
+
+    private mut siftDown(start: Int): Unit {
+        let mut index = start;
+        loop {
+            let left = index * 2 + 1;
+            if (left >= this.values.size) return;
+            let right = left + 1;
+            let mut smallest = left;
+            if (right < this.values.size) {
+                let leftValue = unwrapSome(this.values.at(left));
+                let rightValue = unwrapSome(this.values.at(right));
+                if (rightValue.compareTo(leftValue) matches Ordering.Less()) smallest = right;
+            }
+            let indexValue = unwrapSome(this.values.at(index));
+            let smallestValue = unwrapSome(this.values.at(smallest));
+            if (not (smallestValue.compareTo(indexValue) matches Ordering.Less())) return;
+            this.swap(index, smallest);
+            index = smallest;
+        }
+    }
+
+    /// Adds `value` to the queue.
+    public mut add(value: T): Boolean {
+        this.values.add(value);
+        this.siftUp(this.values.size - 1);
+        return true;
+    }
+
+    /// Returns the smallest element without removing it.
+    public peek(): Option<T> = this.values.first();
+
+    /// Removes and returns the smallest element.
+    public mut poll(): Option<T> {
+        if (this.values.size == 0) return Option<T>.None();
+        let smallest = unwrapSome(this.values.at(0));
+        let last = unwrapSome(this.values.removeAt(this.values.size - 1));
+        if (this.values.size > 0) {
+            this.values.replaceAt(0, last);
+            this.siftDown(0);
+        }
+        return Option.Some(smallest);
+    }
+
+    /// Removes one element ordered equal to `value`, returning `true` when it was present.
+    public mut remove(value: T): Boolean {
+        let mut index = 0;
+        while (index < this.values.size) {
+            let current = unwrapSome(this.values.at(index));
+            if (current.compareTo(value) matches Ordering.Equal()) {
+                let last = unwrapSome(this.values.removeAt(this.values.size - 1));
+                if (index < this.values.size) {
+                    this.values.replaceAt(index, last);
+                    this.siftDown(index);
+                    this.siftUp(index);
+                }
+                return true;
+            }
+            index = index + 1;
+        }
+        return false;
+    }
+
+    /// Removes every element.
+    public mut clear(): Unit = this.values.clear();
+
+    /// Returns an iterator over the heap array order.
+    public iterator(): &Iterator<T> = PriorityQueueIterator<T>.from(this.values);
+}

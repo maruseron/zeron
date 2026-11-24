@@ -28,17 +28,17 @@ public class HashMap<K: Hashable<K>, V admits mutable>
     ///
     /// The two functions must agree: keys that `equalityFunction` considers equal must produce the
     /// same hash from `hashFunction`.
-    public constructor withOperations(
+    public constructor fromOperations(
         hashFunction: (K) -> Long,
         equalityFunction: (K, K) -> Boolean
     ) =
         HashMap<K, V>.new(
-            HashTable<K, V>.withOperations(hashFunction, equalityFunction)
+            HashTable<K, V>.fromOperations(hashFunction, equalityFunction)
         );
 
     /// Creates an empty map using the standard hashing and equality of `K`.
     public constructor empty() =
-        HashMap<K, V>.withOperations(hashKey, equalKeys);
+        HashMap<K, V>.fromOperations(hashKey, equalKeys);
 
     /// Creates a map holding each entry; a later duplicate key replaces the earlier value.
     public constructor of(entries: &Pair<K, V>...) {

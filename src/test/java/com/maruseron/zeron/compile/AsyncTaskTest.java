@@ -3,17 +3,22 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
+import java.io.File;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -29,13 +34,13 @@ public final class AsyncTaskTest {
                 package %s;
                 import java.lang.Thread;
                 import zeron.concurrent.Await;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.blocking;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
                 fn totalsBody(): Int performs Await, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let first = spawn(scope, () -> 20);
                         let second = spawn(scope, () -> 22);
                         return await(first) + await(second);
@@ -44,7 +49,7 @@ public final class AsyncTaskTest {
                 public fn totals(): Int performs DisposeFailure =
                     handle (totalsBody()) with { %s };
                 fn virtualThreadBody(): Boolean performs Await, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = spawn(scope, () -> unsafe Thread.currentThread()!!.isVirtual());
                         return await(task);
                     }
@@ -52,7 +57,7 @@ public final class AsyncTaskTest {
                 public fn virtualThread(): Boolean performs DisposeFailure =
                     handle (virtualThreadBody()) with { %s };
                 fn primitiveBody(): Int performs Await, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         return await(scope.start(() -> 42));
                     }
                 }
@@ -83,12 +88,12 @@ public final class AsyncTaskTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-entry-");
         final var unit = parse("Main.zn", """
                 package %s;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
                 public fn main(): Unit performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = spawn(scope, () -> 42);
                         let value = await(task);
                     }
@@ -109,13 +114,121 @@ public final class AsyncTaskTest {
     }
 
     @Test
+    public void entryHandlerRunsInASeparateProcess() throws Exception {
+        final var packageName = "asyncProcess" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-process-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                import zeron.concurrent.ConcurrentScope;
+                import zeron.concurrent.await;
+                import zeron.concurrent.spawn;
+                import zeron.resource.DisposeFailure;
+                public fn main(): Unit performs DisposeFailure {
+                    using (let scope = ConcurrentScope.open()) {
+                        let task = spawn(scope, () -> 42);
+                        let value = await(task);
+                    }
+                }
+                """.formatted(packageName));
+        try {
+            final var compiler = compiler(unit, packageName, output);
+            compiler.resolve();
+            compiler.compile();
+
+            final var java = Path.of(System.getProperty("java.home"), "bin",
+                    System.getProperty("os.name").toLowerCase().contains("win")
+                            ? "java.exe" : "java");
+            final var classPath = output.toAbsolutePath().normalize()
+                    + File.pathSeparator + System.getProperty("java.class.path");
+            final var process = new ProcessBuilder(java.toString(), "-cp", classPath,
+                    packageName + ".Main").redirectErrorStream(true).start();
+            final var completed = process.waitFor(60, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                throw new AssertionError("The generated entry process timed out.");
+            }
+            final var text = new String(process.getInputStream().readAllBytes(),
+                    StandardCharsets.UTF_8);
+            assertEquals(text, 0, process.exitValue());
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void taskSurfaceRoundTripsThroughTheLibraryIndex() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "tasklibrary" + suffix;
+        final var clientPackage = "taskclient" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-task-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-task-client-");
+        final var library = parse("Library.zn", """
+                package %s;
+                import zeron.concurrent.Await;
+                import zeron.concurrent.Task;
+                import zeron.concurrent.await;
+                public fn join<T admits nullable + mutable, E admits effect...>(
+                    task: Task<T, {E}>
+                ): T performs Await, E = await(task);
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.join;
+                import zeron.concurrent.Await;
+                import zeron.concurrent.Task;
+                public fn run<T admits nullable + mutable, E admits effect...>(
+                    task: Task<T, {E}>
+                ): T performs Await, E = join(task);
+                """.formatted(clientPackage, libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            final var libraryErrors = libraryCompiler.resolveWithDiagnostics().errors();
+            assertTrue(libraryErrors.toString(), libraryErrors.isEmpty());
+            libraryCompiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var join = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
+                    .map(ZeronLibraryIndex.FunctionExport.class::cast)
+                    .filter(function -> function.qualifiedName().equals(libraryPackage + ".join"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("zeron.concurrent.Task",
+                    join.signature().parameters().getFirst().name());
+            assertTrue(join.signature().raisedEffects().stream()
+                    .anyMatch(effect -> effect.name().equals("zeron.concurrent.Await")));
+
+            final var taskParameter = join.signature().parameters().getFirst();
+            assertEquals("zeron.concurrent.Task", taskParameter.name());
+            assertTrue(taskParameter.descriptor(),
+                    taskParameter.descriptor().contains("zeron.concurrent.Task")
+                            && taskParameter.descriptor().contains("@row:{E}"));
+            assertFalse(index.declarations().stream()
+                    .anyMatch(declaration -> declaration.qualifiedName().contains("Future")));
+
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage,
+                    List.of(index), true, List.of(), clientOutput);
+            final var clientErrors = clientCompiler.resolveWithDiagnostics().errors();
+            assertTrue(clientErrors.toString(), clientErrors.isEmpty());
+            clientCompiler.compile();
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+
+    @Test
     public void awaitReRaisesCapturedEffectsAndChecksTheCallersRow() throws Exception {
         final var packageName = "asyncEffects" + UUID.randomUUID().toString().replace("-", "");
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-effects-");
         final var unit = parse("Main.zn", """
                 package %s;
                 import zeron.concurrent.Await;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
@@ -124,7 +237,7 @@ public final class AsyncTaskTest {
                 }
                 fn fire(): Int performs Boom = perform Boom.new(7);
                 fn capturedBody(): Int performs Await, Boom, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = spawn(scope, () -> fire());
                         return await(task);
                     }
@@ -151,7 +264,7 @@ public final class AsyncTaskTest {
 
         final var invalid = parse("Invalid.zn", """
                 package %s;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
@@ -160,7 +273,7 @@ public final class AsyncTaskTest {
                 }
                 fn fire(): Int performs Boom = perform Boom.new(7);
                 fn unhandled(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         return await(spawn(scope, () -> fire()));
                     }
                 }
@@ -176,12 +289,12 @@ public final class AsyncTaskTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-async-row-");
         final var unit = parse("Main.zn", """
                 package %s;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
                 import zeron.resource.DisposeFailure;
                 public fn missingRow(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         return await(spawn(scope, () -> 1));
                     }
                 }
@@ -204,7 +317,7 @@ public final class AsyncTaskTest {
                 package %s;
                 import java.lang.Thread;
                 import zeron.concurrent.Await;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.concurrent.await;
                 import zeron.concurrent.spawn;
                 import zeron.resource.Disposable;
@@ -216,7 +329,7 @@ public final class AsyncTaskTest {
                     }
                 }
                 fn cancelledBody(): Int performs Await, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let state: &Array<Int> = [0];
                         let task = spawn(scope, () -> {
                             using (let cleanup = Cleanup.new(state)) {
@@ -234,7 +347,7 @@ public final class AsyncTaskTest {
                     handle (cancelledBody()) with { %s };
                 public fn cleanupRan(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         spawn(scope, () -> {
                             using (let cleanup = Cleanup.new(state)) {
                                 state[1] = 1;

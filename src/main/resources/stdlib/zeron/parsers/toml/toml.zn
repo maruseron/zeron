@@ -1,0 +1,95 @@
+package zeron.parsers.toml;
+
+import com.maruseron.zeron.runtime.parsers.toml.TomlNode;
+import com.maruseron.zeron.runtime.parsers.toml.TomlSupport;
+
+import zeron.collections.ArrayList;
+import zeron.collections.HashMap;
+import zeron.internal.arrayFromList;
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+/// A TOML value, preserving the scalar, array, and table distinctions of TOML 1.0.
+public type TomlValue =
+      StringValue(value: String)
+    | IntegerValue(value: Long)
+    | FloatValue(value: Float)
+    | BooleanValue(value: Boolean)
+    | DateValue(value: String)
+    | TimeValue(value: String)
+    | DateTimeValue(value: String)
+    | OffsetDateTimeValue(value: String)
+    | ArrayValue(value: Array<TomlValue>)
+    | TableValue(value: TomlTable);
+
+/// A TOML table with its source key order preserved.
+public class TomlTable {
+    names: Array<String>;
+    entries: &HashMap<String, TomlValue>;
+
+    private constructor new;
+
+    public constructor from(names: Array<String>, entries: &HashMap<String, TomlValue>) =
+        TomlTable.new(names, entries);
+
+    /// The table's keys, in source order.
+    public keys(): Array<String> = this.names;
+
+    /// The number of entries in the table.
+    public size(): Int = this.names.length;
+
+    /// Returns the value stored for `key`, or `None` when the key is absent.
+    public get(key: String): Option<TomlValue> = this.entries.get(key);
+
+    /// Whether the table holds `key`.
+    public containsKey(key: String): Boolean = this.entries.containsKey(key);
+}
+
+fn tableOf(node: &TomlNode): TomlTable {
+    let names = node.tableKeys();
+    let mut entries = HashMap.empty<String, TomlValue>();
+    for (let name in names) {
+        let child = node.child(name);
+        if (child != null) entries.put(name, valueOf(child));
+    }
+    return TomlTable.from(names, entries);
+}
+
+fn valueOf(node: &TomlNode): TomlValue {
+    let kind = node.kind();
+    if (kind == "string") return TomlValue.StringValue(node.text());
+    if (kind == "integer") return TomlValue.IntegerValue(node.integer());
+    if (kind == "float") return TomlValue.FloatValue(node.decimal());
+    if (kind == "boolean") return TomlValue.BooleanValue(node.flag());
+    if (kind == "date") return TomlValue.DateValue(node.text());
+    if (kind == "time") return TomlValue.TimeValue(node.text());
+    if (kind == "date-time") return TomlValue.DateTimeValue(node.text());
+    if (kind == "offset-date-time") return TomlValue.OffsetDateTimeValue(node.text());
+    if (kind == "array") {
+        let mut values = ArrayList<TomlValue>.empty();
+        let mut index = 0;
+        while (index < node.arraySize()) {
+            let item = node.arrayAt(index);
+            if (item != null) values.add(valueOf(item));
+            index = index + 1;
+        }
+        return TomlValue.ArrayValue(arrayFromList<TomlValue>(values));
+    }
+    if (kind == "table") return TomlValue.TableValue(tableOf(node));
+    return TomlValue.StringValue(node.text());
+}
+
+/// A TOML parse failure with a source position.
+public type TomlError = TomlParseError(message: String, line: Int, column: Int);
+
+namespace Toml {
+    /// Parses a TOML 1.0 document.
+    public fn parse(text: String): Result<TomlTable, TomlError> {
+        let parsed = TomlSupport.parse(text);
+        if (parsed.isSuccess()) {
+            return Result<TomlTable, TomlError>.Ok(tableOf(parsed.root()));
+        }
+        return Result<TomlTable, TomlError>.Err(
+            TomlError.TomlParseError(parsed.message(), parsed.line(), parsed.column()));
+    }
+}

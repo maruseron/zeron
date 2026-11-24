@@ -1,0 +1,19 @@
+package com.maruseron.zeron.runtime.buffer;
+
+public external class BufferSupport = "com.maruseron.zeron.runtime.buffer.BufferSupport" {
+    public static toByte(value: Int): Byte;
+    public static bitCount(value: Int): Int;
+    public static bitCountLong(value: Long): Int;
+    public static leadingZeros(value: Int): Int;
+    public static leadingZerosLong(value: Long): Int;
+    public static trailingZeros(value: Int): Int;
+    public static trailingZerosLong(value: Long): Int;
+    public static rotateLeft(value: Int, bits: Int): Int;
+    public static rotateRight(value: Int, bits: Int): Int;
+    public static rotateLeftLong(value: Long, bits: Int): Long;
+    public static rotateRightLong(value: Long, bits: Int): Long;
+    public static reverseBits(value: Int): Int;
+    public static reverseBitsLong(value: Long): Long;
+    public static floatToBits(value: Float): Int;
+    public static bitsToFloat(value: Int): Float;
+}

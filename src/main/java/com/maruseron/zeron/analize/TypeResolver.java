@@ -501,8 +501,9 @@ final class TypeResolver {
         return type;
     }
 
-    /// A generic effect application is accepted only when every argument is a closed source type.
-    /// Open applications are deferred to a later proposal; this slice keeps runtime identity exact.
+    /// A generic effect application accepts open type parameters, but every argument must still be
+    /// a value type. Runtime identity stays on the effect's base class, so an open argument adds no
+    /// descriptor or dispatch distinction.
     private static void validateEffectApplication(final ResolutionContext context,
                                                   final TypeDescriptor type, final Token where) {
         if (!(type instanceof GenericDescriptor generic)) return;
@@ -516,29 +517,30 @@ final class TypeResolver {
             return;
         }
         for (final var argument : generic.typeParameters()) {
-            if (!isClosedEffectArgument(argument)) {
+            if (!isWellFormedEffectArgument(argument)) {
                 Zeron.resolutionError(new ResolutionError(
                         DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
                         "Effect application `" + TypeFormatter.format(generic)
-                                + "` must be closed; `" + TypeFormatter.format(argument)
-                                + "` is not a closed type argument."));
+                                + "` has invalid value type argument `" + TypeFormatter.format(argument)
+                                + "`; effect arguments must be value types."));
             }
         }
     }
 
-    private static boolean isClosedEffectArgument(final TypeDescriptor type) {
+    private static boolean isWellFormedEffectArgument(final TypeDescriptor type) {
         return switch (type) {
-            case TypeParameterDescriptor ignored -> false;
+            case TypeParameterDescriptor parameter -> !parameter.isEffectKind()
+                    && !parameter.isEffectRowKind();
             case TypeProjectionDescriptor ignored -> false;
             case CapturedTypeDescriptor ignored -> false;
             case FunctionDescriptor ignored -> false;
             case EffectRowDescriptor ignored -> false;
             case InferDescriptor ignored -> false;
-            case NullableDescriptor nullable -> isClosedEffectArgument(nullable.baseType());
-            case ReferenceDescriptor reference -> isClosedEffectArgument(reference.baseType());
-            case ArrayDescriptor array -> isClosedEffectArgument(array.elementType());
+            case NullableDescriptor nullable -> isWellFormedEffectArgument(nullable.baseType());
+            case ReferenceDescriptor reference -> isWellFormedEffectArgument(reference.baseType());
+            case ArrayDescriptor array -> isWellFormedEffectArgument(array.elementType());
             case GenericDescriptor generic -> generic.typeParameters().stream()
-                    .allMatch(TypeResolver::isClosedEffectArgument);
+                    .allMatch(TypeResolver::isWellFormedEffectArgument);
             default -> true;
         };
     }

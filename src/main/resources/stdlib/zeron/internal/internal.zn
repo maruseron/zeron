@@ -1,5 +1,6 @@
 package zeron.internal;
 
+import zeron.collections.ArrayList;
 import zeron.lang.Option;
 
 fn allocateArray<T admits nullable + mutable>(size: Int): &Array<T> = allocateArray<T>(size);
@@ -16,6 +17,17 @@ public fn generateArray<T admits nullable + mutable>(length: Int, initialize: (I
         index += 1;
     }
     return values;
+}
+
+/// Copies every element of `values` into a new fixed-size array.
+public fn arrayFromList<T admits mutable>(values: &ArrayList<T>): &Array<T> {
+    let mut result = allocateArray<T>(values.size);
+    let mut index = 0;
+    while (index < values.size) {
+        result[index] = unwrapSome(values.at(index));
+        index += 1;
+    }
+    return result;
 }
 
 public fn arrayToByteArray(values: Array<Byte>): ByteArray {

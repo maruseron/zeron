@@ -1,0 +1,61 @@
+package zeron.concurrent;
+
+import java.util.concurrent.ExecutorService;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Cell;
+import zeron.lang.Option;
+import zeron.resource.Disposable;
+
+/// Opens a fail-fast scope, runs `body` with a read-only scope receiver, and cancels and joins any
+/// task still running when the body exits.
+///
+/// The body calls `start`, `join`, `cancel`, and `deadline` without a `scope.` prefix. `Await` is
+/// handled around the body, so ordinary concurrent code needs neither `blocking` nor
+/// `DisposeFailure`.
+public fn concurrent<T admits nullable + mutable, E admits effect...>(
+    body: ConcurrentScope.() -> T performs Await, E
+): T performs E {
+    let result = Cell<Option<T>>.new(Option<T>.None());
+    using (let block = ConcurrentBlock.open()) {
+        result.set(Option.Some(block.run(body)));
+    }
+    return unwrapSome(result.get());
+}
+
+/// Like [concurrent], but runs the scope on `executor`. The caller owns the executor; the block
+/// never shuts it down.
+public fn concurrentWith<T admits nullable + mutable, E admits effect...>(
+    executor: &ExecutorService,
+    body: ConcurrentScope.() -> T performs Await, E
+): T performs E {
+    let result = Cell<Option<T>>.new(Option<T>.None());
+    using (let block = ConcurrentBlock.openWith(executor)) {
+        result.set(Option.Some(block.run(body)));
+    }
+    return unwrapSome(result.get());
+}
+
+/// Package-visible helper that owns one fail-fast scope for a `concurrent` block.
+class ConcurrentBlock is Disposable {
+    scope: &ConcurrentScope;
+
+    private constructor new;
+
+    public constructor open() = ConcurrentBlock.new(ConcurrentScope.open());
+
+    public constructor openWith(executor: &ExecutorService) =
+        ConcurrentBlock.new(ConcurrentScope.openWith(executor));
+
+    public run<T admits nullable + mutable, E admits effect...>(
+        body: ConcurrentScope.() -> T performs Await, E
+    ): T performs E =
+        handle (this.scope.body()) with {
+            case Await as awaited, k -> k.resume(awaited.pending.awaitDone());
+        };
+
+    public mut dispose(): Unit {
+        this.scope.cancel();
+        this.scope.dispose();
+    }
+}

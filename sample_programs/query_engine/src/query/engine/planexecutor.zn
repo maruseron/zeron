@@ -155,11 +155,11 @@ fn missingColumn(rows: ArrayList<Row>, column: String): Option<QueryError> =
 fn compareRows(left: Row, right: Row, column: String): Ordering =
     match (compareRowValues(left, right, column)) {
         case Ok(order) ->
-            if (order < 0) then Ordering.LT()
-            else if (order > 0) then Ordering.GT()
-            else Ordering.EQ();
+            if (order < 0) then Ordering.Less()
+            else if (order > 0) then Ordering.Greater()
+            else Ordering.Equal();
         // Missing columns are rejected before sorting; a mixed-type row compares equal.
-        case Err(_) -> Ordering.EQ();
+        case Err(_) -> Ordering.Equal();
     };
 
 fn compareRowValues(left: Row, right: Row, column: String): Result<Int, QueryError> =

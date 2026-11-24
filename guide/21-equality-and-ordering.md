@@ -55,8 +55,8 @@ not be mutated in ways that change their equality or hash while stored.
 
 The relational operators `<`, `<=`, `>`, and `>=` express ordering. `Int` and `Float` use their
 built-in numeric comparisons. A custom type can opt in by providing `Comparable<T>`, whose
-`compareTo(other: T): Ordering` method returns one of `Ordering.LT`, `Ordering.EQ`, or
-`Ordering.GT`.
+`compareTo(other: T): Ordering` method returns one of `Ordering.Less`, `Ordering.Equal`, or
+`Ordering.Greater`.
 
 For example, a `Rank` compares itself with another `Rank` by comparing its numeric value:
 
@@ -69,15 +69,15 @@ class Rank is Comparable<Rank> {
     public constructor new;
 
     public compareTo(other: Rank): Ordering =
-        if (this.value < other.value) then Ordering.LT()
-        else if (this.value > other.value) then Ordering.GT()
-        else Ordering.EQ();
+        if (this.value < other.value) then Ordering.Less()
+        else if (this.value > other.value) then Ordering.Greater()
+        else Ordering.Equal();
 }
 ```
 
 Once this implementation is in scope, code can use `Rank` values with the relational operators.
-`<` is true for `LT`; `<=` is true for `LT` or `EQ`; `>` is true for `GT`; and `>=` is true for
-`GT` or `EQ`. A generic function using these operators must state the same capability as a bound:
+`<` is true for `Less`; `<=` is true for `Less` or `Equal`; `>` is true for `Greater`; and `>=`
+is true for `Greater` or `Equal`. A generic function using these operators must state the same capability as a bound:
 
 ```zeron
 fn comesBefore<T: Comparable<T>>(left: T, right: T): Boolean = left < right;

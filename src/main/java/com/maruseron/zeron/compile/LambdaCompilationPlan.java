@@ -487,6 +487,7 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(handle.expression);
                 collectLambdaShapes(handle.handler);
                 collectLambdaShapes(handle.frameHandler());
+                collectLambdaShapes(handle.level3Body());
                 for (final var arm : handle.arms) {
                     collectLambdaShapes(arm.guard());
                     collectLambdaShapes(arm.expression());
@@ -778,10 +779,14 @@ final class LambdaCompilationPlan {
             }
             case Expr.Grouping grouping -> collectCapturedVariables(grouping.expression, localNames, captured, seen);
             case Expr.ValueBlock block -> {
+                final var blockNames = new HashSet<>(localNames);
                 for (final var statement : block.statements) {
-                    collectCapturedVariables(statement, localNames, captured, seen);
+                    collectCapturedVariables(statement, blockNames, captured, seen);
+                    if (statement instanceof Stmt.Var variable) {
+                        blockNames.add(variable.name().lexeme());
+                    }
                 }
-                collectCapturedVariables(block.value, localNames, captured, seen);
+                collectCapturedVariables(block.value, blockNames, captured, seen);
             }
             case Expr.If iff -> {
                 collectCapturedVariables(iff.condition, localNames, captured, seen);
@@ -835,6 +840,9 @@ final class LambdaCompilationPlan {
                 }
                 if (handle.frameHandler() != null) {
                     collectCapturedVariables(handle.frameHandler(), localNames, captured, seen);
+                }
+                if (handle.level3Body() != null) {
+                    collectCapturedVariables(handle.level3Body(), localNames, captured, seen);
                 }
                 for (final var arm : handle.arms) {
                     final var armNames = new HashSet<>(localNames);

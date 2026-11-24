@@ -7,35 +7,44 @@ import java.util.concurrent.ExecutorService;
 import zeron.lang.Cell;
 import zeron.lang.Option;
 import zeron.resource.Disposable;
-import zeron.resource.DisposeFailure;
 import zeron.time.Duration;
 
 /// A structured lifetime for concurrent tasks.
 ///
 /// Open a scope in a `using` block. Tasks started in it run on virtual threads and are bounded by
-/// the scope's lifetime: closing the scope joins every task, and cancelling the scope interrupts
-/// every task before that join. The scope never leaves a task running after `dispose`.
+/// the scope's lifetime: closing the scope joins every task. The default scope is fail-fast: the
+/// first genuine task failure cancels every sibling and rejects new starts, and close reports the
+/// failure when no join observed it. Use `openManual` when the caller coordinates failures.
 ///
 /// ```zeron
-/// using (let scope = Scope.open()) {
+/// using (let scope = ConcurrentScope.open()) {
 ///     let first = scope.start(() -> load(1));
 ///     let second = scope.start(() -> load(2));
-///     scope.join();
 ///     return [first.value(), second.value()];
 /// }
 /// ```
-public class Scope is Disposable {
+public class ConcurrentScope is Disposable {
     runtime: &ScopeSupport;
 
     private constructor new;
 
-    /// Opens a scope whose tasks run on named virtual threads.
-    public constructor open() = Scope.new(ScopeSupport.open());
+    /// Opens a fail-fast scope whose tasks run on named virtual threads.
+    public constructor open() = ConcurrentScope.new(ScopeSupport.open());
 
-    /// Opens a scope on an injected executor. The caller keeps ownership of the executor; the
-    /// scope only uses it to run tasks and never shuts it down.
+    /// Opens a manual scope whose tasks run on named virtual threads.
+    ///
+    /// A manual scope does not cancel siblings on failure and does not report an unobserved
+    /// failure at close. `value()` and `await` remain the failure observation points.
+    public constructor openManual() = ConcurrentScope.new(ScopeSupport.openManual());
+
+    /// Opens a fail-fast scope on an injected executor. The caller keeps ownership of the
+    /// executor; the scope only uses it to run tasks and never shuts it down.
     public constructor openWith(executor: &ExecutorService) =
-        Scope.new(ScopeSupport.openWith(executor));
+        ConcurrentScope.new(ScopeSupport.openWith(executor));
+
+    /// Opens a manual scope on an injected executor.
+    public constructor openManualWith(executor: &ExecutorService) =
+        ConcurrentScope.new(ScopeSupport.openManualWith(executor));
 
     /// Starts `block` on a virtual thread and returns its handle.
     ///
@@ -53,12 +62,14 @@ public class Scope is Disposable {
     /// Waits for every task started in this scope and prevents new tasks from starting.
     ///
     /// Task outcomes stay attached to their handles; call `value()` on a task to re-raise its
-    /// captured effect at the join point.
+    /// captured effect at the join point. `join` itself does not raise, including in fail-fast
+    /// mode; close reports an unobserved failure.
     public join(): Unit = ScopeSupport.join(this.runtime);
 
     /// Requests cooperative cancellation of every task in this scope and interrupts running tasks.
     ///
     /// The subsequent scope close joins the cancelled tasks, so their `using` cleanup still runs.
+    /// Cancellation is not a failure and is not reported at close.
     public cancel(): Unit = ScopeSupport.cancel(this.runtime);
 
     /// Cancels the scope when `duration` elapses. A later deadline replaces an earlier one.
@@ -69,7 +80,10 @@ public class Scope is Disposable {
 
     /// Joins every task. A task that has not been joined explicitly still finishes here, so the
     /// scope's `using` block is the outer bound on every task lifetime.
-    public mut dispose(): Unit performs DisposeFailure {
-        ScopeSupport.join(this.runtime);
+    ///
+    /// In fail-fast mode, close reports the first genuine task failure that no join observed. The
+    /// report is a runtime safety net rather than a statically required effect.
+    public mut dispose(): Unit {
+        ScopeSupport.dispose(this.runtime);
     }
 }

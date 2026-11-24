@@ -17,6 +17,7 @@ import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.ZeronLibraryJar;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
+import zeron.runtime.ContinuationProviderLoader;
 
 import java.io.File;
 import java.io.IOException;
@@ -326,6 +327,13 @@ public class Zeron {
                 System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
         final var command = new ArrayList<String>();
         command.add(javaExecutable.toString());
+        // The compiler process may have a different export set than the child. Pass the
+        // provider gate explicitly so `zeron run` uses the same backend contract.
+        command.addAll(ContinuationProviderLoader.launcherArguments());
+        final var requestedBackend = System.getProperty(ContinuationProviderLoader.BACKEND_PROPERTY);
+        if (requestedBackend != null && !requestedBackend.isBlank()) {
+            command.add("-D" + ContinuationProviderLoader.BACKEND_PROPERTY + "=" + requestedBackend);
+        }
         command.add("-cp");
         command.add(String.join(File.pathSeparator, classPathEntries));
         command.add(className);

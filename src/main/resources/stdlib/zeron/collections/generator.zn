@@ -1,0 +1,87 @@
+package zeron.collections;
+
+import com.maruseron.zeron.runtime.GeneratorSupport;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Cell;
+import zeron.lang.Option;
+import zeron.lang.Yield;
+import zeron.resource.DisposeFailure;
+
+/// A one-shot generator cursor.
+///
+/// `Generator` refines [Iterator] with explicit cancellation. A generator body is suspended between
+/// pulls; [cancel] stops it and runs its cleanup, while [close] does the same without reporting
+/// cleanup failure. A cursor is never an `Iterable`: a second traversal needs a fresh iterator from
+/// its [GeneratorSource].
+public contract Generator<T admits nullable + mutable> requires Iterator<T> {
+    /// Stops the body and runs its cleanup, reporting cleanup failure as [DisposeFailure].
+    mut cancel(): Unit performs DisposeFailure;
+
+    /// True after `Step.Done`, `close`, or `cancel`.
+    isDone(): Boolean;
+}
+
+/// The replayable factory for [Generator] cursors.
+///
+/// Each `iterator()` call starts a fresh body with the captures of the original lambda, so a
+/// generator source can be traversed repeatedly. The cursors it returns are single-use.
+public class GeneratorSource<T admits mutable> is Iterable<T> {
+    body: Any;
+
+    private constructor new;
+
+    public constructor of(body: Any) = GeneratorSource.new(body);
+
+    /// Starts a fresh generator body for this traversal.
+    public iterator(): &Generator<T> = GeneratorImpl<T>.of(this.body);
+}
+
+/// Runs `body` as a pull generator.
+///
+/// The body runs only while a consumer pulls from a cursor. `perform Yield<Int>(value)` suspends
+/// the body until the next `next()` call; abandoning the cursor cancels it and runs the body's
+/// `using` cleanup. The body may leave only `Yield<T>` and the `DisposeFailure` that `using`
+/// cleanup can raise; [Iterator.next] itself remains effect-free because cleanup is delivered
+/// through `cancel()` or logged by `close()`.
+///
+/// ```zeron
+/// let body: () -> Unit performs Yield<Int> = () -> {
+///     perform Yield<Int>(0);
+///     perform Yield<Int>(1);
+///     perform Yield<Int>(2);
+/// };
+/// let numbers = generator<Int>(body);
+///
+/// for (let number in numbers) println(number);
+/// ```
+public fn generator<T admits mutable>(
+    body: () -> Unit performs Yield<T>, DisposeFailure
+): GeneratorSource<T> =
+    GeneratorSource<T>.of(body);
+
+class GeneratorImpl<T admits nullable + mutable> is Generator<T> {
+    runtime: &GeneratorSupport;
+    slot: &Cell<Option<T>>;
+
+    public constructor new;
+
+    public constructor of(body: Any) = GeneratorImpl<T>.new(GeneratorSupport.open(body),
+        Cell<Option<T>>.new(Option<T>.None()));
+
+    public mut next(): Step<T> {
+        let slot = this.slot;
+        let receive: (T) -> Unit = (item) -> slot.set(Option.Some(item));
+        if (not this.runtime.advance(receive)) return Step<T>.Done();
+        return Step<T>.Yield(unwrapSome(this.slot.get()));
+    }
+
+    public mut cancel(): Unit performs DisposeFailure {
+        let failure = this.runtime.cancel();
+        if (failure != null) perform DisposeFailure.new(failure);
+    }
+
+    public mut close(): Unit = this.runtime.close();
+
+    public isDone(): Boolean = this.runtime.isDone();
+}

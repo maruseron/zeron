@@ -20,9 +20,9 @@ public class Duration is Comparable<Duration> deriving Eq, Hashable {
     }
 
     public compareTo(other: Duration): Ordering {
-        if (this.value < other.value) return Ordering.LT();
-        if (this.value > other.value) return Ordering.GT();
-        return Ordering.EQ();
+        if (this.value < other.value) return Ordering.Less();
+        if (this.value > other.value) return Ordering.Greater();
+        return Ordering.Equal();
     }
 
     public plus(other: Duration): Option<Duration> {

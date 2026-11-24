@@ -20,7 +20,7 @@ A concurrent scope is itself a `Disposable` resource. Open it in a `using` block
 and let the closing join bound their lifetimes:
 
 ```zeron
-using (let scope = Scope.open()) {
+using (let scope = ConcurrentScope.open()) {
     let first = scope.start(() -> load(1));
     let second = scope.start(() -> load(2));
     scope.join();
@@ -64,6 +64,11 @@ becomes primary and later cleanup failures are suppressed.
 The standard `DisposeFailure` effect has a `cause: Any?` property for the original failure object.
 Unchecked Java exceptions and `Error`s are not translated; they propagate unchanged as the primary
 failure when thrown by the body or disposal.
+
+Cleanup must not block or suspend. While a `dispose` call runs, performing `Await` or entering a new
+continuation is a runtime error, and the resolver rejects an `Await` perform, an `Await` entry in a
+`dispose` row, or a continuation-capturing `handle` in a method named `dispose`. Wait for a task
+outside cleanup and dispose only what is already finished.
 
 ## Observing suppressed cleanup failures
 

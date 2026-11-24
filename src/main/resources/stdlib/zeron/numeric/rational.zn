@@ -91,9 +91,9 @@ public class Rational is Ratio<Integer>, Hashable<Rational>, Comparable<Rational
     /// Compares this rational with `other` by value.
     public compareTo(other: Rational): Ordering {
         let comparison = rationalCompare(this.value, other.value);
-        if (comparison < 0) return Ordering.LT();
-        if (comparison > 0) return Ordering.GT();
-        return Ordering.EQ();
+        if (comparison < 0) return Ordering.Less();
+        if (comparison > 0) return Ordering.Greater();
+        return Ordering.Equal();
     }
 }
 

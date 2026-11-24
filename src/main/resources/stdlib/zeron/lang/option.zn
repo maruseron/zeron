@@ -43,18 +43,26 @@ public extension<T admits nullable + mutable> Option<T> {
         };
 
     /// Transforms the contained value, if any, leaving `None` unchanged.
-    public fn map<B admits mutable>(f: (T) -> B): Option<B> =
+    public fn map<B admits mutable>(transform: (T) -> B): Option<B> =
         match (this) {
-            case Some(value) -> Option.Some(f(value));
+            case Some(value) -> Option.Some(transform(value));
             case None() -> Option<B>.None();
         };
 
-    /// Keeps this option only when it holds a value that satisfies `p`; otherwise returns `None`.
-    ///
-    /// `p` is not called when this option is already `None`.
-    public fn filter(p: (T) -> Boolean): Option<T> =
+    /// Chains another optional operation on the contained value, leaving `None` unchanged.
+    public fn flatMap<B admits mutable>(transform: (T) -> Option<B>): Option<B> =
         match (this) {
-            case Some(value) -> if (p(value)) then this else Option<T>.None();
+            case Some(value) -> transform(value);
+            case None() -> Option<B>.None();
+        };
+
+    /// Keeps this option only when it holds a value that satisfies `predicate`; otherwise returns
+    /// `None`.
+    ///
+    /// `predicate` is not called when this option is already `None`.
+    public fn filter(predicate: (T) -> Boolean): Option<T> =
+        match (this) {
+            case Some(value) -> if (predicate(value)) then this else Option<T>.None();
             case None() -> this;
         };
 }

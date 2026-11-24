@@ -10,6 +10,7 @@ import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
+import zeron.runtime.SuspensionGuard;
 
 import java.io.IOException;
 import java.lang.classfile.*;
@@ -1916,7 +1917,9 @@ final class BytecodeEmitter {
         if (!(application instanceof GenericDescriptor)) {
             throw new IllegalStateException("A generic effect constructor call lost its applied type.");
         }
-        RuntimeTypeDescriptorEmitter.emit(context, composer, application);
+        final var runtimeApplication = TypeSubstitution.containsTypeParameter(application)
+                ? TypeSubstitution.erase(application) : application;
+        RuntimeTypeDescriptorEmitter.emit(context, composer, runtimeApplication);
         context.lastEmittedType = RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE;
     }
 
@@ -2144,7 +2147,37 @@ final class BytecodeEmitter {
     }
 
     private static void emitMemberCall(CompilationContext context, final CodeBuilder composer, final Expr.MemberCall call ){
+        if (call.continuationCancel()) {
+            emitExpr(context, composer, call.receiver);
+            composer.checkcast(ClassDesc.of("zeron.runtime.Cont"));
+            composer.invokevirtual(ClassDesc.of("zeron.runtime.Cont"), "cancel",
+                    MethodTypeDesc.of(ConstantDescs.CD_void));
+            emitUnitValue(context, composer);
+            context.lastEmittedType = TypeDescriptor.ofUnit();
+            return;
+        }
+        if (call.continuationIsDone()) {
+            emitExpr(context, composer, call.receiver);
+            composer.checkcast(ClassDesc.of("zeron.runtime.Cont"));
+            composer.invokevirtual(ClassDesc.of("zeron.runtime.Cont"), "isDone",
+                    MethodTypeDesc.of(ConstantDescs.CD_boolean));
+            context.lastEmittedType = TypeDescriptor.ofBoolean();
+            return;
+        }
         if (call.resumeCall()) {
+            if (call.continuationResume()) {
+                // A level-3 resume drives the provider session through the runtime Cont. The
+                // erased call returns Object; the declared result is the handled expression's T.
+                emitExpr(context, composer, call.receiver);
+                composer.checkcast(ClassDesc.of("zeron.runtime.Cont"));
+                emitExpr(context, composer, call.arguments.getFirst());
+                emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+                composer.invokevirtual(ClassDesc.of("zeron.runtime.Cont"), "resume",
+                        MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+                emitConversion(context, composer, TypeDescriptor.ofAny(), call.getType());
+                context.lastEmittedType = call.getType();
+                return;
+            }
             emitExpr(context, composer, call.arguments.getFirst());
             emitConversion(context, composer, context.lastEmittedType, call.getType());
             context.lastEmittedType = call.getType();
@@ -2878,8 +2911,9 @@ final class BytecodeEmitter {
             emitJavaVarargsArray(context, composer, call, fixedParameterCount,
                     descriptor.parameterType(fixedParameterCount).componentType());
         }
-        emitJavaExceptionTranslation(composer, target.exceptionMappings(),
-                () -> emitJavaInvocation(composer, target, owner, descriptor));
+        emitJavaInvocationWithSuspensionBoundary(composer, call,
+                () -> emitJavaExceptionTranslation(composer, target.exceptionMappings(),
+                        () -> emitJavaInvocation(composer, target, owner, descriptor)));
         if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
                 && descriptor.returnType().equals(ConstantDescs.CD_void)) {
             emitUnitValue(context, composer);
@@ -2891,6 +2925,51 @@ final class BytecodeEmitter {
         context.lastEmittedType = call.safeNavigation() && call.resolvedDescriptor() != null
                 ? call.resolvedDescriptor().returnType()
                 : call.getType();
+    }
+
+    /// A Java call that receives a Zeron callback can invoke it while a host frame sits between the
+    /// callback and any enclosing handler. Mark that call so a suspension cannot capture across the
+    /// host frame; a handler installed inside the callback records the marker depth and still works.
+    private static void emitJavaInvocationWithSuspensionBoundary(final CodeBuilder composer,
+                                                                 final Expr.MemberCall call,
+                                                                 final Runnable invocation) {
+        if (!passesZeronCallback(call)) {
+            invocation.run();
+            return;
+        }
+        final var guard = ClassDesc.of("zeron.runtime.SuspensionGuard");
+        final var enter = MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String);
+        final var exit = MethodTypeDesc.of(ConstantDescs.CD_void);
+        composer.ldc(SuspensionGuard.HOST_CALLBACK);
+        composer.invokestatic(guard, "enter", enter);
+        final var boundaryStart = composer.newLabel();
+        final var boundaryEnd = composer.newLabel();
+        final var boundaryFailure = composer.newLabel();
+        final var boundaryDone = composer.newLabel();
+        composer.labelBinding(boundaryStart);
+        invocation.run();
+        composer.labelBinding(boundaryEnd);
+        composer.invokestatic(guard, "exit", exit);
+        composer.goto_(boundaryDone);
+        composer.labelBinding(boundaryFailure);
+        composer.invokestatic(guard, "exit", exit);
+        composer.athrow();
+        composer.labelBinding(boundaryDone);
+        composer.exceptionCatch(boundaryStart, boundaryEnd, boundaryFailure,
+                ClassDesc.of("java.lang.Throwable"));
+    }
+
+    private static boolean passesZeronCallback(final Expr.MemberCall call) {
+        if (call.javaCallTarget() == null
+                || call.javaCallTarget().kind() == JavaCallTarget.InvocationKind.CONSTRUCTOR) {
+            return false;
+        }
+        for (final var argument : call.arguments) {
+            if (argument instanceof Expr.Lambda lambda && lambda.javaSamTarget() != null) return true;
+            if (argument instanceof Expr.Variable variable
+                    && variable.javaSamTarget() != null) return true;
+        }
+        return false;
     }
 
     private static void emitJavaExceptionTranslation(

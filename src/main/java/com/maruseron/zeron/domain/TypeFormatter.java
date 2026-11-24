@@ -55,7 +55,9 @@ public final class TypeFormatter {
                                     + typeParameterConstraints(parameter))
                             .collect(Collectors.joining(", ", "<", ">")))
                     + formatParameters(function)
-                    + format(function.returnType());
+                    + format(function.returnType())
+                    + (function.raisedEffects().isEmpty() ? ""
+                            : " performs " + formatEffectSet(function.raisedEffects()));
         };
     }
 

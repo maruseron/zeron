@@ -27,6 +27,7 @@ final class StatementEmitter {
                 if (context.loopExitLabels.isEmpty()) {
                     throw new IllegalStateException("Resolved break has no enclosing loop.");
                 }
+                emitIteratorClosesToDepth(context, composer, context.loopIteratorDepths.peek());
                 emitUsingCleanupsToDepth(context, composer, context.loopUsingDepths.peek());
                 composer.goto_(context.loopExitLabels.peek());
             }
@@ -34,6 +35,8 @@ final class StatementEmitter {
                 if (context.loopContinueLabels.isEmpty()) {
                     throw new IllegalStateException("Resolved continue has no enclosing loop.");
                 }
+                emitIteratorClosesToDepth(context, composer,
+                        context.loopIteratorDepths.peek() + 1);
                 emitUsingCleanupsToDepth(context, composer, context.loopUsingDepths.peek());
                 composer.goto_(context.loopContinueLabels.peek());
             }
@@ -89,9 +92,11 @@ final class StatementEmitter {
                     context.loopExitLabels.push(loopExit);
                     context.loopContinueLabels.push(loopStart);
                     context.loopUsingDepths.push(context.activeUsingScopes.size());
+                    context.loopIteratorDepths.push(context.activeIterators.size());
                     try {
                         emitStmt(context, composer, body);
                     } finally {
+                        context.loopIteratorDepths.pop();
                         context.loopUsingDepths.pop();
                         context.loopExitLabels.pop();
                         context.loopContinueLabels.pop();
@@ -115,7 +120,7 @@ final class StatementEmitter {
                 }
             }
             case Stmt.Return(Expr expression, Token _) -> {
-                if (!context.activeUsingScopes.isEmpty()) {
+                if (!context.activeUsingScopes.isEmpty() || !context.activeIterators.isEmpty()) {
                     if (expression == null) {
                         emitUnitValue(context, composer);
                         context.lastEmittedType = TypeDescriptor.ofUnit();
@@ -128,6 +133,7 @@ final class StatementEmitter {
                     final var returnValue = declareLoopLocal(context,
                             nextLoopTemporary(context, "usingReturn"), context.currentReturnType);
                     composer.storeLocal(returnKind, returnValue.lvt() + context.localSlotOffset);
+                    emitIteratorClosesToDepth(context, composer, 0);
                     emitUsingCleanupsToDepth(context, composer, 0);
                     composer.loadLocal(returnKind, returnValue.lvt() + context.localSlotOffset);
                     composer.return_(returnKind);
@@ -278,6 +284,21 @@ final class StatementEmitter {
         }
     }
 
+    /// Closes the innermost active `for` cursors down to `depth`. `close` is idempotent, so a
+    /// second close at the loop exit is harmless.
+    private static void emitIteratorClosesToDepth(final CompilationContext context,
+                                                  final CodeBuilder composer,
+                                                  final int depth) {
+        var remaining = context.activeIterators.size() - depth;
+        for (final var active : context.activeIterators) {
+            if (remaining-- <= 0) break;
+            composer.aload(active.local().lvt() + context.localSlotOffset);
+            composer.invokeinterface(ClassDesc.of("zeron.collections.Iterator"), "close",
+                    MethodTypeDesc.of(ClassDesc.of("zeron.lang.Unit")));
+            composer.pop();
+        }
+    }
+
     private static Bind emitResourceDisposal(final CompilationContext context,
                                              final CodeBuilder composer,
                                              final Bind resources,
@@ -342,7 +363,17 @@ final class StatementEmitter {
         composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
         final var stepLocal = declareLoopLocal(context, nextLoopTemporary(context, "step"), stepType);
         final var valueLocal = declareLoopLocal(context, iterationBind, elementType);
+        final var primary = declareLoopLocal(context,
+                nextLoopTemporary(context, "iteratorFailure"), TypeDescriptor.ofAny().toNullable());
 
+        context.activeIterators.push(new CompilationContext.ActiveIterator(iteratorLocal, iteratorType));
+        final var outerDepth = context.activeIterators.size() - 1;
+        context.loopIteratorDepths.push(outerDepth);
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var handler = composer.newLabel();
+        final var after = composer.newLabel();
+        composer.labelBinding(start);
         final var loopStart = composer.newLabel();
         final var loopExit = composer.newLabel();
         composer.labelBinding(loopStart);
@@ -379,6 +410,20 @@ final class StatementEmitter {
         }
         composer.goto_(loopStart);
         composer.labelBinding(loopExit);
+        composer.labelBinding(end);
+        emitIteratorClosesToDepth(context, composer, outerDepth);
+        composer.goto_(after);
+
+        composer.labelBinding(handler);
+        composer.astore(primary.lvt() + context.localSlotOffset);
+        emitIteratorClosesToDepth(context, composer, outerDepth);
+        composer.aload(primary.lvt() + context.localSlotOffset);
+        composer.checkcast(ClassDesc.of("java.lang.Throwable"));
+        composer.athrow();
+        composer.labelBinding(after);
+        composer.exceptionCatch(start, end, handler, ClassDesc.of("java.lang.Throwable"));
+        context.loopIteratorDepths.pop();
+        context.activeIterators.pop();
     }
 
     private static void emitArrayFor(CompilationContext context, final CodeBuilder composer,
@@ -425,9 +470,11 @@ final class StatementEmitter {
         context.loopExitLabels.push(loopExit);
         context.loopContinueLabels.push(loopContinue);
         context.loopUsingDepths.push(context.activeUsingScopes.size());
+        context.loopIteratorDepths.push(context.activeIterators.size());
         try {
             emitStmt(context, composer, body);
         } finally {
+            context.loopIteratorDepths.pop();
             context.loopUsingDepths.pop();
             context.loopContinueLabels.pop();
             context.loopExitLabels.pop();

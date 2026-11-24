@@ -142,6 +142,8 @@ public final class DiagnosticCatalog {
             warning("ZR3017", "Local declaration shadows an outer declaration");
     public static final Entry NULLABLE_RETURN_TYPE =
             warning("ZR3018", "Nullable return type");
+    public static final Entry DIRECT_TASK_VALUE =
+            warning("ZR3019", "Direct Task.value() bypasses the Await policy");
     public static final Entry PACKAGE_SOURCE_DIRECTORY_MISMATCH =
             entry("ZR4001", "Package does not match source directory");
 
@@ -207,6 +209,7 @@ public final class DiagnosticCatalog {
             WHILE_TRUE_LOOP,
             SHADOWED_LOCAL,
             NULLABLE_RETURN_TYPE,
+            DIRECT_TASK_VALUE,
             PACKAGE_SOURCE_DIRECTORY_MISMATCH);
 
     private static final Map<DiagnosticCode, Entry> ENTRIES_BY_CODE;

@@ -92,12 +92,12 @@ public final class StringApiTest {
                 fn collectThroughJoiner(): String {
                     let config = JoinerConfig.new();
                     config.separator = ":";
-                    return "abc".split("").collectWith(StringJoiner.withConfig(config));
+                    return "abc".split("").collectWith(StringJoiner.fromConfig(config));
                 }
                 fn collectFromLocalJoiner(): String {
                     let config = JoinerConfig.new();
                     config.separator = ":";
-                    let joiner = StringJoiner.withConfig(config);
+                    let joiner = StringJoiner.fromConfig(config);
                     let first = "ab".split("").collectWith(joiner);
                     let second = "cd".split("").collectWith(joiner);
                     return first + "|" + second;
@@ -116,7 +116,7 @@ public final class StringApiTest {
                 fn joinerOnStreamDirectly(): String {
                     let config = JoinerConfig.new();
                     config.separator = "-";
-                    return StringJoiner.withConfig(config).join(Stream<Int>.fromArray([1, 2, 3])
+                    return StringJoiner.fromConfig(config).join(Stream<Int>.fromArray([1, 2, 3])
                         .map(value -> value.toString()));
                 }
                 fn splitDoesNotShareIterators(): Int {

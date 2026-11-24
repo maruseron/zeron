@@ -24,6 +24,8 @@ repository map and the compiler pipeline.
 
 Workflow guides:
 
+- [`style-conventions.md`](./documents/developer_guides/style-conventions.md) — naming, feature
+  grouping, declaration choice, data modeling, parameters, and fluent APIs.
 - [`compiler-changes.md`](./documents/developer_guides/compiler-changes.md) — statements,
   declarations, expressions.
 - [`syntax-surface-checklist.md`](./documents/developer_guides/syntax-surface-checklist.md) —

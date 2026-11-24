@@ -1,0 +1,149 @@
+package zeron.random;
+
+import com.maruseron.zeron.runtime.random.RandomSupport;
+
+import zeron.collections.ArrayList;
+import zeron.internal.unwrapSome;
+import zeron.collections.Iterable;
+import zeron.io.IoFailure;
+import zeron.lang.Option;
+
+fn rotateLeft(value: Long, bits: Int): Long =
+    (value << bits) | (value >>> (64 - bits));
+
+fn splitMixFinalize(value: Long): Long {
+    let mut result = value;
+    result = (result ^ (result >>> 30)) * -4658895280553007687L;
+    result = (result ^ (result >>> 27)) * -7723592293110705685L;
+    return result ^ (result >>> 31);
+}
+
+/// A seedable, non-cryptographic pseudorandom generator.
+///
+/// `Random` owns four 64-bit state words and implements xoshiro256** with SplitMix64 seed
+/// expansion. Every `Long` seed, including `0`, produces a usable sequence. The generator is a
+/// mutable value with no shared state or locking; use separate instances from separate threads.
+///
+/// Sequences are deterministic for a seed within one release series. They are not a
+/// cryptographic source and carry no unpredictability guarantee.
+public class Random {
+    state0: Long;
+    state1: Long;
+    state2: Long;
+    state3: Long;
+
+    private constructor new;
+
+    /// Creates a generator from `seed` using SplitMix64 expansion.
+    public constructor seeded(seed: Long) {
+        let mut mixer = seed;
+        mixer = mixer + -7046029254386353131L;
+        let state0 = splitMixFinalize(mixer);
+        mixer = mixer + -7046029254386353131L;
+        let state1 = splitMixFinalize(mixer);
+        mixer = mixer + -7046029254386353131L;
+        let state2 = splitMixFinalize(mixer);
+        mixer = mixer + -7046029254386353131L;
+        let state3 = splitMixFinalize(mixer);
+        return Random.new(state0, state1, state2, state3);
+    }
+
+    /// Creates a generator seeded from the host entropy source.
+    ///
+    /// This is the only operation that touches host state; the effect is declared even though the
+    /// current implementation does not synthesize an available entropy failure at runtime.
+    public constructor fromEntropy() performs IoFailure {
+        let state = RandomSupport.entropyState();
+        return Random.new(state[0], state[1], state[2], state[3]);
+    }
+
+    /// Advances the state and returns the next 64-bit output.
+    public mut nextLong(): Long {
+        let result = rotateLeft(this.state1 * 5L, 7) * 9L;
+        let shifted = this.state1 << 17;
+        this.state2 = this.state2 ^ this.state0;
+        this.state3 = this.state3 ^ this.state1;
+        this.state1 = this.state1 ^ this.state2;
+        this.state0 = this.state0 ^ this.state3;
+        this.state2 = this.state2 ^ shifted;
+        this.state3 = rotateLeft(this.state3, 45);
+        return result;
+    }
+
+    /// Returns the next 32 bits with signed two's-complement interpretation.
+    public mut nextInt(): Int = RandomSupport.lowInt(this.nextLong());
+
+    /// Returns the next eight bits as an unsigned byte.
+    public mut nextByte(): Byte = RandomSupport.lowByte(this.nextLong());
+
+    /// Returns the next bit as a Boolean.
+    public mut nextBoolean(): Boolean = (this.nextLong() & 1L) == 1L;
+
+    /// Returns a uniformly distributed value in `[0.0, 1.0)` with 24 bits of precision.
+    public mut nextFloat(): Float {
+        let bits = (this.nextLong() >>> 40).toInt().getOrElse(0);
+        return bits.toFloat() / 16777216.0;
+    }
+
+    private mut unbiasedLong(bound: Long): Long {
+        let mask = bound - 1L;
+        if ((bound & mask) == 0L) return this.nextLong() & mask;
+        let mut bits = this.nextLong() >>> 1;
+        let mut remainder = bits % bound;
+        while (bits - remainder + mask < 0L) {
+            bits = this.nextLong() >>> 1;
+            remainder = bits % bound;
+        }
+        return remainder;
+    }
+
+    /// Returns a uniformly distributed value in `[0, bound)`, or `None` when `bound <= 0`.
+    public mut nextIntBelow(bound: Int): Option<Int> {
+        if (bound <= 0) return Option<Int>.None();
+        let value = this.unbiasedLong(bound.toLong()).toInt();
+        return value;
+    }
+
+    /// Returns a uniformly distributed value in `[origin, bound)`, or `None` for an empty range.
+    public mut nextIntBetween(origin: Int, bound: Int): Option<Int> {
+        if (bound <= origin) return Option<Int>.None();
+        let span = bound.toLong() - origin.toLong();
+        let offset = this.unbiasedLong(span);
+        return (origin.toLong() + offset).toInt();
+    }
+
+    /// Returns a uniformly distributed value in `[0, bound)`, or `None` when `bound <= 0`.
+    public mut nextLongBelow(bound: Long): Option<Long> {
+        if (bound <= 0L) return Option<Long>.None();
+        return Option.Some(this.unbiasedLong(bound));
+    }
+
+    /// Returns a uniformly chosen element of `source`, or `None` when it is empty.
+    ///
+    /// Reservoir sampling makes one traversal and does not require the source to be sized.
+    public mut pick<T admits mutable>(source: Iterable<T>): Option<T> {
+        let mut selected: T? = null;
+        let mut count = 0;
+        for (let item in source) {
+            count = count + 1;
+            if (this.nextIntBelow(count).getOrElse(0) == 0) selected = item;
+        }
+        if (count == 0) return Option<T>.None();
+        let result = selected;
+        if (result == null) return Option<T>.None();
+        return Option.Some(result);
+    }
+
+    /// Shuffles `values` in place with Fisher–Yates.
+    public mut shuffle<T admits mutable>(values: &ArrayList<T>): Unit {
+        let mut index = values.size - 1;
+        while (index > 0) {
+            let other = this.nextIntBetween(0, index + 1).getOrElse(0);
+            let currentValue = unwrapSome(values.at(index));
+            let otherValue = unwrapSome(values.at(other));
+            values.replaceAt(index, otherValue);
+            values.replaceAt(other, currentValue);
+            index = index - 1;
+        }
+    }
+}

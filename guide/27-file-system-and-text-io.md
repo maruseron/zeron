@@ -122,7 +122,7 @@ order per sink; the API does not add cross-thread locking.
 
 `zeron.time.Clock` is the source of the monotonic instants used for logging and elapsed-time
 measurement. `Clock.system()` samples the same clock as `Instant.now()`, while
-`Clock.fixed(instant)` always reports the supplied instant. `Logger.withClock(name, sink, clock)`
+`Clock.fixed(instant)` always reports the supplied instant. `Logger.fromClock(name, sink, clock)`
 accepts a clock; `Logger.of` defaults to `Clock.system()`.
 
 ```zeron
@@ -132,7 +132,7 @@ import zeron.time.Clock;
 import zeron.time.Instant;
 
 fn deterministicLogger(sink: &LogSink): Logger =
-    Logger.withClock("app", sink, Clock.fixed(Instant.now()));
+    Logger.fromClock("app", sink, Clock.fixed(Instant.now()));
 ```
 
 `Instant` remains a monotonic elapsed-time value; `zeron.time` does not provide wall-clock

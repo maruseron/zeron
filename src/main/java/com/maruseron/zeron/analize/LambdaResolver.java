@@ -647,6 +647,7 @@ final class LambdaResolver {
 
     static FunctionDescriptor resolveLambda(final ResolutionContext context, final Expr.Lambda lambda,
                                              final FunctionDescriptor expectedType) {
+        new LambdaCaptureValidator(context.symbols).validate(lambda);
         return resolveLambda(context, lambda, expectedType, false);
     }
 
@@ -742,8 +743,14 @@ final class LambdaResolver {
             }
             final var resolvedReturn = expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
                     ? returnType : expectedType.returnType();
-            final var inferRows = EffectRows.containsRowVariable(expectedType.raisedEffects());
-            final var raisedEffects = inferRaisedEffects || inferRows
+            // An effect row with a row variable, or an applied effect whose arguments mention an
+            // open type parameter, must be inferred from the lambda body. Otherwise the expected
+            // row would be copied back verbatim and a generic `Yield<T>` call site would never
+            // bind `T` from the lambda's actual `Yield<Int>`.
+            final var inferEffects = EffectRows.containsRowVariable(expectedType.raisedEffects())
+                    || expectedType.raisedEffects().stream()
+                            .anyMatch(TypeSubstitution::containsTypeParameter);
+            final var raisedEffects = inferRaisedEffects || inferEffects
                     ? List.copyOf(context.frame.raisedEffects)
                     : expectedType.raisedEffects();
             final var resolvedType = (expectedType.receiverType() == null
@@ -756,7 +763,7 @@ final class LambdaResolver {
             if (lambda.codeModelType() != null) {
                 validateCodeModelLambda(context, lambda, lambdaParameters);
             }
-            if (!inferRaisedEffects && !inferRows) {
+            if (!inferRaisedEffects && !inferEffects) {
                 RaisedEffectFlow.verifyCallable(context, expectedType.raisedEffects(), lambda.arrow);
             }
             lambda.setType(resolvedType);

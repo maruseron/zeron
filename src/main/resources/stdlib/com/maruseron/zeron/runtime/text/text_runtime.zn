@@ -1,0 +1,31 @@
+package com.maruseron.zeron.runtime.text;
+
+public external class RegexCompileResult = "com.maruseron.zeron.runtime.text.RegexCompileResult" {
+    public isSuccess(): Boolean;
+    public regex(): &RegexHandle;
+    public message(): String;
+    public offset(): Int;
+}
+
+public external class RegexMatchResult = "com.maruseron.zeron.runtime.text.RegexMatchResult" {
+    public isPresent(): Boolean;
+    public text(): String;
+    public start(): Int;
+    public end(): Int;
+    public groupCount(): Int;
+    public group(index: Int): String?;
+    public namedGroup(name: String): String?;
+}
+
+public external class RegexHandle = "com.maruseron.zeron.runtime.text.RegexHandle" {
+    public matches(text: String): Boolean;
+    public find(text: String, fromIndex: Int): &RegexMatchResult;
+    public replaceFirst(text: String, replacement: String): String;
+    public replaceAll(text: String, replacement: String): String;
+}
+
+public external class TextSupport = "com.maruseron.zeron.runtime.text.TextSupport" {
+    public static compileRegex(expression: String): &RegexCompileResult;
+    public static formatFixed(value: Float, places: Int): String;
+    public static zeroPadded(value: Long, width: Int): String;
+}

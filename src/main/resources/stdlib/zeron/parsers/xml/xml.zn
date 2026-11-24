@@ -1,0 +1,107 @@
+package zeron.parsers.xml;
+
+import com.maruseron.zeron.runtime.parsers.xml.XmlNode;
+import com.maruseron.zeron.runtime.parsers.xml.XmlSupport;
+
+import zeron.collections.ArrayList;
+import zeron.collections.HashMap;
+import zeron.internal.arrayFromList;
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+/// One XML element, with namespace-qualified names, attributes, direct text, and child elements.
+public class XmlElement {
+    nameValue: String;
+    namespaceValue: String;
+    textValue: String;
+    attributeNames: Array<String>;
+    attributes: &HashMap<String, String>;
+    children: Array<XmlElement>;
+
+    private constructor new;
+
+    public constructor from(
+        elementName: String,
+        namespaceUri: String,
+        elementText: String,
+        attributeNames: Array<String>,
+        attributes: &HashMap<String, String>,
+        children: Array<XmlElement>
+    ) = XmlElement.new(elementName, namespaceUri, elementText, attributeNames, attributes,
+        children);
+
+    /// The element's qualified source name.
+    public elementName(): String = this.nameValue;
+
+    /// The element's namespace URI, or the empty string when it has none.
+    public namespaceUri(): String = this.namespaceValue;
+
+    /// The concatenated direct text and CDATA content of the element.
+    public text(): String = this.textValue;
+
+    /// The attribute names in source order.
+    public names(): Array<String> = this.attributeNames;
+
+    /// Returns the attribute value, or `None` when the attribute is absent.
+    public attribute(name: String): Option<String> = this.attributes.get(name);
+
+    /// The number of child elements.
+    public childCount(): Int = this.children.length;
+
+    /// Returns the child at `index`, or `None` when the index is out of range.
+    public child(index: Int): Option<XmlElement> {
+        if (index < 0 or index >= this.children.length) return Option<XmlElement>.None();
+        return Option.Some(this.children[index]);
+    }
+
+    /// The child elements in source order.
+    public childElements(): Array<XmlElement> = this.children;
+}
+
+/// A parsed XML document, rooted at its document element.
+public class XmlDocument {
+    rootElement: XmlElement;
+
+    private constructor new;
+
+    public constructor from(root: XmlElement) = XmlDocument.new(root);
+
+    /// The document element.
+    public root(): XmlElement = this.rootElement;
+}
+
+fn elementOf(node: &XmlNode): XmlElement {
+    let names = node.attributeNames();
+    let mut attributes = HashMap.empty<String, String>();
+    for (let name in names) {
+        let value = node.attribute(name);
+        if (value != null) attributes.put(name, value);
+    }
+    let mut children = ArrayList<XmlElement>.empty();
+    let mut index = 0;
+    while (index < node.childCount()) {
+        let child = node.child(index);
+        if (child != null) children.add(elementOf(child));
+        index = index + 1;
+    }
+    return XmlElement.from(node.qualifiedName(), node.namespaceUri(), node.text(), names,
+        attributes, arrayFromList<XmlElement>(children));
+}
+
+/// An XML parse failure with a source position.
+public type XmlError =
+      XmlParseError(message: String, line: Int, column: Int)
+    | DoctypeRejected(message: String);
+
+namespace Xml {
+    /// Parses XML with DTDs and external resources disabled.
+    public fn parse(text: String): Result<XmlDocument, XmlError> {
+        let parsed = XmlSupport.parse(text);
+        if (parsed.isSuccess()) {
+            return Result<XmlDocument, XmlError>.Ok(
+                XmlDocument.from(elementOf(parsed.root())));
+        }
+        return Result<XmlDocument, XmlError>.Err(
+            XmlError.XmlParseError(parsed.message(), parsed.line(), parsed.column()));
+    }
+}

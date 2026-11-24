@@ -85,5 +85,5 @@ public contract Peekable<T<_>> {
     /// Invokes the provided function with `this` as an argument, then returns `this`.
     /// This function only exists for debugging purposes and should generally be
     /// avoided in production code.
-    peek<A>(this: T<A>, action: A -> Unit): A;
+    peek<A>(this: T<A>, action: A -> Unit): T<A>;
 }

@@ -77,7 +77,7 @@ public final class LoggingApiTest {
                 fn fixedClockStampsRecord(): Boolean {
                     let sink = RecordingSink.create();
                     let instant: Instant = Instant.now();
-                    Logger.withClock("app", sink, Clock.fixed(instant)).info(() -> "hello");
+                    Logger.fromClock("app", sink, Clock.fixed(instant)).info(() -> "hello");
                     let record = sink.last();
                     if (record == null) return false;
                     return record.time == instant

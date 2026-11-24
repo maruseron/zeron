@@ -44,12 +44,12 @@ public data class Json(indent: Int) {
     /// Encodes the fields that `block` selects through `model`.
     ///
     /// A model records field identity and external names but erases value types, so the block
-    /// supplies the typed reads, as it does for `jsonModel`.
+    /// supplies the typed reads, as it does for `Json.model`.
     public encodeToValueWith<T admits nullable + mutable>(
         model: Model<T>,
         value: T,
         block: &JsonModelObjectBuilder<T>.() -> Unit
-    ): Result<&JsonValue, JsonError> = jsonModel<T>(model, value, block);
+    ): Result<&JsonValue, JsonError> = Json.model<T>(model, value, block);
 
     /// Encodes the fields that `block` selects through `model` and writes them using this
     /// configuration.
@@ -58,7 +58,7 @@ public data class Json(indent: Int) {
         value: T,
         block: &JsonModelObjectBuilder<T>.() -> Unit
     ): Result<String, JsonError> =
-        match (jsonModel<T>(model, value, block)) {
+        match (Json.model<T>(model, value, block)) {
             case Ok(json) -> this.stringifyValue(json);
             case Err(error) -> Result<String, JsonError>.Err(error);
         };
@@ -79,7 +79,7 @@ public data class Json(indent: Int) {
     /// Parses JSON text into a JSON value.
     ///
     /// Parsing does not depend on this configuration; use it to feed `stringifyValue`.
-    public parseValue(text: String): Result<&JsonValue, JsonError> = parse(text);
+    public parseValue(text: String): Result<&JsonValue, JsonError> = Json.parse(text);
 }
 
 /// JSON operations that delegate to the default compact configuration.

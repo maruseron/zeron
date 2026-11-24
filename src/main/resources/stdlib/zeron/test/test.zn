@@ -1,10 +1,23 @@
 package zeron.test;
 
+import zeron.lang.Ordering;
+
 /// Marks a top-level, public, parameterless `Unit` function as a test.
 public annotation Test on FUNCTION;
 
 /// Marks a `@Test` function as skipped. The optional reason is reported by the test runner.
 public annotation Ignore(reason: String = "") on FUNCTION;
+
+/// Marks a parameterless `Unit` function as an expected compilation failure.
+///
+/// The runner compiles `fixture` relative to a configured compile-failure root and checks that the
+/// compilation fails. When `code` is non-empty, that diagnostic code must be reported. When
+/// `message` is non-empty, it must occur in the selected diagnostic's text.
+public annotation CompileFailure(
+    fixture: String,
+    code: String = "",
+    message: String = ""
+) on FUNCTION;
 
 /// Raised by an assertion to report a test failure.
 public effect TestFailure {
@@ -69,6 +82,96 @@ public fn assertNotNull<T admits nullable>(
     message: String = "expected a non-null value"
 ): Unit performs TestFailure {
     if (value == null) perform TestFailure.new(message);
+}
+
+/// Fails unless `text` contains `part`.
+public fn assertContains(
+    text: String,
+    part: String,
+    message: String = ""
+): Unit performs TestFailure {
+    if (not text.contains(part)) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected \"" + text + "\" to contain \"" + part + "\""
+            else message);
+    }
+}
+
+/// Fails when `text` contains `part`.
+public fn assertNotContains(
+    text: String,
+    part: String,
+    message: String = ""
+): Unit performs TestFailure {
+    if (text.contains(part)) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected \"" + text + "\" not to contain \"" + part + "\""
+            else message);
+    }
+}
+
+/// Fails unless `text` starts with `prefix`.
+public fn assertStartsWith(
+    text: String,
+    prefix: String,
+    message: String = ""
+): Unit performs TestFailure {
+    if (not text.startsWith(prefix)) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected \"" + text + "\" to start with \"" + prefix + "\""
+            else message);
+    }
+}
+
+/// Fails unless `text` ends with `suffix`.
+public fn assertEndsWith(
+    text: String,
+    suffix: String,
+    message: String = ""
+): Unit performs TestFailure {
+    if (not text.endsWith(suffix)) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected \"" + text + "\" to end with \"" + suffix + "\""
+            else message);
+    }
+}
+
+/// Fails unless `actual` is greater than `expected`.
+public fn assertGreaterThan<T: Comparable<T> + Display>(
+    actual: T,
+    expected: T,
+    message: String = ""
+): Unit performs TestFailure {
+    let comparison = actual.compareTo(expected);
+    let notGreater = match (comparison) {
+        case Ordering.Greater() -> false;
+        case Ordering.Less() -> true;
+        case Ordering.Equal() -> true;
+    };
+    if (notGreater) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected " + actual.toString() + " to be greater than " + expected.toString()
+            else message);
+    }
+}
+
+/// Fails unless `actual` is less than `expected`.
+public fn assertLessThan<T: Comparable<T> + Display>(
+    actual: T,
+    expected: T,
+    message: String = ""
+): Unit performs TestFailure {
+    let comparison = actual.compareTo(expected);
+    let notLess = match (comparison) {
+        case Ordering.Less() -> false;
+        case Ordering.Greater() -> true;
+        case Ordering.Equal() -> true;
+    };
+    if (notLess) {
+        perform TestFailure.new(if (message.isEmpty())
+            then "expected " + actual.toString() + " to be less than " + expected.toString()
+            else message);
+    }
 }
 
 /// Fails unless `actual` is within `tolerance` of `expected`.

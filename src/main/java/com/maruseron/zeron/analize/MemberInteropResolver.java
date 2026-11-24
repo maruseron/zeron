@@ -560,12 +560,99 @@ final class MemberInteropResolver {
         return resolveMemberCall(context, call, null, expectedType);
     }
 
+    private static GenericDescriptor continuationType(final TypeDescriptor type) {
+        var candidate = type;
+        if (candidate instanceof ReferenceDescriptor reference) candidate = reference.baseType();
+        if (candidate instanceof NullableDescriptor nullable) candidate = nullable.baseType();
+        return candidate instanceof GenericDescriptor generic
+                && generic.baseType().name().equals("zeron.runtime.Cont") ? generic : null;
+    }
+
+    private static boolean isContinuationOperation(final String name) {
+        return name.equals("resume") || name.equals("cancel") || name.equals("isDone");
+    }
+
+    /// Resolves an operation on a `Cont` value that is not the case's own token, such as a stored
+    /// continuation or one passed to a helper.
+    private static TypeDescriptor resolveContinuationCall(final ResolutionContext context,
+                                                          final Expr.MemberCall call,
+                                                          final GenericDescriptor receiverType) {
+        if (call.safeNavigation() || !call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "A continuation call cannot be a safe call or have type arguments."));
+        }
+        final var name = call.name.lexeme();
+        if (name.equals("isDone")) {
+            if (!call.arguments.isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name, "'isDone' expects no arguments."));
+            }
+            call.setContinuationIsDone(true);
+            call.setType(TypeDescriptor.ofBoolean());
+            return TypeDescriptor.ofBoolean();
+        }
+        if (name.equals("cancel")) {
+            if (!call.arguments.isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name, "'cancel' expects no arguments."));
+            }
+            call.setContinuationCancel(true);
+            RaisedEffectFlow.add(context, TypeDescriptor.ofName("zeron.resource.DisposeFailure"),
+                    call.name);
+            call.setType(TypeDescriptor.ofUnit());
+            return TypeDescriptor.ofUnit();
+        }
+        if (call.arguments.size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "'resume' expects exactly one response argument."));
+        }
+        final var responseType = receiverType.typeParameters().get(0);
+        final var resultType = receiverType.typeParameters().get(1);
+        if (call.arguments.size() == 1) {
+            final var argumentType = ExpressionFlowResolver.resolveExpression(
+                    context, call.arguments.getFirst());
+            if (!TypeDescriptor.ofNever().equals(responseType)) {
+                ensureAssignable(context, responseType, argumentType, call.name);
+            }
+        }
+        call.setResumeCall(true);
+        call.setContinuationResume(true);
+        call.setType(resultType);
+        return resultType;
+    }
+
     private static TypeDescriptor resolveResumeCall(final ResolutionContext context,
                                                     final Expr.MemberCall call,
-                                                    final TypeDescriptor responseType) {
-        if (!call.name.lexeme().equals("resume")) {
+                                                    final ResolutionContext.ResumeToken token) {
+        final var responseType = token.response();
+        final var name = call.name.lexeme();
+        if (name.equals("isDone") && token.continuation()) {
+            if (!call.arguments.isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name, "'isDone' expects no arguments."));
+            }
+            call.setContinuationIsDone(true);
+            call.setType(TypeDescriptor.ofBoolean());
+            return TypeDescriptor.ofBoolean();
+        }
+        if (name.equals("cancel") && token.continuation()) {
+            if (!call.arguments.isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name, "'cancel' expects no arguments."));
+            }
+            call.setContinuationCancel(true);
+            RaisedEffectFlow.add(context, TypeDescriptor.ofName("zeron.resource.DisposeFailure"),
+                    call.name);
+            call.setType(TypeDescriptor.ofUnit());
+            return TypeDescriptor.ofUnit();
+        }
+        if (!name.equals("resume")) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    call.name, "A resume token only provides 'resume'."));
+                    call.name, token.continuation()
+                            ? "A continuation only provides 'resume', 'cancel', and 'isDone'."
+                            : "A resume token only provides 'resume'."));
+            call.setType(TypeDescriptor.ofAny());
+            return TypeDescriptor.ofAny();
         }
         if (call.safeNavigation() || !call.explicitTypeArguments.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -583,7 +670,10 @@ final class MemberInteropResolver {
             }
         }
         call.setResumeCall(true);
-        final var result = TypeDescriptor.ofNever().equals(responseType) ? argumentType : responseType;
+        call.setContinuationResume(token.continuation());
+        final var result = token.continuation()
+                ? token.result()
+                : (TypeDescriptor.ofNever().equals(responseType) ? argumentType : responseType);
         call.setType(result);
         return result;
     }
@@ -887,6 +977,11 @@ final class MemberInteropResolver {
                 : alreadyResolvedReceiverType;
         final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : receiverType;
+        final var continuationType = receiverBaseType.isNullable()
+                ? null : continuationType(receiverBaseType);
+        if (continuationType != null && isContinuationOperation(call.name.lexeme())) {
+            return resolveContinuationCall(context, call, continuationType);
+        }
         final var receiverFunctionResult = resolveReceiverFunctionPropertyCall(context, call, receiverType);
         if (receiverFunctionResult != null) return receiverFunctionResult;
         if (!call.safeNavigation() && !isTypeParameterTypePath(call.receiver, receiverBaseType)) {

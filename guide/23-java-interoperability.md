@@ -114,6 +114,12 @@ both forms apply. Java overload resolution defers lambda and function-reference 
 reports an ambiguity rather than guessing when several SAM targets remain possible. SAM conversion
 itself does not require `unsafe`; a direct Java call still does.
 
+A converted callback is also a runtime suspension boundary. The emitted call that passes the
+callback enters `SuspensionGuard`, and a level-3 handler outside that host frame rejects a suspension
+with a program error instead of attempting to capture across Java, JNI, or native code. A handler
+installed inside the callback records the marker depth and still suspends normally. The static rule
+is stricter still: a converted callback may not declare a non-empty `performs` row.
+
 Lowering reuses `LambdaMetafactory` with the Java interface as the call-site return type, so it adds
 no runtime class, generated interface, or API-index field. A converted callback may not carry a
 non-empty `performs` row; handle or map the effect inside the callback. Java reference types keep their

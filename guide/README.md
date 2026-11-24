@@ -64,3 +64,4 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [The REPL](03-the-repl.md)
 1. [Why unit?](35-why-unit.md)
 1. [Contract derivation](38-contract-derivation.md)
+1. [Style and API conventions](../documents/developer_guides/style-conventions.md)

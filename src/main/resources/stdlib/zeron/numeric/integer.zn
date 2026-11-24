@@ -116,9 +116,9 @@ public class Integer {
     /// Compares this integer with `other`.
     public compareTo(other: Integer): Ordering {
         let res = bigIntegerCompare(this.value, other.value);
-        if (res < 0) return Ordering.LT();
-        if (res > 0) return Ordering.GT();
-        return Ordering.EQ();
+        if (res < 0) return Ordering.Less();
+        if (res > 0) return Ordering.Greater();
+        return Ordering.Equal();
     }
 
     /// Returns the decimal representation of this integer.

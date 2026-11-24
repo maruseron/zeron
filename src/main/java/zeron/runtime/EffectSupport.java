@@ -35,6 +35,7 @@ public final class EffectSupport {
     /// enclosing handler. When a handler does not match, it rethrows the same carrier and the
     /// search continues outward.
     public static Object perform(final Object payload) {
+        DisposeGuard.requireEffectAllowed(payload);
         final var frames = FRAMES.get();
         while (!frames.isEmpty()) {
             final var frame = frames.peekLast();

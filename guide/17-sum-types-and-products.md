@@ -102,7 +102,8 @@ for the derivation rules): a type that derives `Encode, Decode` round-trips thro
 the free `encode(value, encoder)` and `decode<{}, T>(decoder)` entry points without building an
 intermediate value tree. A failure names the path of components that led to it, unknown fields are
 skipped, and an unknown sum case is a decode error. The `zeron.serialization.json` package provides
-JSON parsing, a JSON value model, and stringification. `Json` is a configuration value whose
+JSON parsing, a JSON value model, and stringification through the `Json` companion namespace
+(`Json.parse`, `Json.stringify`, and `Json.build`). `Json` is also a configuration value whose
 `indent` component sets the number of spaces per nesting level: `Json.compact()` and the companion
 functions `Json.encodeToString` and `Json.decodeFromString` use the default compact form, while
 `Json.pretty(2).encodeToString(value)` indents each level by two spaces.
@@ -144,7 +145,7 @@ value type.
 | Types | Products, sums, and transparent data classes | Any nominal type with readable properties, including ordinary classes |
 | Use when | A canonical, derivable representation is enough | External names, a partial view, or a non-codec format are needed |
 
-Model-based decoding is not part of the current JSON API: `jsonModel` and
+Model-based decoding is not part of the current JSON API: `Json.model` and
 `Json.encodeToStringWith` encode only. A consumer can read a mapped property with `Field.get`, or
 write it through `Field.writer` when the model exposes one.
 

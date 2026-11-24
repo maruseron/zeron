@@ -1124,7 +1124,9 @@ final class DeclarationResolver {
     context.frame.expectedReturnTypes.push(method.typeDescriptor().returnType());
         final var enclosingFlow = context.frame.flowState;
         final var enclosingMethodOwner = context.frame.currentMethodOwner;
+        final var enclosingMethodName = context.frame.currentMethodName;
         context.frame.currentMethodOwner = owner;
+        context.frame.currentMethodName = method.name().lexeme();
         context.frame.flowState = new FlowState();
         final var thisToken = new Token(TokenType.THIS, "this", null, method.name().span());
         final TypeDescriptor ownerType = TypeResolver.classType(context, owner);
@@ -1160,12 +1162,23 @@ final class DeclarationResolver {
                     context, method.name(), method.typeDescriptor().returnType(), method.body());
             ensureReturnsOnAllPaths(context, method.name(), resolvedReturn);
             RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
+            if ("dispose".equals(method.name().lexeme())) {
+                for (final var effect : method.typeDescriptor().raisedEffects()) {
+                    if (effect.name().equals("zeron.concurrent.Await")) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE, method.name(),
+                                "A dispose implementation cannot declare Await; cleanup must not "
+                                        + "block or suspend. Move the wait outside cleanup."));
+                    }
+                }
+            }
         } finally {
             context.frame.receiverScopes.pop();
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.flowState = enclosingFlow;
             context.frame.currentMethodOwner = enclosingMethodOwner;
+            context.frame.currentMethodName = enclosingMethodName;
             context.exitInferableReifiedScope(exported, typeParameters);
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }

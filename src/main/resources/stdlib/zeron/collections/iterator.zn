@@ -16,4 +16,10 @@ public type Step<T admits nullable + mutable> =
 public contract Iterator<T admits nullable + mutable> {
     /// Advances the cursor and returns the next element or `Done`.
     mut next(): Step<T>;
+
+    /// Releases the cursor's resources. Idempotent; a completed iterator needs no cleanup.
+    ///
+    /// `for` and the `Stream` adapters call this on the cursor they own, including on `break`,
+    /// `return`, and exceptional exit. Ordinary iterators have nothing to release.
+    default mut close(): Unit = ();
 }

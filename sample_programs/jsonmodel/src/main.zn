@@ -1,11 +1,9 @@
-import zeron.serialization.json.stringify;
-import zeron.serialization.json.json;
-import zeron.serialization.json.jsonModel;
+import zeron.serialization.json.Json;
 
 import zeron.collections.ArrayList;
 
 fn main(): Unit {
-    let obj = json {
+    let obj = Json.build {
         put("a", 5);
         put("b", 1.5);
         putObject("address") {
@@ -16,13 +14,13 @@ fn main(): Unit {
 
     let user = User.new(1, "Marcelo", "marcelorodfu@gmail.com", "dummy-date");
 
-    let obj2 = jsonModel(UserWire, user) {
+    let obj2 = Json.model(UserWire, user) {
         field(User::id);
         field(User::name);
     };
 
     match (obj) {
-        case Ok(data) -> match (stringify(data)) {
+        case Ok(data) -> match (Json.stringify(data)) {
             case Ok(string) -> println(string);
             case Err(_) -> ();
         };

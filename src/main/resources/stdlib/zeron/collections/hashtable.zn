@@ -94,7 +94,7 @@ class HashTable<K, V admits mutable> {
 
     private constructor new;
 
-    public constructor withOperations(
+    public constructor fromOperations(
         hashFunction: (K) -> Long,
         equalityFunction: (K, K) -> Boolean
     ) =

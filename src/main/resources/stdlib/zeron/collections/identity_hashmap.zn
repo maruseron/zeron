@@ -27,7 +27,7 @@ public class IdentityHashMap<K, V admits mutable>
     /// Creates an empty map using reference identity for keys.
     public constructor empty() =
         IdentityHashMap<K, V>.new(
-            HashTable<K, V>.withOperations(
+            HashTable<K, V>.fromOperations(
                 (key) -> identityHash(key),
                 (left, right) -> sameReference(left, right)
             )

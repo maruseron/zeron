@@ -4,16 +4,15 @@ Zeron runs concurrent work on virtual threads. Blocking a virtual thread is chea
 looks like ordinary blocking code: no `async`, no `await`, and no wrapper on every function that
 participates in the work.
 
-`Scope` gives that work a lifetime. Opening a scope, starting tasks in it, and closing the scope is
+`ConcurrentScope` gives that work a lifetime. Opening a scope, starting tasks in it, and closing the scope is
 the whole protocol. A scope never leaves a task running after its `using` block exits.
 
 ```zeron
-import zeron.concurrent.Scope;
+import zeron.concurrent.ConcurrentScope;
 import zeron.concurrent.Task;
-import zeron.resource.DisposeFailure;
 
-public fn loadBoth(): Int performs DisposeFailure {
-    using (let scope = Scope.open()) {
+public fn loadBoth(): Int {
+    using (let scope = ConcurrentScope.open()) {
         let first = scope.start(() -> load(1));
         let second = scope.start(() -> load(2));
         scope.join();
@@ -22,9 +21,33 @@ public fn loadBoth(): Int performs DisposeFailure {
 }
 ```
 
-`Scope.open()` uses one virtual thread per task. `Scope.openWith(executor)` uses an executor you
-own, which is useful for tests or for sharing a bounded pool. The scope never shuts down an injected
-executor.
+`ConcurrentScope.open()` uses one virtual thread per task and is fail-fast by default: the first
+genuine task failure cancels every sibling and rejects new starts. `openManual()` preserves the
+caller-coordinated behaviour, where a failure stays on its own handle and does not cancel the rest.
+`ConcurrentScope.openWith(executor)` and `openManualWith(executor)` use an executor you own, which
+is useful for tests or for sharing a bounded pool. The scope never shuts down an injected executor.
+
+## The `concurrent` helper
+
+`concurrent { ... }` opens a fail-fast scope, installs the blocking `Await` handler, and lends a
+read-only scope receiver. Call `start`, `join`, `cancel`, and `deadline` without a `scope.` prefix;
+the body does not declare `DisposeFailure`, and `await` does not need a separate `blocking` wrapper:
+
+```zeron
+import zeron.concurrent.await;
+import zeron.concurrent.concurrent;
+
+public fn loadBoth(): Array<User> performs DbError =
+    concurrent {
+        let first = start(() -> repo.user(1));
+        let second = start(() -> repo.user(2));
+        return [await(first), await(second)];
+    };
+```
+
+When the body exits, the helper cancels and joins every task that is still running. `join()` is
+available when the body needs every task to finish. `concurrentWith(executor, body)` is the same
+helper on an injected executor.
 
 ## Starting and joining
 
@@ -47,13 +70,12 @@ wrapper to the enclosing signature:
 
 ```zeron
 import zeron.concurrent.Await;
-import zeron.concurrent.Scope;
+import zeron.concurrent.ConcurrentScope;
 import zeron.concurrent.await;
 import zeron.concurrent.spawn;
-import zeron.resource.DisposeFailure;
 
-public fn loadBoth(): Int performs Await, DisposeFailure {
-    using (let scope = Scope.open()) {
+public fn loadBoth(): Int performs Await {
+    using (let scope = ConcurrentScope.open()) {
         let first = spawn(scope, () -> load(1));
         let second = spawn(scope, () -> load(2));
         return await(first) + await(second);
@@ -73,7 +95,7 @@ entry point installs the same policy implicitly, so `main` can await without dec
 
 ```zeron
 fn main(): Unit performs DisposeFailure {
-    using (let scope = Scope.open()) {
+    using (let scope = ConcurrentScope.open()) {
         let task = spawn(scope, () -> load());
         println(await(task));
     }
@@ -84,16 +106,19 @@ Cancelling a `Task` and calling `scope.cancel()` have the same unwind rules as b
 `using` cleanup inside the body. A scope still owns its tasks: close it with `using`, and do not keep
 a task after its scope has exited.
 
-Starting the body does not perform its effects. Only `value()`/`await` observes the outcome, so a
-task that is started and never awaited still participates in the scope's join and cancellation but
-does not re-raise its effect.
+Starting the body does not perform its effects. `value()`/`await` observes the outcome at the join.
+In fail-fast mode, a genuine task failure that is started and never awaited still participates in
+the scope's cancellation and is reported at close unless another join observed it.
 
 A task body that awaits is an ordinary effectful body. Direct-style waiting inside a task is not
 resumable in this slice; awaiting in the task's caller, including `main`, is the supported path.
 
-A task failure does not automatically cancel its siblings. `scope.join()` still waits for all of
-them; call `scope.cancel()` when the first failure should stop the rest. `value()` is where a task's
-captured effect is observed, so each caller decides whether to continue or cancel.
+In fail-fast mode, the first genuine task failure becomes the scope's primary failure and cancels
+its siblings. `scope.join()` waits for all of them but does not raise. The failed task re-raises its
+own failure at `value()`/`await`; a sibling cancelled by the primary re-raises the primary there
+instead of hiding it behind `CancellationException`. If the body returns without observing a
+genuine failure, close reports the first unobserved one. `openManual()` restores caller-coordinated
+failure handling, where a task failure does not cancel siblings and is only observed at its join.
 
 ## Effects across a task boundary
 
@@ -104,8 +129,8 @@ and the caller's `performs` row apply.
 ```zeron
 fn find(id: Int): User performs NotFound = loadUser(id);
 
-fn findBoth(): Array<User> performs NotFound, DisposeFailure {
-    using (let scope = Scope.open()) {
+fn findBoth(): Array<User> performs NotFound {
+    using (let scope = ConcurrentScope.open()) {
         let first = scope.start(() -> find(1));
         let second = scope.start(() -> find(2));
         return [first.value(), second.value()];
@@ -142,7 +167,7 @@ otherwise hang. It only requests cancellation; it does not add a separate failur
 ```zeron
 import zeron.time.Duration;
 
-using (let scope = Scope.open()) {
+using (let scope = ConcurrentScope.open()) {
     let task = scope.start(() -> waitForWork());
     scope.deadline(Duration.fromNanoseconds(5_000_000_000L));
     task.value();
@@ -156,12 +181,18 @@ both fail, the body's effect stays primary and the disposal failures are suppres
 synchronous code. An enclosing handler can inspect them with `with suppressed as failures`.
 
 The same rule applies when cancellation interrupts a task: cleanup still runs, and the cancellation
-is reported at the join point. A scope's `dispose` itself performs `DisposeFailure` because joining
-can be interrupted, so the enclosing `using` propagates that obligation like any other disposal.
+is reported at the join point. `ConcurrentScope.dispose` is effect-free; it joins every task and, in
+fail-fast mode, reports the first unobserved genuine failure as a runtime safety net. An enclosing
+handler can observe a raised effect if one is active at the close site; otherwise it surfaces as a
+host failure. The compiler does not require a `DisposeFailure` obligation for scope-only code.
+
+Explicit `cancel()` and deadline cancellation are cancellation causes, not failures. They cancel the
+scope without becoming the primary failure, and task failures recorded during that cancellation are
+not escalated at close.
 
 ## Scope request rules
 
-- Open the scope in a `using` block. `Scope` implements `Disposable`; closing it joins.
+- Open the scope in a `using` block. `ConcurrentScope` implements `Disposable`; closing it joins.
 - Start tasks after opening the scope and before joining it. Starting after `join()` or `cancel()`
   fails at runtime.
 - Keep task bodies free of shared mutable state unless the mutation is explicit. The existing

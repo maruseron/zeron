@@ -25,6 +25,7 @@ final class FunctionResolutionFrame {
                       boolean resolvingSumCaseCondition,
                       int unsafeDepth,
                       String currentClassName,
+                      String currentMethodName,
                       Stmt.ClassDecl currentMethodOwner,
                       List<ReceiverScope> receiverScopes,
                       int nextReceiverScopeId,
@@ -43,6 +44,7 @@ final class FunctionResolutionFrame {
     boolean resolvingSumCaseCondition;
     int unsafeDepth;
     String currentClassName;
+    String currentMethodName;
     Stmt.ClassDecl currentMethodOwner;
     final Deque<ReceiverScope> receiverScopes = new ArrayDeque<>();
     int nextReceiverScopeId;
@@ -60,7 +62,8 @@ final class FunctionResolutionFrame {
                 patternOutputNames, raisedEffects,
                 raisedEffects == null ? null : Set.copyOf(raisedEffects),
                 flowState, flowState.copy(), loopDepth, resolvingPattern, resolvingSumCaseCondition,
-                unsafeDepth, currentClassName, currentMethodOwner, List.copyOf(receiverScopes), nextReceiverScopeId,
+                unsafeDepth, currentClassName, currentMethodName, currentMethodOwner,
+                List.copyOf(receiverScopes), nextReceiverScopeId,
                 initializerVisibleFields,
                 dataInitializerOwner, dataInitializerWritableFields);
     }
@@ -96,6 +99,7 @@ final class FunctionResolutionFrame {
         unsafeDepth = checkpoint.unsafeDepth();
         currentClassName = checkpoint.currentClassName();
         currentMethodOwner = checkpoint.currentMethodOwner();
+        currentMethodName = checkpoint.currentMethodName();
         receiverScopes.clear();
         receiverScopes.addAll(checkpoint.receiverScopes());
         nextReceiverScopeId = checkpoint.nextReceiverScopeId();

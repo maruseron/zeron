@@ -161,6 +161,9 @@ public sealed interface Expr {
         private Token spreadToken;
         private List<Token> witnessSelection = List.of();
         private boolean resumeCall;
+        private boolean continuationResume;
+        private boolean continuationCancel;
+        private boolean continuationIsDone;
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -284,9 +287,19 @@ public sealed interface Expr {
         public void setWitnessSelection(final List<Token> selection) {
             witnessSelection = List.copyOf(selection);
         }
-        /// Marks `k.resume(value)`, which lowers to the value itself.
+        /// Marks `k.resume(value)`. A level-2 tail resume lowers to the value itself; a level-3
+        /// resume lowers to a `zeron.runtime.Cont.resume` call.
         public boolean resumeCall() { return resumeCall; }
         public void setResumeCall(final boolean value) { resumeCall = value; }
+        /// Whether this resume call targets a level-3 `Cont` instead of a tail-only token.
+        public boolean continuationResume() { return continuationResume; }
+        public void setContinuationResume(final boolean value) { continuationResume = value; }
+        /// Whether this call is `k.cancel()` on a level-3 continuation.
+        public boolean continuationCancel() { return continuationCancel; }
+        public void setContinuationCancel(final boolean value) { continuationCancel = value; }
+        /// Whether this call is `k.isDone()` on a level-3 continuation.
+        public boolean continuationIsDone() { return continuationIsDone; }
+        public void setContinuationIsDone(final boolean value) { continuationIsDone = value; }
         public int spreadArgumentIndex() { return spreadArgumentIndex; }
         public Token spreadToken() { return spreadToken; }
         public void setSpreadArgument(final int index, final Token token) {
@@ -974,6 +987,8 @@ public sealed interface Expr {
         private final Token suppressedBinding;
         private final Token resumeBinding;
         private TypeDescriptor resolvedEffectType;
+        private TypeDescriptor resumeTokenType;
+        private boolean tailTransfer;
 
         public HandleArm(final Token keyword, final TypeDescriptor effectType,
                          final MatchPattern pattern, final Expr guard, final Expr expression) {
@@ -1008,6 +1023,27 @@ public sealed interface Expr {
         public Expr expression() { return expression; }
         public TypeDescriptor resolvedEffectType() { return resolvedEffectType; }
         public void setResolvedEffectType(final TypeDescriptor type) { resolvedEffectType = type; }
+        /// The type of this arm's continuation binding: a level-2 response token or a level-3
+        /// `zeron.runtime.Cont<Response, T>`. Null for an abortive arm.
+        public TypeDescriptor resumeTokenType() { return resumeTokenType; }
+        public void setResumeTokenType(final TypeDescriptor type) { resumeTokenType = type; }
+
+        /// Whether this level-3 arm is exactly `k.resume(value)`, so the runtime can discard the
+        /// case frame and drive the continuation from its own loop.
+        public boolean tailTransfer() { return tailTransfer; }
+        public void setTailTransfer(final boolean value) { tailTransfer = value; }
+
+        /// The response expression of a syntactic tail arm, or null. A block whose yielded value
+        /// is the resume call counts as tail: work before the resume cannot outlive the case.
+        public Expr tailResumeArgument() {
+            if (resumeBinding == null) return null;
+            Expr value = expression;
+            if (value instanceof ValueBlock block) value = block.value;
+            if (!(value instanceof MemberCall call) || !call.resumeCall()) return null;
+            if (!(call.receiver instanceof Variable receiver)
+                    || !receiver.name.lexeme().equals(resumeBinding.lexeme())) return null;
+            return call.arguments.size() == 1 ? call.arguments.getFirst() : null;
+        }
     }
 
     final class Handle implements Expr {
@@ -1016,6 +1052,7 @@ public sealed interface Expr {
         public final List<HandleArm> arms;
         public final Expr handler;
         private Expr frameHandler;
+        private Expr level3Body;
         private TypeDescriptor type = TypeDescriptor.ofInfer();
 
         public Handle(final Token keyword, final Expr expression, final List<HandleArm> arms) {
@@ -1035,19 +1072,43 @@ public sealed interface Expr {
         /// The synthesized resuming handler installed while the protected expression runs.
         public Expr frameHandler() { return frameHandler; }
         public void setFrameHandler(final Expr handler) { frameHandler = handler; }
+        /// For a level-3 handle, the synthesized `() -> T` body that runs in the provider session.
+        public Expr level3Body() { return level3Body; }
+        public void setLevel3Body(final Expr body) { level3Body = body; }
     }
 
     final class HandlerDispatch implements Expr {
         public final Token keyword;
         public final Token carrier;
         public final List<HandleArm> arms;
+        private final Token continuationToken;
+        private final boolean payloadOnly;
         private TypeDescriptor type = TypeDescriptor.ofInfer();
 
         public HandlerDispatch(final Token keyword, final Token carrier, final List<HandleArm> arms) {
+            this(keyword, carrier, arms, null, false);
+        }
+
+        public HandlerDispatch(final Token keyword, final Token carrier, final List<HandleArm> arms,
+                               final Token continuationToken) {
+            this(keyword, carrier, arms, continuationToken, false);
+        }
+
+        public HandlerDispatch(final Token keyword, final Token carrier, final List<HandleArm> arms,
+                               final Token continuationToken, final boolean payloadOnly) {
             this.keyword = keyword;
             this.carrier = carrier;
             this.arms = List.copyOf(arms);
+            this.continuationToken = continuationToken;
+            this.payloadOnly = payloadOnly;
         }
+
+        /// The lambda parameter carrying the level-3 `Cont`, or null for a level-2 dispatch.
+        public Token continuationToken() { return continuationToken; }
+
+        /// Whether the carrier parameter is the effect payload itself (level 3) instead of a
+        /// `RaisedEffect` (level 2).
+        public boolean payloadOnly() { return payloadOnly; }
 
         public TypeDescriptor getType() { return type; }
         public void setType(final TypeDescriptor type) { this.type = type; }

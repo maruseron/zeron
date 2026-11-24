@@ -1,0 +1,151 @@
+package zeron.collections;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Comparable;
+import zeron.lang.Option;
+import zeron.lang.Ordering;
+import zeron.lang.Pair;
+
+class SortedMapIterator<K: Comparable<K>, V admits mutable> is Iterator<Pair<K, V>> {
+    map: SortedMap<K, V>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(map: SortedMap<K, V>) = SortedMapIterator<K, V>.new(map, 0);
+
+    public mut next(): Step<Pair<K, V>> {
+        if (this.position >= this.map.size) return Step<Pair<K, V>>.Done();
+        let entry = unwrapSome(this.map.entryAt(this.position));
+        this.position = this.position + 1;
+        return Step.Yield(entry);
+    }
+}
+
+class SortedKeyIterator<K: Comparable<K>, V admits mutable> is Iterator<K> {
+    map: SortedMap<K, V>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(map: SortedMap<K, V>) = SortedKeyIterator<K, V>.new(map, 0);
+
+    public mut next(): Step<K> {
+        if (this.position >= this.map.size) return Step<K>.Done();
+        let key = unwrapSome(this.map.keyAt(this.position));
+        this.position = this.position + 1;
+        return Step.Yield(key);
+    }
+}
+
+/// A mutable map whose keys are kept in ascending order.
+///
+/// Keys are ordered by `Comparable`. Lookup is `O(log n)`; insertion and removal shift the ordered
+/// arrays and are `O(n)`. Iteration is an in-order snapshot of the current key order; mutating while
+/// iterating is a programming error.
+public class SortedMap<K: Comparable<K>, V admits mutable>
+    is Map<K, V>,
+       Sized<Pair<K, V>>,
+       Sequenced<Pair<K, V>>,
+       Clearable {
+    keys: &ArrayList<K>;
+    values: &ArrayList<V>;
+
+    private constructor new;
+
+    /// Creates an empty map.
+    public constructor empty() =
+        SortedMap<K, V>.new(ArrayList<K>.empty(), ArrayList<V>.empty());
+
+    /// The number of entries in the map.
+    public property size: Int {
+        get = this.keys.size;
+    }
+
+    /// Whether the map has no entries.
+    public isEmpty(): Boolean = this.keys.size == 0;
+
+    private indexOf(key: K): Int {
+        let mut low = 0;
+        let mut high = this.keys.size;
+        while (low < high) {
+            let middle = (low + high) / 2;
+            let current = unwrapSome(this.keys.at(middle));
+            let order = current.compareTo(key);
+            if (order matches Ordering.Less()) {
+                low = middle + 1;
+            } else if (order matches Ordering.Greater()) {
+                high = middle;
+            } else {
+                return middle;
+            }
+        }
+        return -(low + 1);
+    }
+
+    /// Returns the key at `index`, or `None` when the index is out of range.
+    public keyAt(index: Int): Option<K> = this.keys.at(index);
+
+    /// Returns the entry at `index`, or `None` when the index is out of range.
+    public entryAt(index: Int): Option<Pair<K, V>> {
+        if (index < 0 or index >= this.keys.size) return Option<Pair<K, V>>.None();
+        return Option.Some(
+            Pair<K, V>.new(
+                unwrapSome(this.keys.at(index)),
+                unwrapSome(this.values.at(index))
+            )
+        );
+    }
+
+    /// Whether the map holds an entry for `key`.
+    public containsKey(key: K): Boolean = this.indexOf(key) >= 0;
+
+    /// Returns the value stored for `key`, or `None` when the key is absent.
+    public get(key: K): Option<V> {
+        let index = this.indexOf(key);
+        if (index < 0) return Option<V>.None();
+        return this.values.at(index);
+    }
+
+    /// Stores `value` for `key`, returning the value it replaced or `None` for a new key.
+    public mut put(key: K, value: V): Option<V> {
+        let index = this.indexOf(key);
+        if (index >= 0) return this.values.replaceAt(index, value);
+        let insertion = -index - 1;
+        this.keys.insert(insertion, key);
+        this.values.insert(insertion, value);
+        return Option<V>.None();
+    }
+
+    /// Removes the entry for `key`, returning its value or `None` when absent.
+    public mut remove(key: K): Option<V> {
+        let index = this.indexOf(key);
+        if (index < 0) return Option<V>.None();
+        this.keys.removeAt(index);
+        return this.values.removeAt(index);
+    }
+
+    /// Removes every entry.
+    public mut clear(): Unit {
+        this.keys.clear();
+        this.values.clear();
+    }
+
+    /// Returns the smallest key.
+    public firstKey(): Option<K> = this.keys.first();
+
+    /// Returns the largest key.
+    public lastKey(): Option<K> = this.keys.last();
+
+    /// Returns the entry with the smallest key.
+    public first(): Option<Pair<K, V>> = this.entryAt(0);
+
+    /// Returns the entry with the largest key.
+    public last(): Option<Pair<K, V>> = this.entryAt(this.keys.size - 1);
+
+    /// Returns an iterator over the entries in ascending key order.
+    public iterator(): &Iterator<Pair<K, V>> = SortedMapIterator<K, V>.from(this);
+
+    /// Returns an iterator over the keys in ascending order.
+    public keyIterator(): &Iterator<K> = SortedKeyIterator<K, V>.from(this);
+}

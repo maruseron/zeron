@@ -39,7 +39,7 @@ public class StringJoiner is Collector<String, String> {
     private constructor new;
 
     /// Creates a joiner that writes `separator` between adjacent elements.
-    public constructor withConfig(config: JoinerConfig) =
+    public constructor fromConfig(config: JoinerConfig) =
         StringJoiner.new(config, config.prefix, true);
 
     /// Returns a joiner that holds `value` after the elements already collected, inserting the
@@ -211,14 +211,14 @@ public extension String {
     ///
     /// The index is measured in code units, like `length()` and `substring`. An unpaired surrogate
     /// is reported as U+FFFD, matching the scalar operations.
-    public fn charAt(index: Int): Option<Char> {
+    public fn at(index: Int): Option<Char> {
         let value = stringCharCodePointAt(this, index);
         if (value < 0) return Option<Char>.None();
         return Option.Some(intToChar(value));
     }
 
-    /// Alias of `charAt`, for code that reads collections with `at`.
-    public fn at(index: Int): Option<Char> = this.charAt(index);
+    /// Compatibility bridge for `at`; prefer `at` in new code.
+    public fn charAt(index: Int): Option<Char> = this.at(index);
 
     /// Returns the parts of this string separated by `separator`.
     ///
@@ -322,7 +322,7 @@ namespace String {
     public fn join(values: Iterable<String>, builder: &JoinerConfig.() -> Unit): String {
         let config = JoinerConfig.new();
         config.builder();
-        return StringJoiner.withConfig(config).join(values);
+        return StringJoiner.fromConfig(config).join(values);
     }
 }
 

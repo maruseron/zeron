@@ -27,10 +27,10 @@ public final class StructuredConcurrencyTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 import java.lang.Thread;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.DisposeFailure;
                 public fn fanOut(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let first = scope.start(() -> 20);
                         let second = scope.start(() -> 22);
                         scope.join();
@@ -38,7 +38,7 @@ public final class StructuredConcurrencyTest {
                     }
                 }
                 public fn virtualThreads(): Boolean performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> unsafe Thread.currentThread()!!.isVirtual());
                         return task.value();
                     }
@@ -65,14 +65,14 @@ public final class StructuredConcurrencyTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-concurrency-effects-");
         final var unit = parse("Main.zn", """
                 package %s;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.DisposeFailure;
                 public effect Boom {
                     public property code: Int;
                 }
                 fn fire(): Int performs Boom = perform Boom.new(7);
                 fn captured(): Int performs Boom, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> fire());
                         scope.join();
                         return task.value();
@@ -98,14 +98,14 @@ public final class StructuredConcurrencyTest {
 
         final var invalid = parse("Invalid.zn", """
                 package %s;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.DisposeFailure;
                 public effect Boom {
                     public property code: Int;
                 }
                 fn fire(): Int performs Boom = perform Boom.new(7);
                 fn unhandled(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> fire());
                         return task.value();
                     }
@@ -123,7 +123,7 @@ public final class StructuredConcurrencyTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 import java.lang.Thread;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.Disposable;
                 import zeron.resource.DisposeFailure;
                 public effect Boom {}
@@ -143,7 +143,7 @@ public final class StructuredConcurrencyTest {
                 }
                 public fn cancelsRunningTask(): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> cancellingTask(state));
                         while (state[0] == 0) {
                             // Wait until the virtual thread has started.
@@ -160,7 +160,7 @@ public final class StructuredConcurrencyTest {
                     return 0;
                 }
                 fn cleanupInTask(state: &Array<Int>): Int performs Boom, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> cleanupTask(state));
                         scope.join();
                         return task.value();
@@ -185,7 +185,7 @@ public final class StructuredConcurrencyTest {
                     return 0;
                 }
                 fn failingCleanupInTask(): Int performs Boom, DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> failingCleanupTask());
                         scope.join();
                         return task.value();
@@ -221,11 +221,11 @@ public final class StructuredConcurrencyTest {
                 package %s;
                 import java.lang.Thread;
                 import java.util.concurrent.ExecutorService;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.DisposeFailure;
                 import zeron.time.Duration;
                 public fn deadlineCancels(): Boolean performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> {
                             while (not unsafe Thread.currentThread()!!.isInterrupted()) {
                                 // Wait for the deadline.
@@ -239,7 +239,7 @@ public final class StructuredConcurrencyTest {
                 }
                 public fn singleThreaded(executor: &ExecutorService): Int performs DisposeFailure {
                     let state: &Array<Int> = [0, 0];
-                    using (let scope = Scope.openWith(executor)) {
+                    using (let scope = ConcurrentScope.openWith(executor)) {
                         let first = scope.start(() -> { state[0] = 1; return 1; });
                         let second = scope.start(() -> { state[1] = 2; return 2; });
                         scope.join();
@@ -273,10 +273,10 @@ public final class StructuredConcurrencyTest {
         final var unit = parse("Main.zn", """
                 package %s;
                 import java.lang.Thread;
-                import zeron.concurrent.Scope;
+                import zeron.concurrent.ConcurrentScope;
                 import zeron.resource.DisposeFailure;
                 public fn hostFailure(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> {
                             let values: &Array<Int> = [0];
                             return values[9];
@@ -285,7 +285,7 @@ public final class StructuredConcurrencyTest {
                     }
                 }
                 public fn cancelledValue(): Int performs DisposeFailure {
-                    using (let scope = Scope.open()) {
+                    using (let scope = ConcurrentScope.open()) {
                         let task = scope.start(() -> {
                             while (not unsafe Thread.currentThread()!!.isInterrupted()) {
                                 // Wait for cancellation.

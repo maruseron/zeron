@@ -985,7 +985,12 @@ final class ExpressionFlowEmitter {
             return;
         }
         if (handle.frameHandler() != null) {
-            emitResumingHandle(context, composer, handle);
+            final var frameType = (FunctionDescriptor) handle.frameHandler().getType();
+            if (frameType.arity() == 2 && handle.level3Body() != null) {
+                emitLevel3Handle(context, composer, handle);
+            } else {
+                emitResumingHandle(context, composer, handle);
+            }
             return;
         }
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
@@ -1156,6 +1161,110 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = handle.getType();
     }
 
+    /// Emits a level-3 handle: the protected expression runs in a provider session so `k` is a
+    /// real `Cont`, and resuming `k` drives that session. Abortive arms stay on the exception path.
+    private static void emitLevel3Handle(final CompilationContext context,
+                                         final CodeBuilder composer,
+                                         final Expr.Handle handle) {
+        final var bodyType = (FunctionDescriptor) handle.level3Body().getType();
+        final var frameType = (FunctionDescriptor) handle.frameHandler().getType();
+        final var bodyValue = declareLoopLocal(context, nextLoopTemporary(context, "level3Body"), bodyType);
+        final var frameValue = declareLoopLocal(context, nextLoopTemporary(context, "level3Handler"), frameType);
+
+        beginScope(context);
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var handler = composer.newLabel();
+        final var escape = composer.newLabel();
+        final var done = composer.newLabel();
+
+        emitExpr(context, composer, handle.level3Body());
+        storePipelineValue(context, composer, bodyValue, bodyType);
+        emitExpr(context, composer, handle.frameHandler());
+        storePipelineValue(context, composer, frameValue, frameType);
+
+        final var methodHandle = ClassDesc.of("java.lang.invoke.MethodHandle");
+        composer.labelBinding(start);
+        loadPipelineValue(context, composer, bodyValue, bodyType);
+        composer.ldc(MethodHandleDesc.ofMethod(DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL,
+                TypeDescriptor.toJavaClassDesc(bodyType), "invoke", toJavaMethodDescriptor(bodyType)));
+        loadPipelineValue(context, composer, frameValue, frameType);
+        composer.ldc(MethodHandleDesc.ofMethod(DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL,
+                TypeDescriptor.toJavaClassDesc(frameType), "invoke", toJavaMethodDescriptor(frameType)));
+        composer.invokestatic(ClassDesc.of("zeron.runtime.Level3Support"), "run",
+                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object,
+                        methodHandle, ConstantDescs.CD_Object, methodHandle));
+        emitConversion(context, composer, TypeDescriptor.ofAny(), handle.getType());
+        composer.goto_(done);
+        composer.labelBinding(end);
+
+        composer.labelBinding(escape);
+        final var escaped = declareLoopLocal(context, nextLoopTemporary(context, "handlerEscape"),
+                TypeDescriptor.ofAny());
+        storePipelineValue(context, composer, escaped, TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, escaped, TypeDescriptor.ofAny());
+        composer.checkcast(ClassDesc.of("zeron.runtime.Level3Support$HandlerEscape"));
+        composer.invokevirtual(ClassDesc.of("zeron.runtime.Level3Support$HandlerEscape"), "getCause",
+                MethodTypeDesc.of(ConstantDescs.CD_Throwable));
+        composer.athrow();
+
+        composer.labelBinding(handler);
+        final var exception = declareLoopLocal(context, nextLoopTemporary(context, "handlerException"),
+                TypeDescriptor.ofAny());
+        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
+                TypeDescriptor.ofAny());
+        storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(ClassDesc.of("zeron.runtime.RaisedEffect"));
+        composer.invokevirtual(ClassDesc.of("zeron.runtime.RaisedEffect"), "payload",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
+        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+
+        final var orderedArms = orderedHandlerArms(context, handle.arms).stream()
+                .filter(arm -> arm.resumeBinding() == null).toList();
+        for (final var arm : orderedArms) {
+            final var next = composer.newLabel();
+            beginScope(context);
+            try {
+                declareMatchBindings(context, arm.pattern());
+                emitExactEffectMatchTest(context, composer, payload, arm.resolvedEffectType(), next);
+                emitMatchPattern(context, composer, arm.pattern(), payload, next);
+                if (arm.suppressedBinding() != null) {
+                    final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                    final var suppressed = declareLoopLocal(
+                            context, arm.suppressedBinding(), suppressedType);
+                    loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+                    composer.checkcast(ClassDesc.of("zeron.runtime.RaisedEffect"));
+                    composer.invokevirtual(ClassDesc.of("zeron.runtime.RaisedEffect"), "suppressedOutcomes",
+                            MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    composer.astore(suppressed.lvt() + context.localSlotOffset);
+                }
+                if (arm.guard() != null) {
+                    emitExpr(context, composer, arm.guard());
+                    composer.ifeq(next);
+                }
+                emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, handle.getType());
+            } finally {
+                endScope(context);
+            }
+            composer.goto_(done);
+            composer.labelBinding(next);
+        }
+
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(ClassDesc.of("zeron.runtime.RaisedEffect"));
+        composer.athrow();
+
+        composer.labelBinding(done);
+        composer.exceptionCatch(start, end, escape,
+                ClassDesc.of("zeron.runtime.Level3Support$HandlerEscape"));
+        composer.exceptionCatch(start, end, handler, ClassDesc.of("zeron.runtime.RaisedEffect"));
+        endScope(context);
+        context.lastEmittedType = handle.getType();
+    }
+
     /// Orders handler cases most-specific first, independent of source order. Incomparable cases
     /// keep their relative order; their overlap is reported as an ambiguity.
     private static List<Expr.HandleArm> orderedHandlerArms(final CompilationContext context,
@@ -1251,20 +1360,27 @@ final class ExpressionFlowEmitter {
                 TypeDescriptor.ofAny());
         emitVariable(context, composer, dispatch.carrier);
         storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
-        emitHandlerCases(context, composer, dispatch.arms, dispatch.getType(), exception);
+        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
+                TypeDescriptor.ofAny());
+        if (dispatch.payloadOnly()) {
+            loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        } else {
+            loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+            composer.checkcast(ClassDesc.of("zeron.runtime.RaisedEffect"));
+            composer.invokevirtual(ClassDesc.of("zeron.runtime.RaisedEffect"), "payload",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object));
+        }
+        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+        emitHandlerCases(context, composer, dispatch.arms, dispatch.getType(), exception, payload,
+                dispatch.continuationToken(), dispatch.payloadOnly());
         context.lastEmittedType = dispatch.getType();
     }
 
     private static void emitHandlerCases(final CompilationContext context, final CodeBuilder composer,
                                          final List<Expr.HandleArm> arms, final TypeDescriptor resultType,
-                                         final Bind exception) {
+                                         final Bind exception, final Bind payload,
+                                         final Token continuationToken, final boolean payloadOnly) {
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
-        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
-                TypeDescriptor.ofAny());
-        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
-        composer.checkcast(carrier);
-        composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
-        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
         final var done = composer.newLabel();
 
         final var orderedArms = orderedHandlerArms(context, arms);
@@ -1273,16 +1389,29 @@ final class ExpressionFlowEmitter {
             beginScope(context);
             try {
                 declareMatchBindings(context, arm.pattern());
+                if (continuationToken != null && arm.resumeBinding() != null) {
+                    // Every case names its own continuation, but they all alias the single
+                    // level-3 `Cont` lambda parameter.
+                    final var binding = declareLoopLocal(context, arm.resumeBinding(),
+                            arm.resumeTokenType());
+                    emitVariable(context, composer, continuationToken);
+                    composer.astore(binding.lvt() + context.localSlotOffset);
+                }
                 emitExactEffectMatchTest(context, composer, payload, arm.resolvedEffectType(), next);
                 emitMatchPattern(context, composer, arm.pattern(), payload, next);
                 if (arm.suppressedBinding() != null) {
                     final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
                     final var suppressed = declareLoopLocal(
                             context, arm.suppressedBinding(), suppressedType);
-                    loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
-                    composer.checkcast(carrier);
-                    composer.invokevirtual(carrier, "suppressedOutcomes",
-                            MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    if (payloadOnly) {
+                        // A level-3 suspension has no suppressed-outcome view.
+                        composer.aconst_null();
+                    } else {
+                        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+                        composer.checkcast(carrier);
+                        composer.invokevirtual(carrier, "suppressedOutcomes",
+                                MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    }
                     composer.astore(suppressed.lvt() + context.localSlotOffset);
                 }
                 if (arm.guard() != null) {
@@ -1290,7 +1419,24 @@ final class ExpressionFlowEmitter {
                     composer.ifeq(next);
                 }
                 emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
-                emitExpr(context, composer, arm.expression());
+                if (arm.tailTransfer() && continuationToken != null) {
+                    // Syntactic tail case: abandon this frame instead of calling `resume`, so the
+                    // runtime loop drives the body and the case stack does not grow per suspension.
+                    // Work the block performs before the resume still runs here.
+                    if (arm.expression() instanceof Expr.ValueBlock block) {
+                        StatementEmitter.emitStmts(context, composer, block.statements);
+                    }
+                    emitVariable(context, composer, arm.resumeBinding());
+                    composer.checkcast(ClassDesc.of("zeron.runtime.Cont"));
+                    emitExpr(context, composer, arm.tailResumeArgument());
+                    emitBox(context, composer, context.lastEmittedType);
+                    composer.invokestatic(ClassDesc.of("zeron.runtime.Level3Support"), "transfer",
+                            MethodTypeDesc.of(ConstantDescs.CD_Object,
+                                    ClassDesc.of("zeron.runtime.Cont"), ConstantDescs.CD_Object));
+                    context.lastEmittedType = TypeDescriptor.ofAny();
+                } else {
+                    emitExpr(context, composer, arm.expression());
+                }
                 emitConversion(context, composer, context.lastEmittedType, resultType);
             } finally {
                 endScope(context);
@@ -1299,9 +1445,18 @@ final class ExpressionFlowEmitter {
             composer.labelBinding(next);
         }
 
-        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
-        composer.checkcast(carrier);
-        composer.athrow();
+        if (payloadOnly) {
+            composer.new_(carrier);
+            composer.dup();
+            loadPipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+            composer.invokespecial(carrier, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+            composer.athrow();
+        } else {
+            loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+            composer.checkcast(carrier);
+            composer.athrow();
+        }
         composer.labelBinding(done);
     }
 
@@ -1491,9 +1646,9 @@ final class ExpressionFlowEmitter {
         final var matched = composer.newLabel();
         final var unmatched = composer.newLabel();
         final var result = composer.newLabel();
-        final var less = ClassDesc.of("zeron.lang.Ordering$$sum$LT");
-        final var equal = ClassDesc.of("zeron.lang.Ordering$$sum$EQ");
-        final var greater = ClassDesc.of("zeron.lang.Ordering$$sum$GT");
+        final var less = ClassDesc.of("zeron.lang.Ordering$$sum$Less");
+        final var equal = ClassDesc.of("zeron.lang.Ordering$$sum$Equal");
+        final var greater = ClassDesc.of("zeron.lang.Ordering$$sum$Greater");
         final var checkEqual = composer.newLabel();
         final var checkGreater = composer.newLabel();
 

@@ -218,16 +218,16 @@ public class LspWorkspaceTest {
     @Test
     public void formatsLongStandardLibrarySignaturesInHover() throws Exception {
         final var source = """
-                import zeron.serialization.json.jsonModel;
+                import zeron.serialization.json.Json.model;
 
                 fn main(): Unit {}
                 """;
         final var project = project(source);
         final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
-        final var hover = hoverAt(snapshot, project.entry(), source, "jsonModel");
+        final var hover = hoverAt(snapshot, project.entry(), source, "model");
 
-        assertTrue("Unexpected jsonModel hover: " + hover,
-                hover.contains("fn jsonModel<T admits nullable + mutable>(\n    model: Model<T>,"));
+        assertTrue("Unexpected Json.model hover: " + hover,
+                hover.contains("fn model<T admits nullable + mutable>(\n    model: Model<T>,"));
         assertTrue("Missing owner parameter: " + hover,
                 hover.contains("owner: T,"));
         assertTrue("Missing block parameter: " + hover,

@@ -1,0 +1,8 @@
+package com.maruseron.zeron.runtime.random;
+
+public external class RandomSupport = "com.maruseron.zeron.runtime.random.RandomSupport" {
+    public static entropyState(): Array<Long>;
+    public static lowInt(value: Long): Int;
+    public static lowByte(value: Long): Byte;
+    public static unsignedRemainder(value: Long, bound: Long): Long;
+}

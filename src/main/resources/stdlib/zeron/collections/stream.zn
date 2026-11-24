@@ -48,6 +48,11 @@ class ConcatStream<T admits mutable> is Iterable<T> {
                     case Yield(value) -> Yield(value);
                     case Done() -> extractNext();
                 };
+
+            public mut close(): Unit {
+                l.close();
+                r.close();
+            }
         };
     }
 }
@@ -69,6 +74,8 @@ class MappedStream<T admits mutable, R admits mutable> is Iterable<R> {
                     case Step.Done() -> Step<R>.Done();
                 };
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -100,6 +107,11 @@ class FlatMappedStream<T admits mutable, R admits mutable> is Iterable<R> {
                 }
                 return Step<R>.Done();
             }
+
+            public mut close(): Unit {
+                this.inner.close();
+                this.source.close();
+            }
         };
     }
 }
@@ -130,6 +142,11 @@ class MonadFlatMappedStream<T admits mutable, R admits mutable> is Iterable<R> {
                     item = this.inner.next();
                 }
                 return Step<R>.Done();
+            }
+
+            public mut close(): Unit {
+                this.inner.close();
+                this.source.close();
             }
         };
     }
@@ -163,6 +180,11 @@ class AppliedStream<A admits mutable, B admits mutable> is Iterable<B> {
                 }
                 return Step<B>.Done();
             }
+
+            public mut close(): Unit {
+                this.currentValues.close();
+                this.functions.close();
+            }
         };
     }
 }
@@ -190,6 +212,8 @@ class FilteredStream<T admits mutable> is Iterable<T> {
                 }
                 return Step<T>.Done();
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -210,6 +234,8 @@ class TakenStream<T admits mutable> is Iterable<T> {
                 this.remaining = this.remaining - 1;
                 return this.source.next();
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -241,6 +267,8 @@ class DroppedStream<T admits mutable> is Iterable<T> {
                 }
                 return this.source.next();
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -271,6 +299,8 @@ class DroppedWhileStream<T admits mutable> is Iterable<T> {
                 }
                 return this.source.next();
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -303,6 +333,8 @@ class TakenWhileStream<T admits mutable> is Iterable<T> {
                 }
                 return Step<T>.Done();
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }
@@ -339,6 +371,8 @@ class SortedByStream<T admits mutable> is Iterable<T> {
                 this.position = this.position + 1;
                 return Step.Yield(value);
             }
+
+            public mut close(): Unit = this.source.close();
         };
     }
 }

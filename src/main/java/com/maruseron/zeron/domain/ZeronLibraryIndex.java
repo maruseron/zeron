@@ -2423,6 +2423,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(nominal.name());
             }
             case GenericDescriptor generic -> {
+                // Arguments may be references to declaration type parameters. That is how an open
+                // effect application such as `Yield<T>` survives separate compilation without an
+                // extra wire kind; closed applications use the same encoding.
                 output.writeByte(9);
                 output.writeUTF(generic.baseType().name());
                 output.writeInt(generic.typeParameters().size());
@@ -2509,6 +2512,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             case 7 -> TypeDescriptor.ofString();
             case 8 -> TypeDescriptor.ofName(input.readUTF());
             case 9 -> {
+                // Type-parameter references are resolved through ReadContext, so an open effect
+                // application is rebound to the declaring parameter and an unbound reference is
+                // rejected instead of being silently erased.
                 final var base = TypeDescriptor.ofName(input.readUTF());
                 final var arguments = new ArrayList<TypeDescriptor>();
                 for (int i = 0, count = readCount(input); i < count; i++) arguments.add(readType(input, context));

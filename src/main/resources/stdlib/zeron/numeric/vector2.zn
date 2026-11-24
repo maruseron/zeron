@@ -6,13 +6,8 @@ import zeron.lang.Display;
 ///
 /// Component-wise operations (`add`, `subtract`, `multiply`, `abs`, `signum`, `negate`) combine
 /// the components independently, and `dot` and `cross` follow the usual plane-vector definitions.
-/// The class implements `Numeric<Vector2<T>>` by delegating to its components.
-public class Vector2<T: Numeric<T>> {
-    /// The first component.
-    public property x: T;
-    /// The second component.
-    public property y: T;
-
+/// The data class implements `Numeric<Vector2<T>>` by delegating to its components.
+public data class Vector2<T: Numeric<T>>(x: T, y: T) {
     /// Returns the component-wise sum of this vector and `other`.
     public add(other: Vector2<T>): Vector2<T> = Vector2.new(
         this.x + other.x,

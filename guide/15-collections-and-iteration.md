@@ -48,12 +48,13 @@ public type Step<T admits nullable> =
       Yield(value: T)
     | Done;
 
-public contract Iterable<T admits nullable> {
+public contract Iterable<T admits mutable> {
     iterator(): &Iterator<T>;
 }
 
-public contract Iterator<T admits nullable> {
+public contract Iterator<T admits nullable + mutable> {
     mut next(): Step<T>;
+    default mut close(): Unit = ();
 }
 ```
 
@@ -66,6 +67,36 @@ The loop takes care of asking for items until there are no more.
 An iterator is mutable because it remembers its position and moves forward each time `next()` is
 called. If you define a type that conforms to `Iterable<T>` and returns an appropriate iterator,
 your type can be used in `for` loops too.
+
+`close` releases a cursor's resources. Its default does nothing, so ordinary iterators need no
+implementation. `for` calls it on the cursor it owns after exhaustion, `break`, `return`, and an
+exceptional exit, and the `Stream` adapters forward it to their upstream iterator. A resource-backed
+iterator should make `close` idempotent.
+
+## Pull generators
+
+`generator<T>` turns a body that performs `Yield<T>` into a replayable source:
+
+```zeron
+import zeron.collections.generator;
+import zeron.lang.Yield;
+
+let body: () -> Unit performs Yield<Int> = () -> {
+    perform Yield<Int>(0);
+    perform Yield<Int>(1);
+    perform Yield<Int>(2);
+};
+let numbers = generator<Int>(body);
+
+for (let number in numbers) println(number);
+```
+
+The body starts on the first `next()` and stays suspended between pulls. Each `iterator()` call
+starts a fresh body, so the source can be traversed repeatedly; the returned `Generator<T>` is a
+one-shot cursor with `cancel()` and `isDone()`. `cancel()` reports cleanup failure as
+`DisposeFailure`; `close()`, which `for` uses, does not. The body may leave only `Yield<T>` and the
+`DisposeFailure` that `using` cleanup can raise unhandled, because `next()` has no effect row. The
+signature also accepts a trailing lambda: `generator<Int> { perform Yield<Int>(1); }`.
 
 ## Ranges of integers
 

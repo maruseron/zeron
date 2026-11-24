@@ -96,6 +96,38 @@
                             <goal>run</goal>
                         </goals>
                     </execution>
+                    <!-- The Loom provider is the only source that names jdk.internal.vm.
+                         Compile it separately because release mode cannot be combined with a
+                         system-module export. The core runtime and normal compile never link
+                         the internal type. -->
+                    <execution>
+                        <id>compile-loom-continuation-provider</id>
+                        <phase>process-classes</phase>
+                        <configuration>
+                            <target>
+                                <javac srcdir="${project.basedir}/src/continuation/java"
+                                       destdir="${project.build.outputDirectory}"
+                                       source="25"
+                                       target="25"
+                                       encoding="UTF-8"
+                                       debug="true"
+                                       fork="true"
+                                       executable="${java.home}/bin/javac"
+                                       includeantruntime="false"
+                                       failonerror="true">
+                                    <classpath>
+                                        <pathelement location="${project.build.outputDirectory}"/>
+                                    </classpath>
+                                    <compilerarg value="--add-exports"/>
+                                    <compilerarg value="java.base/jdk.internal.vm=ALL-UNNAMED"/>
+                                    <compilerarg value="-Xlint:-options"/>
+                                </javac>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
                     <!-- Give every parallel test fork a clean working directory. Many tests write
                          relative output such as dist/ and target/, so sharing them would race. -->
                     <execution>

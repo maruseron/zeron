@@ -237,17 +237,17 @@ public final class OperatorTest {
                 }
                 witness zeron.lang.Comparable<Rank> for Rank {
                     fn compareTo(other: Rank): zeron.lang.Ordering =
-                        if (this.value < other.value) then zeron.lang.Ordering.LT()
-                        else if (this.value > other.value) then zeron.lang.Ordering.GT()
-                        else zeron.lang.Ordering.EQ();
+                        if (this.value < other.value) then zeron.lang.Ordering.Less()
+                        else if (this.value > other.value) then zeron.lang.Ordering.Greater()
+                        else zeron.lang.Ordering.Equal();
                 }
                 class NominalRank is zeron.lang.Comparable<NominalRank> {
                     public property value: Int;
                     public constructor new;
                     public compareTo(other: NominalRank): zeron.lang.Ordering =
-                        if (this.value < other.value) then zeron.lang.Ordering.LT()
-                        else if (this.value > other.value) then zeron.lang.Ordering.GT()
-                        else zeron.lang.Ordering.EQ();
+                        if (this.value < other.value) then zeron.lang.Ordering.Less()
+                        else if (this.value > other.value) then zeron.lang.Ordering.Greater()
+                        else zeron.lang.Ordering.Equal();
                 }
                 fn rankLess(left: Rank, right: Rank): Boolean = left < right;
                 fn rankLessOrEqual(left: Rank, right: Rank): Boolean = left <= right;

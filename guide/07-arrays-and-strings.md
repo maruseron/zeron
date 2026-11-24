@@ -54,13 +54,13 @@ let startsWithZ = title.startsWith("Z");
 These operations let you ask basic questions about text without treating it as a number or
 modifying it.
 
-`charAt` and `at` read one character by UTF-16 code-unit index and return `Option<Char>`, so an
-out-of-range index is `None` rather than a failure. `toLowerCase` and `toUpperCase` ignore the host
+`at` reads one character by UTF-16 code-unit index and returns `Option<Char>`, so an
+out-of-range index is `None` rather than a failure. `charAt` remains as a compatibility bridge. `toLowerCase` and `toUpperCase` ignore the host
 locale, `trim`, `trimStart`, and `trimEnd` remove surrounding whitespace, `isBlank` reports text
 that is empty or only whitespace, and `replace` replaces literal text:
 
 ```zeron
-let initial = title.charAt(0).getOrElse('?');
+let initial = title.at(0).getOrElse('?');
 let normalized = "  Zeron Guide  ".trim().toLowerCase();
 let noSpaces = "a b c".replace(" ", "");
 ```

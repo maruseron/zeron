@@ -51,7 +51,9 @@ final class ResolutionContext {
     final Set<Stmt.Function> newtypeWitnessHelpers =
             Collections.newSetFromMap(new IdentityHashMap<>());
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
-    final Map<String, Deque<TypeDescriptor>> resumeTokens = new LinkedHashMap<>();
+    final Map<String, Deque<ResumeToken>> resumeTokens = new LinkedHashMap<>();
+    /// A response token for a level-2 tail resume, or a `Cont<Response, T>` for a level-3 case.
+    record ResumeToken(TypeDescriptor response, TypeDescriptor result, boolean continuation) {}
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
     private final Deque<OpeningScope> openingScopes = new ArrayDeque<>();
     boolean resolvingOpeningCondition;

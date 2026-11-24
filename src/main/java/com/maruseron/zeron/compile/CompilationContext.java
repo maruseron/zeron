@@ -30,6 +30,7 @@ import java.util.Objects;
 
 final class CompilationContext {
     record ActiveUsing(Bind resources, Bind acquiredCount) {}
+    record ActiveIterator(Bind local, TypeDescriptor type) {}
 
     final ClassFile classFile;
     List<Stmt> topLevelDeclarations;
@@ -65,6 +66,8 @@ final class CompilationContext {
     final Deque<Label> loopContinueLabels = new ArrayDeque<>();
     final Deque<Integer> loopUsingDepths = new ArrayDeque<>();
     final Deque<ActiveUsing> activeUsingScopes = new ArrayDeque<>();
+    final Deque<Integer> loopIteratorDepths = new ArrayDeque<>();
+    final Deque<ActiveIterator> activeIterators = new ArrayDeque<>();
 
     CompilationContext(final List<CompilationUnit> units,
                        final String mainClassName,

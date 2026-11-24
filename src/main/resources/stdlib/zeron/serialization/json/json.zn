@@ -14,57 +14,74 @@ public type JsonError =
       Encode(message: String)
     | Parse(message: String, offset: Int, line: Int, column: Int);
 
-public fn parse(text: String): Result<&JsonValue, JsonError> {
-    let result = JsonSupport.parse(text);
-    if (result.isSuccess()) return Result.Ok(result.value());
-    let error = result.error();
-    return Result.Err(JsonError.Parse(
-        error.message(),
-        error.offset(),
-        error.line(),
-        error.column()
-    ));
-}
+/// Operations over the JSON value model.
+namespace Json {
+    /// Parses JSON text into a JSON value.
+    ///
+    /// A syntax error carries the offset, line, and column reported by the parser.
+    public fn parse(text: String): Result<&JsonValue, JsonError> {
+        let result = JsonSupport.parse(text);
+        if (result.isSuccess()) return Result.Ok(result.value());
+        let error = result.error();
+        return Result.Err(JsonError.Parse(
+            error.message(),
+            error.offset(),
+            error.line(),
+            error.column()
+        ));
+    }
 
-public fn number(lexeme: String): Result<&JsonValue, JsonError> {
-    let result = JsonSupport.number(lexeme);
-    if (result.isSuccess()) return Result.Ok(result.value());
-    let error = result.error();
-    return Result.Err(JsonError.Parse(
-        error.message(),
-        error.offset(),
-        error.line(),
-        error.column()
-    ));
-}
+    /// Parses one JSON number lexeme into a JSON value.
+    public fn number(lexeme: String): Result<&JsonValue, JsonError> {
+        let result = JsonSupport.number(lexeme);
+        if (result.isSuccess()) return Result.Ok(result.value());
+        let error = result.error();
+        return Result.Err(JsonError.Parse(
+            error.message(),
+            error.offset(),
+            error.line(),
+            error.column()
+        ));
+    }
 
-public fn stringify(value: &JsonValue): Result<String, JsonError> {
-    let result = JsonSupport.stringify(value);
-    if (result.isSuccess()) return Result.Ok(result.text());
-    let error = result.error();
-    return Result.Err(JsonError.Parse(
-        error.message(),
-        error.offset(),
-        error.line(),
-        error.column()
-    ));
-}
+    /// Writes `value` as compact JSON text.
+    public fn stringify(value: &JsonValue): Result<String, JsonError> {
+        let result = JsonSupport.stringify(value);
+        if (result.isSuccess()) return Result.Ok(result.text());
+        let error = result.error();
+        return Result.Err(JsonError.Parse(
+            error.message(),
+            error.offset(),
+            error.line(),
+            error.column()
+        ));
+    }
 
-public fn json(block: &JsonObjectBuilder.() -> Unit): Result<&JsonValue, JsonError> {
-    let builder = JsonObjectBuilder.empty();
-    builder.block();
-    return builder.build();
-}
+    /// Builds a JSON object from the members that `block` writes.
+    public fn build(block: &JsonObjectBuilder.() -> Unit): Result<&JsonValue, JsonError> {
+        let builder = JsonObjectBuilder.empty();
+        builder.block();
+        return builder.build();
+    }
 
-public fn jsonModel<T admits nullable + mutable>(
-    model: Model<T>, owner: T, block: &JsonModelObjectBuilder<T>.() -> Unit
-): Result<&JsonValue, JsonError> {
-    let builder = JsonModelObjectBuilder.of(model, owner);
-    builder.block();
-    return builder.build();
-}
+    /// Builds a JSON object from the fields that `block` selects through `model`.
+    public fn model<T admits nullable + mutable>(
+        model: Model<T>, owner: T, block: &JsonModelObjectBuilder<T>.() -> Unit
+    ): Result<&JsonValue, JsonError> {
+        let builder = JsonModelObjectBuilder.of(model, owner);
+        builder.block();
+        return builder.build();
+    }
 
-public fn nullValue(): &JsonValue = JsonValue.nullValue();
-public fn booleanValue(value: Boolean): &JsonValue = JsonValue.booleanValue(value);
-public fn newArray(): &JsonArray = JsonArray.new();
-public fn newObject(): &JsonObject = JsonObject.new();
+    /// Returns the JSON null value.
+    public fn nullValue(): &JsonValue = JsonValue.nullValue();
+
+    /// Returns a JSON boolean holding `value`.
+    public fn booleanValue(value: Boolean): &JsonValue = JsonValue.booleanValue(value);
+
+    /// Returns a new empty JSON array.
+    public fn emptyArray(): &JsonArray = JsonArray.new();
+
+    /// Returns a new empty JSON object.
+    public fn emptyObject(): &JsonObject = JsonObject.new();
+}

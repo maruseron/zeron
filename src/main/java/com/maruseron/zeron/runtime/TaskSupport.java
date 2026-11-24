@@ -1,12 +1,14 @@
 package com.maruseron.zeron.runtime;
 
+import zeron.runtime.CancellationSupport;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 
-/// Host-side handle for one task started by `zeron.concurrent.Scope`.
+/// Host-side handle for one task started by `zeron.concurrent.ConcurrentScope`.
 ///
 /// The task body and result receiver are ordinary Zeron function objects. They are invoked through
 /// their generated `invoke` method so the runtime accepts effectful bodies without converting them
@@ -16,9 +18,11 @@ public final class TaskSupport {
     private final ScopeSupport scope;
     private final CountDownLatch finished = new CountDownLatch(1);
     private final FutureTask<Void> future;
+    private final CancellationSupport.Request cancellation = new CancellationSupport.Request();
     private volatile boolean started;
-    private volatile boolean cancelled;
+    private volatile ScopeSupport.Cause cancellationCause;
     private volatile Throwable failure;
+    private volatile boolean failureObserved;
 
     TaskSupport(final ScopeSupport scope, final Object block, final Object receive) {
         this.scope = scope;
@@ -43,6 +47,26 @@ public final class TaskSupport {
         return scope;
     }
 
+    ScopeSupport.Cause cancellationCause() {
+        return cancellationCause;
+    }
+
+    Throwable failure() {
+        return failure;
+    }
+
+    boolean failureObserved() {
+        return failureObserved;
+    }
+
+    boolean isGenuineFailure() {
+        return failure != null && cancellationCause == null;
+    }
+
+    void markFailureObserved() {
+        failureObserved = true;
+    }
+
     /// Waits for a task without re-throwing its outcome. This is the operation an `Await`
     /// handler uses; the typed join still reports failure and cancellation.
     public static void waitDone(final TaskSupport task) {
@@ -65,12 +89,26 @@ public final class TaskSupport {
     /// Waits for the task and re-raises its captured effect, host failure, or cancellation.
     public static void await(final TaskSupport task) {
         task.awaitFinished();
-        if (task.cancelled) {
-            final var cancellation = new CancellationException("The task was cancelled.");
-            if (task.failure != null) cancellation.addSuppressed(task.failure);
+        final var cause = task.cancellationCause;
+        if (cause == ScopeSupport.Cause.SCOPE_FAILURE) {
+            final var primary = task.scope.primaryFailure();
+            if (primary != null && primary.failure != null) {
+                primary.failureObserved = true;
+                rethrow(primary.failure);
+            }
+        }
+        if (cause != null) {
+            final var cancellation = new CancellationException();
+            if (task.failure != null) {
+                task.failureObserved = true;
+                cancellation.addSuppressed(task.failure);
+            }
             throw cancellation;
         }
-        if (task.failure != null) sneakyThrow(task.failure);
+        if (task.failure != null) {
+            task.failureObserved = true;
+            rethrow(task.failure);
+        }
     }
 
     public boolean isDone() {
@@ -78,34 +116,51 @@ public final class TaskSupport {
     }
 
     public boolean isCancelled() {
-        return cancelled;
+        return cancellationCause != null;
     }
 
     public void cancel() {
+        cancelFromScope(ScopeSupport.Cause.USER);
+    }
+
+    void cancelFromScope(final ScopeSupport.Cause cause) {
         if (isDone()) return;
-        cancelled = true;
-        // Interrupt a running virtual thread so blocking calls and `using` cleanup can observe
-        // cancellation. A task that has not started is prevented from running at all.
+        synchronized (this) {
+            if (cancellationCause != null) return;
+            cancellationCause = cause;
+        }
+        // The record reaches a body suspended in a continuation through the level-3 driver's
+        // checkpoints; the interrupt wakes an interruptible wait on the task thread, and a task
+        // that has not started is prevented from running at all.
+        cancellation.cancel();
         future.cancel(true);
     }
 
     private void run(final Object block, final Object receive) {
         started = true;
+        CancellationSupport.enter(cancellation);
         try {
-            if (cancelled || Thread.currentThread().isInterrupted()) {
-                cancelled = true;
+            if (cancellationCause != null || Thread.currentThread().isInterrupted()) {
+                if (cancellationCause == null) cancellationCause = ScopeSupport.Cause.USER;
                 return;
             }
+            CancellationSupport.checkpoint();
             final var value = invoke(block, new Object[0]);
             // Cancellation wins over an already-produced value: the scope promised that a cancelled
             // task never publishes a result.
-            if (cancelled) return;
+            if (cancellationCause != null) return;
             invoke(receive, new Object[]{value});
         } catch (final Throwable throwable) {
             failure = throwable;
+            scope.recordTaskFailure(this, throwable);
         } finally {
+            CancellationSupport.exit();
             finished.countDown();
         }
+    }
+
+    static void rethrow(final Throwable throwable) {
+        TaskSupport.<RuntimeException>sneakyThrowRaw(throwable);
     }
 
     private static Object invoke(final Object callable, final Object[] arguments) throws Throwable {
@@ -140,7 +195,7 @@ public final class TaskSupport {
     }
 
     @SuppressWarnings("unchecked")
-    private static <T, E extends Throwable> T sneakyThrow(final Throwable throwable) throws E {
+    private static <E extends Throwable> void sneakyThrowRaw(final Throwable throwable) throws E {
         throw (E) throwable;
     }
 }

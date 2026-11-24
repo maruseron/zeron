@@ -1,0 +1,23 @@
+package com.maruseron.zeron.runtime.parsers.xml;
+
+public external class XmlNode = "com.maruseron.zeron.runtime.parsers.xml.XmlNode" {
+    public qualifiedName(): String;
+    public namespaceUri(): String;
+    public text(): String;
+    public attributeNames(): Array<String>;
+    public attribute(name: String): String?;
+    public childCount(): Int;
+    public child(index: Int): &XmlNode?;
+}
+
+public external class XmlParseResult = "com.maruseron.zeron.runtime.parsers.xml.XmlParseResult" {
+    public isSuccess(): Boolean;
+    public root(): &XmlNode;
+    public message(): String;
+    public line(): Int;
+    public column(): Int;
+}
+
+public external class XmlSupport = "com.maruseron.zeron.runtime.parsers.xml.XmlSupport" {
+    public static parse(text: String): &XmlParseResult;
+}

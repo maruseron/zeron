@@ -49,14 +49,14 @@ public final class MathApiTest {
                 fn rationalThreeTenths(): Rational = 3 / 10;
                 fn integerComparison(): Int {
                     let ordering = compare<Integer>(5n, 2n);
-                    if (ordering matches Ordering.GT()) return 1;
-                    if (ordering matches Ordering.LT()) return -1;
+                    if (ordering matches Ordering.Greater()) return 1;
+                    if (ordering matches Ordering.Less()) return -1;
                     return 0;
                 }
                 fn rationalComparison(): Int {
                     let ordering = compare<Rational>(rationalThird(), rationalHalf());
-                    if (ordering matches Ordering.LT()) return -1;
-                    if (ordering matches Ordering.GT()) return 1;
+                    if (ordering matches Ordering.Less()) return -1;
+                    if (ordering matches Ordering.Greater()) return 1;
                     return 0;
                 }
                 fn equalRationals(): Boolean =

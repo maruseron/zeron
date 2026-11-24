@@ -1,0 +1,586 @@
+package zeron.buffer;
+
+import com.maruseron.zeron.runtime.buffer.BufferSupport;
+import com.maruseron.zeron.runtime.buffer.TextDecodeResult;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Iterable;
+import zeron.internal.allocateByteArray;
+import zeron.internal.byteArrayToArray;
+import zeron.internal.generateArray;
+import zeron.internal.unwrapSome;
+import zeron.lang.Option;
+import zeron.lang.Pair;
+import zeron.lang.Result;
+
+/// Byte order used by integer and floating-point reads and writes.
+public type ByteOrder =
+      BigEndian
+    | LittleEndian;
+
+/// A failure produced by binary decoding or text decoding.
+public type BufferError =
+      Truncated(needed: Int, remaining: Int)
+    | MalformedVarInt(offset: Int)
+    | InvalidText(offset: Int);
+
+fn byteValue(value: Int): Byte = BufferSupport.toByte(value);
+
+fn hexDigit(code: Int): Int {
+    if (code >= 48 and code <= 57) return code - 48;
+    if (code >= 65 and code <= 70) return code - 55;
+    if (code >= 97 and code <= 102) return code - 87;
+    return -1;
+}
+
+fn hexCharacter(value: Int): Char {
+    if (value < 10) return (48 + value).toChar().getOrElse('?');
+    return (97 + value - 10).toChar().getOrElse('?');
+}
+
+fn base64Digit(code: Int): Int {
+    if (code >= 65 and code <= 90) return code - 65;
+    if (code >= 97 and code <= 122) return code - 71;
+    if (code >= 48 and code <= 57) return code + 4;
+    if (code == 43) return 62;
+    if (code == 47) return 63;
+    return -1;
+}
+
+fn base64Character(value: Int): Char {
+    if (value < 26) return (65 + value).toChar().getOrElse('?');
+    if (value < 52) return (97 + value - 26).toChar().getOrElse('?');
+    if (value < 62) return (48 + value - 52).toChar().getOrElse('?');
+    if (value == 62) return '+';
+    return '/';
+}
+
+fn bytesToArray(values: &ArrayList<Byte>): Array<Byte> {
+    let bytes = allocateByteArray(values.size);
+    let mut index = 0;
+    while (index < values.size) {
+        bytes[index] = values.at(index).getOrElse(BufferSupport.toByte(0));
+        index = index + 1;
+    }
+    return byteArrayToArray(bytes);
+}
+
+/// A growable write-side byte buffer.
+///
+/// Values append at the current end. There is no read cursor and the backing array is never
+/// exposed; `toArray` returns a copy. Growth is geometric.
+public class ByteBuffer {
+    values: &ArrayList<Byte>;
+    public mut property order: ByteOrder;
+
+    private constructor new;
+
+    /// Creates an empty big-endian buffer.
+    public constructor empty() = ByteBuffer.new(ArrayList<Byte>.empty(), ByteOrder.BigEndian());
+
+    /// Creates a big-endian buffer holding a copy of `source`.
+    public constructor fromBytes(source: Array<Byte>) {
+        let result = ByteBuffer.empty();
+        result.putBytes(source);
+        return result;
+    }
+
+    /// The number of bytes written so far.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether no bytes have been written.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// Appends one byte.
+    public mut putByte(value: Byte): Unit {
+        values.add(value);
+    }
+
+    /// Appends every byte of `source`, in order.
+    public mut putBytes(source: Array<Byte>): Unit {
+        let mut index = 0;
+        while (index < source.length) {
+            values.add(source[index]);
+            index = index + 1;
+        }
+    }
+
+    /// Appends `value` as a four-byte integer in the configured byte order.
+    public mut putInt(value: Int): Unit {
+        if (this.order matches ByteOrder.BigEndian()) {
+            this.putByte(byteValue((value >>> 24) & 0xFF));
+            this.putByte(byteValue((value >>> 16) & 0xFF));
+            this.putByte(byteValue((value >>> 8) & 0xFF));
+            this.putByte(byteValue(value & 0xFF));
+        } else {
+            this.putByte(byteValue(value & 0xFF));
+            this.putByte(byteValue((value >>> 8) & 0xFF));
+            this.putByte(byteValue((value >>> 16) & 0xFF));
+            this.putByte(byteValue((value >>> 24) & 0xFF));
+        }
+    }
+
+    /// Appends `value` as an eight-byte integer in the configured byte order.
+    public mut putLong(value: Long): Unit {
+        if (this.order matches ByteOrder.BigEndian()) {
+            let mut shift = 56;
+            while (shift >= 0) {
+                this.putByte(byteValue(((value >>> shift) & 0xFFL).toInt().getOrElse(0)));
+                shift = shift - 8;
+            }
+        } else {
+            let mut shift = 0;
+            while (shift <= 56) {
+                this.putByte(byteValue(((value >>> shift) & 0xFFL).toInt().getOrElse(0)));
+                shift = shift + 8;
+            }
+        }
+    }
+
+    /// Appends `value` as four bytes of its raw IEEE-754 representation.
+    public mut putFloat(value: Float): Unit = this.putInt(BufferSupport.floatToBits(value));
+
+    /// Appends `value` as one byte, `1` for true and `0` for false.
+    public mut putBoolean(value: Boolean): Unit =
+        this.putByte(if (value) then byteValue(1) else byteValue(0));
+
+    /// Appends `value` in unsigned LEB128 form.
+    public mut putVarInt(value: Int): Unit {
+        let mut remaining = value;
+        while ((remaining >>> 7) != 0) {
+            this.putByte(byteValue((remaining & 0x7F) | 0x80));
+            remaining = remaining >>> 7;
+        }
+        this.putByte(byteValue(remaining & 0x7F));
+    }
+
+    /// Appends `value` in unsigned LEB128 form.
+    public mut putVarLong(value: Long): Unit {
+        let mut remaining = value;
+        while ((remaining >>> 7) != 0L) {
+            this.putByte(byteValue(((remaining & 0x7FL).toInt().getOrElse(0)) | 0x80));
+            remaining = remaining >>> 7;
+        }
+        this.putByte(byteValue((remaining & 0x7FL).toInt().getOrElse(0)));
+    }
+
+    /// Removes every byte.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns a copy of the written bytes.
+    public toArray(): Array<Byte> = bytesToArray(this.values);
+}
+
+/// A checked read cursor over one byte array.
+///
+/// Every `get*` returns a `Result` and leaves `position` unchanged on failure. A successful read
+/// advances the cursor by exactly the bytes it consumed.
+public class ByteReader {
+    bytes: Array<Byte>;
+    cursor: Int;
+    public mut property order: ByteOrder;
+
+    private constructor new;
+
+    /// Creates a reader positioned at the start of `bytes`.
+    public constructor over(bytes: Array<Byte>) =
+        ByteReader.new(bytes, 0, ByteOrder.BigEndian());
+
+    /// The current cursor position.
+    public property position: Int {
+        get = this.cursor;
+    }
+
+    /// The number of bytes not yet consumed.
+    public remaining(): Int = this.bytes.length - this.cursor;
+
+    /// Moves the cursor to `position`, returning false when it is outside the array.
+    public mut seek(position: Int): Boolean {
+        if (position < 0 or position > this.bytes.length) return false;
+        this.cursor = position;
+        return true;
+    }
+
+    private mut truncated(needed: Int): Result<Byte, BufferError> =
+        Result<Byte, BufferError>.Err(
+            BufferError.Truncated(needed, this.remaining()));
+
+    /// Reads one byte.
+    public mut getByte(): Result<Byte, BufferError> {
+        if (this.remaining() < 1) return this.truncated(1);
+        let value = this.bytes[this.cursor];
+        this.cursor = this.cursor + 1;
+        return Result<Byte, BufferError>.Ok(value);
+    }
+
+    /// Reads `count` bytes.
+    public mut getBytes(count: Int): Result<Array<Byte>, BufferError> {
+        if (count < 0 or this.remaining() < count) {
+            return Result<Array<Byte>, BufferError>.Err(
+                BufferError.Truncated(if (count < 0) then 0 else count, this.remaining()));
+        }
+        let result = generateArray<Byte>(count, index -> this.bytes[this.cursor + index]);
+        this.cursor = this.cursor + count;
+        return Result<Array<Byte>, BufferError>.Ok(result);
+    }
+
+    /// Reads four bytes as an integer.
+    public mut getInt(): Result<Int, BufferError> {
+        if (this.remaining() < 4) {
+            return Result<Int, BufferError>.Err(
+                BufferError.Truncated(4, this.remaining()));
+        }
+        let b0 = this.bytes[this.cursor].toInt();
+        let b1 = this.bytes[this.cursor + 1].toInt();
+        let b2 = this.bytes[this.cursor + 2].toInt();
+        let b3 = this.bytes[this.cursor + 3].toInt();
+        this.cursor = this.cursor + 4;
+        if (this.order matches ByteOrder.BigEndian()) {
+            return Result<Int, BufferError>.Ok(
+                (b0 << 24) | (b1 << 16) | (b2 << 8) | b3);
+        }
+        return Result<Int, BufferError>.Ok(
+            b0 | (b1 << 8) | (b2 << 16) | (b3 << 24));
+    }
+
+    /// Reads eight bytes as a long.
+    public mut getLong(): Result<Long, BufferError> {
+        if (this.remaining() < 8) {
+            return Result<Long, BufferError>.Err(
+                BufferError.Truncated(8, this.remaining()));
+        }
+        let start = this.cursor;
+        this.cursor = this.cursor + 8;
+        let mut result = 0L;
+        if (this.order matches ByteOrder.BigEndian()) {
+            let mut index = 0;
+            while (index < 8) {
+                result = (result << 8) | this.bytes[start + index].toInt().toLong();
+                index = index + 1;
+            }
+        } else {
+            let mut index = 7;
+            while (index >= 0) {
+                result = (result << 8) | this.bytes[start + index].toInt().toLong();
+                index = index - 1;
+            }
+        }
+        return Result<Long, BufferError>.Ok(result);
+    }
+
+    /// Reads four bytes as a raw IEEE-754 float.
+    public mut getFloat(): Result<Float, BufferError> =
+        match (this.getInt()) {
+            case Ok(bits) -> Result<Float, BufferError>.Ok(BufferSupport.bitsToFloat(bits));
+            case Err(error) -> Result<Float, BufferError>.Err(error);
+        };
+
+    /// Reads one byte as a Boolean; zero is false and every other value is true.
+    public mut getBoolean(): Result<Boolean, BufferError> =
+        match (this.getByte()) {
+            case Ok(value) -> Result<Boolean, BufferError>.Ok(value.toInt() != 0);
+            case Err(error) -> Result<Boolean, BufferError>.Err(error);
+        };
+
+    /// Reads one unsigned LEB128 integer.
+    public mut getVarInt(): Result<Int, BufferError> {
+        let start = this.cursor;
+        let mut result = 0;
+        let mut shift = 0;
+        let mut count = 0;
+        while (count < 5) {
+            if (this.cursor >= this.bytes.length) {
+                return Result<Int, BufferError>.Err(
+                    BufferError.Truncated(1, 0));
+            }
+            let value = this.bytes[this.cursor].toInt();
+            this.cursor = this.cursor + 1;
+            if (count == 4 and (value & 0xF0) != 0) {
+                this.cursor = start;
+                return Result<Int, BufferError>.Err(BufferError.MalformedVarInt(start));
+            }
+            result = result | ((value & 0x7F) << shift);
+            if ((value & 0x80) == 0) return Result<Int, BufferError>.Ok(result);
+            shift = shift + 7;
+            count = count + 1;
+        }
+        this.cursor = start;
+        return Result<Int, BufferError>.Err(BufferError.MalformedVarInt(start));
+    }
+
+    /// Reads one unsigned LEB128 long.
+    public mut getVarLong(): Result<Long, BufferError> {
+        let start = this.cursor;
+        let mut result = 0L;
+        let mut shift = 0;
+        let mut count = 0;
+        while (count < 10) {
+            if (this.cursor >= this.bytes.length) {
+                return Result<Long, BufferError>.Err(
+                    BufferError.Truncated(1, 0));
+            }
+            let value = this.bytes[this.cursor].toInt();
+            this.cursor = this.cursor + 1;
+            if (count == 9 and (value & 0xFE) != 0) {
+                this.cursor = start;
+                return Result<Long, BufferError>.Err(BufferError.MalformedVarInt(start));
+            }
+            result = result | ((value & 0x7F).toLong() << shift);
+            if ((value & 0x80) == 0) return Result<Long, BufferError>.Ok(result);
+            shift = shift + 7;
+            count = count + 1;
+        }
+        this.cursor = start;
+        return Result<Long, BufferError>.Err(BufferError.MalformedVarInt(start));
+    }
+
+    /// Returns the bytes between `start` and `end`, or `None` for an invalid range.
+    public slice(start: Int, end: Int): Option<Array<Byte>> {
+        if (start < 0 or end < start or end > this.bytes.length) {
+            return Option<Array<Byte>>.None();
+        }
+        return Option.Some(generateArray<Byte>(end - start, index -> this.bytes[start + index]));
+    }
+
+    /// Returns a copy of the bytes from `position` to the end.
+    public remainder(): Array<Byte> {
+        let count = this.remaining();
+        return generateArray<Byte>(count, index -> this.bytes[this.cursor + index]);
+    }
+}
+
+/// Unsigned LEB128 and zigzag helpers.
+namespace VarInt {
+    /// Encodes `value` as unsigned LEB128 bytes.
+    public fn encodeInt(value: Int): Array<Byte> {
+        let buffer = ByteBuffer.empty();
+        buffer.putVarInt(value);
+        return buffer.toArray();
+    }
+
+    /// Encodes `value` as unsigned LEB128 bytes.
+    public fn encodeLong(value: Long): Array<Byte> {
+        let buffer = ByteBuffer.empty();
+        buffer.putVarLong(value);
+        return buffer.toArray();
+    }
+
+    /// Decodes an unsigned LEB128 integer starting at `offset`, returning the value and next offset.
+    public fn decodeInt(bytes: Array<Byte>, offset: Int): Result<Pair<Int, Int>, BufferError> {
+        let reader = ByteReader.over(bytes);
+        if (not reader.seek(offset)) {
+            return Result<Pair<Int, Int>, BufferError>.Err(
+                BufferError.Truncated(1, 0));
+        }
+        return match (reader.getVarInt()) {
+            case Ok(value) -> Result<Pair<Int, Int>, BufferError>.Ok(
+                Pair<Int, Int>.new(value, reader.position));
+            case Err(error) -> Result<Pair<Int, Int>, BufferError>.Err(error);
+        };
+    }
+
+    /// Decodes an unsigned LEB128 long starting at `offset`, returning the value and next offset.
+    public fn decodeLong(bytes: Array<Byte>, offset: Int): Result<Pair<Long, Int>, BufferError> {
+        let reader = ByteReader.over(bytes);
+        if (not reader.seek(offset)) {
+            return Result<Pair<Long, Int>, BufferError>.Err(
+                BufferError.Truncated(1, 0));
+        }
+        return match (reader.getVarLong()) {
+            case Ok(value) -> Result<Pair<Long, Int>, BufferError>.Ok(
+                Pair<Long, Int>.new(value, reader.position));
+            case Err(error) -> Result<Pair<Long, Int>, BufferError>.Err(error);
+        };
+    }
+
+    /// Maps a signed integer to an unsigned zigzag integer.
+    public fn zigZagEncodeInt(value: Int): Int = (value << 1) ^ (value >> 31);
+
+    /// Maps a zigzag integer back to its signed value.
+    public fn zigZagDecodeInt(value: Int): Int = (value >>> 1) ^ -(value & 1);
+
+    /// Maps a signed long to an unsigned zigzag long.
+    public fn zigZagEncodeLong(value: Long): Long = (value << 1) ^ (value >> 63);
+
+    /// Maps a zigzag long back to its signed value.
+    public fn zigZagDecodeLong(value: Long): Long = (value >>> 1) ^ -(value & 1L);
+}
+
+/// Lowercase hexadecimal conversion.
+namespace Hex {
+    /// Encodes `bytes` as two lowercase hexadecimal digits per byte.
+    public fn encode(bytes: Array<Byte>): String {
+        let mut result = "";
+        let mut index = 0;
+        while (index < bytes.length) {
+            let value = bytes[index].toInt();
+            result = result
+                + hexCharacter((value >>> 4) & 0xF).toString()
+                + hexCharacter(value & 0xF).toString();
+            index = index + 1;
+        }
+        return result;
+    }
+
+    /// Decodes an even number of hexadecimal digits.
+    public fn decode(text: String): Result<Array<Byte>, BufferError> {
+        if (text.length() % 2 != 0) {
+            return Result<Array<Byte>, BufferError>.Err(
+                BufferError.InvalidText(text.length()));
+        }
+        let mut result = ArrayList<Byte>.empty();
+        let mut index = 0;
+        while (index < text.length()) {
+            let high = hexDigit(text.at(index).getOrElse('?').toInt());
+            let low = hexDigit(text.at(index + 1).getOrElse('?').toInt());
+            if (high < 0) {
+                return Result<Array<Byte>, BufferError>.Err(BufferError.InvalidText(index));
+            }
+            if (low < 0) {
+                return Result<Array<Byte>, BufferError>.Err(
+                    BufferError.InvalidText(index + 1));
+            }
+            result.add(byteValue((high << 4) | low));
+            index = index + 2;
+        }
+        return Result<Array<Byte>, BufferError>.Ok(bytesToArray(result));
+    }
+}
+
+/// Standard-alphabet Base64 conversion with padding.
+namespace Base64 {
+    /// Encodes `bytes` with the standard padded alphabet.
+    public fn encode(bytes: Array<Byte>): String {
+        let mut result = "";
+        let mut index = 0;
+        while (index + 2 < bytes.length) {
+            let first = bytes[index].toInt();
+            let second = bytes[index + 1].toInt();
+            let third = bytes[index + 2].toInt();
+            result = result
+                + base64Character((first >>> 2) & 0x3F).toString()
+                + base64Character(((first & 0x3) << 4) | (second >>> 4)).toString()
+                + base64Character(((second & 0xF) << 2) | (third >>> 6)).toString()
+                + base64Character(third & 0x3F).toString();
+            index = index + 3;
+        }
+        let remaining = bytes.length - index;
+        if (remaining == 1) {
+            let first = bytes[index].toInt();
+            result = result
+                + base64Character((first >>> 2) & 0x3F).toString()
+                + base64Character((first & 0x3) << 4).toString()
+                + "==";
+        } else if (remaining == 2) {
+            let first = bytes[index].toInt();
+            let second = bytes[index + 1].toInt();
+            result = result
+                + base64Character((first >>> 2) & 0x3F).toString()
+                + base64Character(((first & 0x3) << 4) | (second >>> 4)).toString()
+                + base64Character((second & 0xF) << 2).toString()
+                + "=";
+        }
+        return result;
+    }
+
+    /// Decodes standard Base64 with optional padding.
+    ///
+    /// URL-safe characters are rejected.
+    public fn decode(text: String): Result<Array<Byte>, BufferError> {
+        let mut values = ArrayList<Int>.empty();
+        let mut padding = 0;
+        let mut index = 0;
+        while (index < text.length()) {
+            let code = text.at(index).getOrElse('?').toInt();
+            if (code == 61) {
+                padding = padding + 1;
+                if (padding > 2) {
+                    return Result<Array<Byte>, BufferError>.Err(
+                        BufferError.InvalidText(index));
+                }
+            } else {
+                if (padding > 0) {
+                    return Result<Array<Byte>, BufferError>.Err(
+                        BufferError.InvalidText(index));
+                }
+                let digit = base64Digit(code);
+                if (digit < 0) {
+                    return Result<Array<Byte>, BufferError>.Err(
+                        BufferError.InvalidText(index));
+                }
+                values.add(digit);
+            }
+            index = index + 1;
+        }
+        if (values.size % 4 == 1) {
+            return Result<Array<Byte>, BufferError>.Err(
+                BufferError.InvalidText(text.length()));
+        }
+        if (padding > 0 and (values.size + padding) % 4 != 0) {
+            return Result<Array<Byte>, BufferError>.Err(
+                BufferError.InvalidText(text.length()));
+        }
+        let mut result = ArrayList<Byte>.empty();
+        let mut offset = 0;
+        while (offset < values.size) {
+            let remaining = values.size - offset;
+            let first = values.at(offset).getOrElse(0);
+            let second = values.at(offset + 1).getOrElse(0);
+            result.add(byteValue((first << 2) | (second >>> 4)));
+            if (remaining > 2) {
+                let third = values.at(offset + 2).getOrElse(0);
+                result.add(byteValue(((second & 0xF) << 4) | (third >>> 2)));
+                if (remaining > 3) {
+                    let fourth = values.at(offset + 3).getOrElse(0);
+                    result.add(byteValue(((third & 0x3) << 6) | fourth));
+                }
+            }
+            offset = offset + 4;
+        }
+        return Result<Array<Byte>, BufferError>.Ok(bytesToArray(result));
+    }
+}
+
+/// Bit-level helpers for `Int`.
+public extension Int {
+    /// The number of one bits.
+    public fn bitCount(): Int = BufferSupport.bitCount(this);
+
+    /// The number of zero bits before the highest one bit.
+    public fn leadingZeros(): Int = BufferSupport.leadingZeros(this);
+
+    /// The number of zero bits after the lowest one bit.
+    public fn trailingZeros(): Int = BufferSupport.trailingZeros(this);
+
+    /// Rotates the 32-bit representation left by `bits`.
+    public fn rotateLeft(bits: Int): Int = BufferSupport.rotateLeft(this, bits);
+
+    /// Rotates the 32-bit representation right by `bits`.
+    public fn rotateRight(bits: Int): Int = BufferSupport.rotateRight(this, bits);
+
+    /// Reverses the order of the 32 bits.
+    public fn reverseBits(): Int = BufferSupport.reverseBits(this);
+}
+
+/// Bit-level helpers for `Long`.
+public extension Long {
+    /// The number of one bits.
+    public fn bitCount(): Int = BufferSupport.bitCountLong(this);
+
+    /// The number of zero bits before the highest one bit.
+    public fn leadingZeros(): Int = BufferSupport.leadingZerosLong(this);
+
+    /// The number of zero bits after the lowest one bit.
+    public fn trailingZeros(): Int = BufferSupport.trailingZerosLong(this);
+
+    /// Rotates the 64-bit representation left by `bits`.
+    public fn rotateLeft(bits: Int): Long = BufferSupport.rotateLeftLong(this, bits);
+
+    /// Rotates the 64-bit representation right by `bits`.
+    public fn rotateRight(bits: Int): Long = BufferSupport.rotateRightLong(this, bits);
+
+    /// Reverses the order of the 64 bits.
+    public fn reverseBits(): Long = BufferSupport.reverseBitsLong(this);
+}

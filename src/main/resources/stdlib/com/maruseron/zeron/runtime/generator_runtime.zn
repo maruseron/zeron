@@ -1,0 +1,22 @@
+package com.maruseron.zeron.runtime;
+
+/// Host-side pull driver for `zeron.collections.generator`.
+///
+/// The Zeron body is an ordinary function object passed as `Any` and invoked through its generated
+/// `invoke` method, so an effectful lambda does not need a Java SAM. `advance` delivers each
+/// yielded value to a typed receiver, so the source boundary never casts the payload.
+public external class GeneratorSupport = "com.maruseron.zeron.runtime.GeneratorSupport" {
+    public static open(body: Any): &GeneratorSupport;
+
+    /// Resumes or starts the body and delivers one value to `receive`.
+    /// Returns false once the body completes normally.
+    public advance(receive: Any): Boolean;
+
+    public isDone(): Boolean;
+
+    /// Stops a started body and returns its cleanup failure, or `null`.
+    public mut cancel(): Any?;
+
+    /// Stops a started body and logs any cleanup failure at error level.
+    public mut close(): Unit;
+}

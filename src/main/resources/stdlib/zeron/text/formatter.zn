@@ -1,0 +1,222 @@
+package zeron.text;
+
+import com.maruseron.zeron.runtime.text.TextSupport;
+
+import zeron.collections.ArrayList;
+import zeron.internal.unwrapSome;
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+/// A failure produced while formatting a template.
+public type FormatError =
+      MissingArgument(index: Int)
+    | IndexOutOfRange(index: Int)
+    | MalformedField(offset: Int, message: String)
+    | LeftoverArgument(index: Int);
+
+class FormatState {
+    arguments: Array<String>;
+    used: &ArrayList<Boolean>;
+    output: String;
+    nextIndex: Int;
+    error: Option<FormatError>;
+
+    private constructor new;
+
+    public constructor of(arguments: Array<String>) {
+        let used = ArrayList<Boolean>.empty();
+        let mut index = 0;
+        while (index < arguments.length) {
+            used.add(false);
+            index = index + 1;
+        }
+        return FormatState.new(arguments, used, "", 0, Option<FormatError>.None());
+    }
+
+    public mut append(text: String): Unit {
+        this.output = this.output + text;
+    }
+
+    public isUsed(index: Int): Boolean = this.used.at(index).getOrElse(false);
+
+    public result(): String = this.output;
+
+    public failure(): Option<FormatError> = this.error;
+
+    private mut malformed(offset: Int, message: String): Boolean {
+        this.error = Option.Some(FormatError.MalformedField(offset, message));
+        return false;
+    }
+
+    private mut spaces(count: Int): String {
+        let mut result = "";
+        let mut index = 0;
+        while (index < count) {
+            result = result + " ";
+            index = index + 1;
+        }
+        return result;
+    }
+
+    private mut applyLayout(text: String, specification: String): String {
+        let mut alignment = 'l';
+        let mut cursor = 0;
+        if (specification.length() > 0) {
+            let first = specification.at(0).getOrElse('?');
+            if (first == '<') {
+                alignment = 'l';
+                cursor = 1;
+            } else if (first == '>') {
+                alignment = 'r';
+                cursor = 1;
+            } else if (first == '^') {
+                alignment = 'c';
+                cursor = 1;
+            }
+        }
+        let mut width = 0;
+        while (cursor < specification.length()) {
+            let value = specification.at(cursor).getOrElse('?');
+            if (value == '.') break;
+            let digit = value.toInt();
+            if (digit < 48 or digit > 57) {
+                this.malformed(cursor, "Expected a width digit.");
+                return "";
+            }
+            width = width * 10 + digit - 48;
+            cursor = cursor + 1;
+        }
+        let mut truncation = -1;
+        if (cursor < specification.length() and specification.at(cursor).getOrElse('?') == '.') {
+            cursor = cursor + 1;
+            truncation = 0;
+            let start = cursor;
+            while (cursor < specification.length()) {
+                let digit = specification.at(cursor).getOrElse('?').toInt();
+                if (digit < 48 or digit > 57) {
+                    this.malformed(cursor, "Expected a truncation length.");
+                    return "";
+                }
+                truncation = truncation * 10 + digit - 48;
+                cursor = cursor + 1;
+            }
+            if (cursor == start) {
+                this.malformed(cursor, "Missing truncation length.");
+                return "";
+            }
+        }
+        if (cursor != specification.length()) {
+            this.malformed(cursor, "Unexpected field option.");
+            return "";
+        }
+        let mut value = text;
+        if (truncation >= 0 and value.length() > truncation) {
+            value = value.substring(0, truncation).getOrElse(value);
+        }
+        if (width <= value.length()) return value;
+        let padding = width - value.length();
+        if (alignment == 'r') return this.spaces(padding) + value;
+        if (alignment == 'c') {
+            let left = padding / 2;
+            return this.spaces(left) + value + this.spaces(padding - left);
+        }
+        return value + this.spaces(padding);
+    }
+
+    /// Resolves one field body and appends its rendered value.
+    ///
+    /// Returns `false` and records a `FormatError` on failure.
+    public mut field(body: String, offset: Int): Boolean {
+        let colon = body.indexOf(":");
+        let head = if (colon < 0) then body
+                   else body.substring(0, colon).getOrElse("");
+        let specification = if (colon < 0) then ""
+                            else body.substring(colon + 1, body.length()).getOrElse("");
+        let mut argumentIndex = 0;
+        if (head == "") {
+            argumentIndex = this.nextIndex;
+            this.nextIndex = this.nextIndex + 1;
+        } else {
+            let parsed = head.toInt();
+            if (parsed matches Option.None()) {
+                return this.malformed(offset, "Expected an argument index.");
+            }
+            argumentIndex = parsed.getOrElse(0);
+        }
+        if (argumentIndex < 0 or argumentIndex >= this.arguments.length) {
+            this.error = Option.Some(FormatError.IndexOutOfRange(argumentIndex));
+            return false;
+        }
+        this.used.replaceAt(argumentIndex, true);
+        let rendered = this.applyLayout(this.arguments[argumentIndex], specification);
+        if (this.error.isSome()) return false;
+        this.output = this.output + rendered;
+        return true;
+    }
+}
+
+/// Placeholder-based, locale-neutral string formatting.
+namespace Formatter {
+    /// Replaces `{}` and `{n}` fields in `template` with `arguments`.
+    ///
+    /// `{{` and `}}` produce literal braces. A field may carry `<`, `>`, or `^` and a width, plus
+    /// `.n` to truncate to `n` characters. Every argument must be consumed exactly once.
+    public fn format(template: String, arguments: Array<String>): Result<String, FormatError> {
+        let state = FormatState.of(arguments);
+        let mut index = 0;
+        while (index < template.length()) {
+            let character = template.at(index).getOrElse('?');
+            if (character == '{') {
+                if (index + 1 < template.length()
+                        and template.at(index + 1).getOrElse('?') == '{') {
+                    state.append("{");
+                    index = index + 2;
+                } else {
+                    let remainder = template.substring(index, template.length()).getOrElse("");
+                    let relative = remainder.indexOf("}");
+                    if (relative < 0) {
+                        return Result<String, FormatError>.Err(
+                            FormatError.MalformedField(index, "Missing closing brace."));
+                    }
+                    let close = index + relative;
+                    let body = template.substring(index + 1, close).getOrElse("");
+                    if (not state.field(body, index)) {
+                        return Result<String, FormatError>.Err(unwrapSome(state.failure()));
+                    }
+                    index = close + 1;
+                }
+            } else if (character == '}') {
+                if (index + 1 < template.length()
+                        and template.at(index + 1).getOrElse('?') == '}') {
+                    state.append("}");
+                    index = index + 2;
+                } else {
+                    return Result<String, FormatError>.Err(
+                        FormatError.MalformedField(index, "Unmatched closing brace."));
+                }
+            } else {
+                state.append(character.toString());
+                index = index + 1;
+            }
+        }
+        let mut argumentIndex = 0;
+        while (argumentIndex < arguments.length) {
+            if (not state.isUsed(argumentIndex)) {
+                return Result<String, FormatError>.Err(
+                    FormatError.LeftoverArgument(argumentIndex));
+            }
+            argumentIndex = argumentIndex + 1;
+        }
+        return Result<String, FormatError>.Ok(state.result());
+    }
+
+    /// Renders `value` in fixed notation with `places` digits after the decimal point.
+    ///
+    /// The output uses `.` as the decimal separator regardless of the host locale.
+    public fn fixed(value: Float, places: Int): String =
+        TextSupport.formatFixed(value, places);
+
+    /// Renders `value` in decimal with at least `width` digits, padding with leading zeros.
+    public fn zeroPadded(value: Long, width: Int): String =
+        TextSupport.zeroPadded(value, width);
+}

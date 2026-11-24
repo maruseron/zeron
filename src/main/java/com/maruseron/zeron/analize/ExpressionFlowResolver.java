@@ -353,6 +353,7 @@ final class ExpressionFlowResolver {
                 } else {
                     resolved = MemberInteropResolver.resolveMemberCall(context, call);
                 }
+                warnDirectTaskValue(call);
                 final var descriptor = call.resolvedDescriptor();
                 if (descriptor != null) {
                     final var parameters = call.resolvedExtensionMethod() != null
@@ -905,6 +906,14 @@ final class ExpressionFlowResolver {
                 final var nominalType = effectType instanceof ReferenceDescriptor reference
                         ? reference.baseType() : effectType;
                 TypeResolver.requireEffectType(context, nominalType, perform.keyword);
+                if ("dispose".equals(context.frame.currentMethodName)
+                        && nominalType instanceof NominalDescriptor nominal
+                        && nominal.name().equals("zeron.concurrent.Await")) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE, perform.keyword,
+                            "A dispose implementation cannot perform Await; cleanup must not block "
+                                    + "or suspend. Move the wait outside cleanup."));
+                }
                 RaisedEffectFlow.add(context, nominalType, perform.keyword);
                 final var responseType = EffectResponses.responseOf(context, nominalType);
                 perform.setType(responseType);
@@ -1090,7 +1099,8 @@ final class ExpressionFlowResolver {
                 yield TypeDescriptor.ofInfer();
             }
             case Expr.Variable variable -> {
-                if (context.resumeTokens.containsKey(variable.name.lexeme())) {
+                final var resumeToken = context.resumeTokens.get(variable.name.lexeme());
+                if (resumeToken != null && (resumeToken.isEmpty() || !resumeToken.peek().continuation())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             variable.name,
                             "A resume token may only be used as 'k.resume(value)' in the tail position of its handler case."));
@@ -1429,14 +1439,14 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     binary.operator, "The standard Comparable<T> and Ordering declarations are not available."));
         }
-        final var orderingCases = Set.of("LT", "EQ", "GT");
+        final var orderingCases = Set.of("Less", "Equal", "Greater");
         if (ordering.cases().size() != orderingCases.size()
                 || ordering.cases().stream().map(sumCase -> sumCase.name().lexeme()).distinct().count()
                         != orderingCases.size()
                 || ordering.cases().stream().anyMatch(sumCase ->
                         !orderingCases.contains(sumCase.name().lexeme()) || !sumCase.payloads().isEmpty())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    binary.operator, "Ordering must contain exactly the nullary cases LT, EQ, and GT."));
+                    binary.operator, "Ordering must contain exactly the nullary cases Less, Equal, and Greater."));
         }
         final var comparableType = operandType;
         final var comparableContractType = TypeDescriptor.genericOf(
@@ -1498,7 +1508,17 @@ final class ExpressionFlowResolver {
                     context, enclosingEffects, fullyHandledEffects, handle.keyword);
         }
 
+        final var level3 = handle.arms.stream().anyMatch(ExpressionFlowResolver::isGeneralResumingArm);
+        if (level3 && "dispose".equals(context.frame.currentMethodName)) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE, handle.keyword,
+                    "A dispose implementation cannot install a handler that captures a continuation; "
+                            + "cleanup must not suspend."));
+        }
         TypeDescriptor resultType = protectedType instanceof NeverDescriptor ? null : protectedType;
+        final var continuationResultType = level3
+                ? (resultType == null ? TypeDescriptor.ofAny() : resultType)
+                : null;
         final var armsFlow = new ArrayList<FlowState>();
         final var protectedFlow = context.frame.flowState.copy();
         for (int i = 0; i < handle.arms.size(); i++) {
@@ -1518,16 +1538,19 @@ final class ExpressionFlowResolver {
                             suppressedType, BindingMutability.IMMUTABLE);
                     context.symbols.define(arm.suppressedBinding());
                 }
-                final var resumeType = beginResumeToken(context, arm);
+                final var resumeToken = beginResumeToken(context, arm, level3, continuationResultType);
                 if (arm.guard() != null) {
                     final var guardType = resolve(context, arm.guard());
                     ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
                 }
                 final var armType = resolve(context, arm.expression());
-                if (resumeType != null) {
+                if (level3 && resumeToken != null && arm.tailResumeArgument() != null) {
+                    arm.setTailTransfer(true);
+                }
+                if (resumeToken != null && !level3) {
                     validateTailResume(context, arm);
-                    // A resuming arm supplies the perform response, not the handle result. Execution
-                    // continues inside the protected expression after the handler resumes.
+                    // A level-2 resuming arm supplies the perform response, not the handle
+                    // result. Execution continues inside the protected expression.
                 } else {
                     resultType = resultType == null ? armType
                             : ensureCommonParent(context, arm.keyword(), resultType, armType);
@@ -1540,7 +1563,9 @@ final class ExpressionFlowResolver {
         }
         final var resumingArms = handle.arms.stream()
                 .filter(arm -> arm.resumeBinding() != null).toList();
-        if (!resumingArms.isEmpty()) handle.setFrameHandler(synthesizeFrameHandler(handle, resumingArms));
+        if (!resumingArms.isEmpty()) {
+            handle.setFrameHandler(synthesizeFrameHandler(handle, resumingArms, level3));
+        }
         var joined = protectedType instanceof NeverDescriptor
                 ? FlowState.unreachable() : protectedFlow;
         for (final var flow : armsFlow) joined = FlowState.join(joined, flow);
@@ -1550,8 +1575,11 @@ final class ExpressionFlowResolver {
         return resultType;
     }
 
-    private static TypeDescriptor beginResumeToken(final ResolutionContext context,
-                                                    final Expr.HandleArm arm) {
+    private static ResolutionContext.ResumeToken beginResumeToken(
+            final ResolutionContext context,
+            final Expr.HandleArm arm,
+            final boolean continuation,
+            final TypeDescriptor continuationResult) {
         if (arm.resumeBinding() == null) return null;
         if (!EffectResponses.declaresResponse(context, arm.resolvedEffectType())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
@@ -1560,9 +1588,33 @@ final class ExpressionFlowResolver {
                             + "' does not declare a response type, so its handler cannot resume."));
         }
         final var response = EffectResponses.responseOf(context, arm.resolvedEffectType());
+        final var result = continuation ? continuationResult : response;
+        if (continuation) {
+            // A level-3 case receives a first-class continuation, so it can store, pass, or
+            // resume it after the case body returns.
+            final var continuationType = TypeDescriptor.genericOf(
+                    TypeDescriptor.ofName("zeron.runtime.Cont"), response, continuationResult);
+            arm.setResumeTokenType(continuationType);
+            context.symbols.declareSymbol(SYNTHETIC_VAR, arm.resumeBinding(),
+                    continuationType, BindingMutability.IMMUTABLE);
+            context.symbols.define(arm.resumeBinding());
+        }
+        final var token = new ResolutionContext.ResumeToken(response, result, continuation);
         context.resumeTokens.computeIfAbsent(arm.resumeBinding().lexeme(),
-                ignored -> new java.util.ArrayDeque<>()).push(response);
-        return response;
+                ignored -> new java.util.ArrayDeque<>()).push(token);
+        return token;
+    }
+
+    /// Whether this resuming case needs a first-class continuation. Only the exact syntactic
+    /// tail form keeps the level-2 response-token lowering; anything else may store or pass `k`.
+    private static boolean isGeneralResumingArm(final Expr.HandleArm arm) {
+        if (arm.resumeBinding() == null) return false;
+        final var expression = arm.expression();
+        if (!(expression instanceof Expr.MemberCall call)) return true;
+        if (!call.name.lexeme().equals("resume")) return true;
+        if (!(call.receiver instanceof Expr.Variable receiver)) return true;
+        if (!receiver.name.lexeme().equals(arm.resumeBinding().lexeme())) return true;
+        return call.arguments.size() != 1;
     }
 
     private static void popResumeToken(final ResolutionContext context, final Token binding) {
@@ -1592,7 +1644,8 @@ final class ExpressionFlowResolver {
                     call.name, "'resume' expects exactly one response argument."));
         }
         final var stack = context.resumeTokens.get(arm.resumeBinding().lexeme());
-        final var response = stack == null ? null : stack.peek();
+        final var token = stack == null ? null : stack.peek();
+        final var response = token == null ? null : token.response();
         if (response != null && !(response instanceof NeverDescriptor)) {
             final var argumentType = call.arguments.getFirst().getType();
             if (argumentType != null) {
@@ -1602,19 +1655,39 @@ final class ExpressionFlowResolver {
     }
 
     private static Expr synthesizeFrameHandler(final Expr.Handle handle,
-                                               final List<Expr.HandleArm> resumingArms) {
+                                               final List<Expr.HandleArm> resumingArms,
+                                               final boolean level3) {
         final var carrier = new Token(com.maruseron.zeron.scan.TokenType.IDENTIFIER,
                 "$zeron$frame$carrier", null, handle.keyword.span());
-        final var dispatch = new Expr.HandlerDispatch(handle.keyword, carrier,
-                List.copyOf(resumingArms));
+        final var continuation = level3
+                ? new Token(com.maruseron.zeron.scan.TokenType.IDENTIFIER,
+                        "$zeron$frame$continuation", null, handle.keyword.span())
+                : null;
+        final var dispatch = continuation == null
+                ? new Expr.HandlerDispatch(handle.keyword, carrier, List.copyOf(resumingArms))
+                : new Expr.HandlerDispatch(handle.keyword, carrier, List.copyOf(resumingArms),
+                        continuation, true);
         dispatch.setType(TypeDescriptor.ofAny());
-        final var implementation = new Expr.Lambda(handle.keyword, List.of(carrier),
+        final var parameters = continuation == null
+                ? List.of(carrier) : List.of(carrier, continuation);
+        final var implementation = new Expr.Lambda(handle.keyword, parameters,
                 List.of(new Stmt.Return(dispatch, handle.keyword)), TypeDescriptor.ofInfer());
         final var frame = new Expr.HandlerLiteral(handle.keyword, List.copyOf(resumingArms),
                 implementation);
-        final var effects = resumingArms.stream()
-                .map(Expr.HandleArm::resolvedEffectType).toList();
-        frame.setType(TypeDescriptor.handlerOf(TypeDescriptor.ofAny(), effects, List.of()));
+        if (level3) {
+            // The body returns the handled expression's value through the `Any` slot so
+            // `Cont.resume` can hand it back to the case.
+            final var body = new Expr.Lambda(handle.keyword, List.of(),
+                    List.of(new Stmt.Return(handle.expression, handle.keyword)),
+                    TypeDescriptor.lambdaOf(TypeDescriptor.ofAny(), null));
+            handle.setLevel3Body(body);
+            frame.setType(TypeDescriptor.functionOf("", TypeDescriptor.ofAny(),
+                    TypeDescriptor.ofAny(), TypeDescriptor.ofAny()));
+        } else {
+            final var effects = resumingArms.stream()
+                    .map(Expr.HandleArm::resolvedEffectType).toList();
+            frame.setType(TypeDescriptor.handlerOf(TypeDescriptor.ofAny(), effects, List.of()));
+        }
         return frame;
     }
 
@@ -1698,7 +1771,7 @@ final class ExpressionFlowResolver {
                                 suppressedType, BindingMutability.IMMUTABLE);
                         context.symbols.define(arm.suppressedBinding());
                     }
-                    final var resumeType = beginResumeToken(context, arm);
+                    final var resumeType = beginResumeToken(context, arm, false, null);
                     if (arm.guard() != null) {
                         final var guardType = resolve(context, arm.guard());
                         ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
@@ -4217,6 +4290,25 @@ final class ExpressionFlowResolver {
             case Expr.Grouping grouping -> expressionName(grouping.expression);
             default -> "value";
         };
+    }
+
+    /// A direct `Task.value()` blocks without performing `Await`, so it bypasses an enclosing
+    /// waiting policy and can deadlock during scope shutdown. The ZEP warns when the task's effect
+    /// row is concretely empty; `await(task)` is the async-facing spelling.
+    private static void warnDirectTaskValue(final Expr.MemberCall call) {
+        if (!call.name.lexeme().equals("value") || !call.arguments.isEmpty()) return;
+        TypeDescriptor receiver = call.receiver.getType();
+        while (receiver instanceof ReferenceDescriptor reference) receiver = reference.baseType();
+        while (receiver instanceof NullableDescriptor nullable) receiver = nullable.baseType();
+        if (!(receiver instanceof GenericDescriptor task)
+                || !task.name().equals("zeron.concurrent.Task")
+                || task.typeParameters().size() != 2) return;
+        if (!(task.typeParameters().get(1) instanceof EffectRowDescriptor row) || !row.isEmpty()) {
+            return;
+        }
+        Zeron.warning(call.name, DiagnosticCatalog.DIRECT_TASK_VALUE,
+                "Task.value() blocks without performing Await; use await(task) so an enclosing "
+                        + "Await handler controls the waiting policy.");
     }
 
     private static boolean isNullableOperandType(final TypeDescriptor type) {

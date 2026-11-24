@@ -120,15 +120,21 @@ public final class InvocationExpressionTest {
         final var className = "InvokeEvaluation" + UUID.randomUUID().toString().replace("-", "");
         final var source = parse("""
                 public effect Failure {}
-                let mut factoryCalls = 0;
+
+                class FactoryCounter {
+                    public mut property calls: Int = 0;
+                    public constructor new;
+                }
+
+                let factory = FactoryCounter.new();
 
                 fn make(): () -> Int {
-                    factoryCalls += 1;
-                    return () -> factoryCalls;
+                    factory.calls += 1;
+                    return () -> factory.calls;
                 }
 
                 fn invoked(): Int = make()();
-                fn count(): Int = factoryCalls;
+                fn count(): Int = factory.calls;
 
                 fn failing(): Int performs Failure = perform Failure.new();
                 fn calleeEffect(): Int performs Failure = (if (true) then failing else () -> 0)();

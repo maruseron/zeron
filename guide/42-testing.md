@@ -98,11 +98,18 @@ The `zeron.test` module currently provides:
 | `assertNotEquals(unexpected, actual, message = "")` | The values are equal |
 | `assertNull(value, message = ...)` | `value` is not null |
 | `assertNotNull(value, message = ...)` | `value` is null |
+| `assertContains(text, part, message = "")` | `text` does not contain `part` |
+| `assertNotContains(text, part, message = "")` | `text` contains `part` |
+| `assertStartsWith(text, prefix, message = "")` | `text` does not start with `prefix` |
+| `assertEndsWith(text, suffix, message = "")` | `text` does not end with `suffix` |
+| `assertGreaterThan(actual, expected, message = "")` | `actual` is not greater than `expected` |
+| `assertLessThan(actual, expected, message = "")` | `actual` is not less than `expected` |
 | `assertApproximatelyEquals(expected, actual, tolerance, message = "")` | The absolute difference exceeds `tolerance` |
 
 `assertEquals` and `assertNotEquals` require `Eq<T> + Display` evidence. `assertNull` and
-`assertNotNull` accept nullable types. `assertApproximatelyEquals` operates on `Float` values and
-checks the absolute difference in either direction.
+`assertNotNull` accept nullable types. `assertGreaterThan` and `assertLessThan` require
+`Comparable<T> + Display`. `assertApproximatelyEquals` operates on `Float` values and checks the
+absolute difference in either direction.
 
 Messages are optional. When an equality assertion has no explicit message, it builds a message from
 the expected value and actual value. The generated runner currently reports the test name and
@@ -168,6 +175,11 @@ index.
 The initial testing API is deliberately small. It does not yet provide test filtering, fixtures,
 setup or teardown hooks, parameterized tests, parallel or isolated execution, or a machine-readable
 report format. The runner also does not print assertion messages or per-test timings.
+
+`zeron.test` declares the `@CompileFailure(fixture, code, message)` annotation for expected
+compilation failures, but the compile-failure runner and fixture-root configuration described by
+ZEP-0169 are not part of this slice. Until they land, the annotation is declarative and does not
+change how `zeron test` treats a function.
 
 A test that performs an effect other than `TestFailure` is reported as `FAILED` and makes the command
 exit nonzero, but the current summary does not include a separate error count.

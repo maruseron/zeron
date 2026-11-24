@@ -1,0 +1,118 @@
+package zeron.text;
+
+import com.maruseron.zeron.runtime.text.RegexCompileResult;
+import com.maruseron.zeron.runtime.text.RegexHandle;
+import com.maruseron.zeron.runtime.text.RegexMatchResult;
+import com.maruseron.zeron.runtime.text.TextSupport;
+
+import zeron.collections.ArrayList;
+import zeron.internal.arrayFromList;
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+/// A failure produced while compiling a regular expression.
+public type RegexError =
+      InvalidPattern(message: String, offset: Int);
+
+/// One successful regular-expression match.
+public class Match {
+    result: &RegexMatchResult;
+
+    private constructor new;
+
+    public constructor from(result: &RegexMatchResult) = Match.new(result);
+
+    /// The UTF-16 offset where the match starts.
+    public property start: Int {
+        get = result.start();
+    }
+
+    /// The UTF-16 offset just after the match.
+    public property end: Int {
+        get = result.end();
+    }
+
+    /// The matched text.
+    public property text: String {
+        get = result.text();
+    }
+
+    /// The number of capture groups, excluding the whole match.
+    public property groupCount: Int {
+        get = result.groupCount();
+    }
+
+    /// Returns the text captured by group `index`, or `None` when it did not participate.
+    public group(index: Int): Option<String> {
+        let value = result.group(index);
+        if (value == null) return Option<String>.None();
+        return Option.Some(value);
+    }
+
+    /// Returns the text captured by the named group, or `None` when it did not participate.
+    public namedGroup(name: String): Option<String> {
+        let value = result.namedGroup(name);
+        if (value == null) return Option<String>.None();
+        return Option.Some(value);
+    }
+}
+
+/// A compiled, reusable regular expression.
+///
+/// The pattern dialect is the host's `java.util.regex.Pattern` dialect. The host pattern object is
+/// not exposed.
+public class Regex {
+    expression: &RegexHandle;
+
+    private constructor new;
+
+    public constructor from(expression: &RegexHandle) = Regex.new(expression);
+
+    /// Whether the whole of `text` matches this regex.
+    public matches(text: String): Boolean = this.expression.matches(text);
+
+    /// Returns the first match at or after the start of `text`.
+    public find(text: String): Option<Match> {
+        let result = this.expression.find(text, 0);
+        if (not result.isPresent()) return Option<Match>.None();
+        return Option.Some(Match.from(result));
+    }
+
+    /// Returns every non-overlapping match in order.
+    public findAll(text: String): Array<Match> {
+        let found = ArrayList<Match>.empty();
+        let mut start = 0;
+        while (start <= text.length()) {
+            let result = this.expression.find(text, start);
+            if (not result.isPresent()) break;
+            let foundMatch = Match.from(result);
+            found.add(foundMatch);
+            if (foundMatch.end <= start) {
+                start = foundMatch.end + 1;
+            } else {
+                start = foundMatch.end;
+            }
+        }
+        return arrayFromList<Match>(found);
+    }
+
+    /// Replaces the first match with `replacement`, which may use `$1` or `${name}`.
+    public replaceFirst(text: String, replacement: String): String =
+        this.expression.replaceFirst(text, replacement);
+
+    /// Replaces every match with `replacement`.
+    public replaceAll(text: String, replacement: String): String =
+        this.expression.replaceAll(text, replacement);
+}
+
+namespace Regex {
+    /// Compiles `pattern`, reporting the host parser's message and offset on failure.
+    public fn compile(expression: String): Result<Regex, RegexError> {
+        let result = TextSupport.compileRegex(expression);
+        if (result.isSuccess()) {
+            return Result<Regex, RegexError>.Ok(Regex.from(result.regex()));
+        }
+        return Result<Regex, RegexError>.Err(
+            RegexError.InvalidPattern(result.message(), result.offset()));
+    }
+}

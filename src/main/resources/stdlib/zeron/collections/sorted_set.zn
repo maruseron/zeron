@@ -1,0 +1,57 @@
+package zeron.collections;
+
+import zeron.internal.unwrapSome;
+import zeron.lang.Comparable;
+import zeron.lang.Option;
+
+/// A mutable set whose elements are kept in ascending order.
+///
+/// Elements are ordered by `Comparable`. Lookup is `O(log n)`; insertion and removal are `O(n)`
+/// because they shift the ordered backing arrays. Iteration yields ascending elements.
+public class SortedSet<T: Comparable<T>>
+    is Set<T>,
+       Sized<T>,
+       Sequenced<T>,
+       Sink<T>,
+       Removable<T>,
+       Clearable {
+    entries: &SortedMap<T, Unit>;
+
+    private constructor new;
+
+    /// Creates an empty set.
+    public constructor empty() = SortedSet<T>.new(SortedMap<T, Unit>.empty());
+
+    /// The number of elements in the set.
+    public property size: Int {
+        get = this.entries.size;
+    }
+
+    /// Whether the set has no elements.
+    public isEmpty(): Boolean = this.entries.isEmpty();
+
+    /// Whether `value` is an element of the set.
+    public contains(value: T): Boolean = this.entries.containsKey(value);
+
+    /// Adds `value`, returning `true` when it was not already present.
+    public mut add(value: T): Boolean {
+        if (this.entries.containsKey(value)) return false;
+        this.entries.put(value, ());
+        return true;
+    }
+
+    /// Removes `value`, returning `true` when it was present.
+    public mut remove(value: T): Boolean = this.entries.remove(value).isSome();
+
+    /// Removes every element.
+    public mut clear(): Unit = this.entries.clear();
+
+    /// Returns the smallest element.
+    public first(): Option<T> = this.entries.firstKey();
+
+    /// Returns the largest element.
+    public last(): Option<T> = this.entries.lastKey();
+
+    /// Returns an iterator over the elements in ascending order.
+    public iterator(): &Iterator<T> = this.entries.keyIterator();
+}

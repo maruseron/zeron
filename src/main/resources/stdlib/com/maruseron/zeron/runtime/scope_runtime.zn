@@ -2,13 +2,16 @@ package com.maruseron.zeron.runtime;
 
 import java.util.concurrent.ExecutorService;
 
-/// Host-side structured scope. The public Zeron surface is `zeron.concurrent.Scope`.
+/// Host-side structured scope. The public Zeron surface is `zeron.concurrent.ConcurrentScope`.
 public external class ScopeSupport = "com.maruseron.zeron.runtime.ScopeSupport" {
     public static open(): &ScopeSupport;
+    public static openManual(): &ScopeSupport;
     public static openWith(executor: &ExecutorService): &ScopeSupport;
+    public static openManualWith(executor: &ExecutorService): &ScopeSupport;
     public static start(scope: &ScopeSupport, block: Any, receive: Any): &TaskSupport;
     public static join(scope: &ScopeSupport): Unit;
     public static cancel(scope: &ScopeSupport): Unit;
+    public static dispose(scope: &ScopeSupport): Unit;
     public static deadline(scope: &ScopeSupport, nanoseconds: Long): Unit;
 }
 

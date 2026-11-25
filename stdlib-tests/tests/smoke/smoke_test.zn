@@ -1,0 +1,10 @@
+package smoke;
+
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn harnessCompilesAndRuns(): Unit performs TestFailure {
+    assertEquals(4, 2 + 2);
+}

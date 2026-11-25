@@ -1,0 +1,50 @@
+package text;
+
+import zeron.text.*;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn firstMatch(regex: Regex): String =
+    match (regex.find("abc-42")) {
+        case Option.Some(found) -> found.text + "|" + found.group(1).getOrElse("missing")
+            + "|" + found.namedGroup("word").getOrElse("missing");
+        case Option.None() -> "no match";
+    };
+
+fn queryFacts(regex: Regex): Int {
+    let whole = if (regex.matches("123")) then 1 else 0;
+    let partial = if (regex.matches("a123")) then 1 else 0;
+    let all = regex.findAll("a1 b22").length;
+    let first = if (regex.replaceFirst("a1 b22", "#") == "a# b22") then 1 else 0;
+    let every = if (regex.replaceAll("a1 b22", "#") == "a# b#") then 1 else 0;
+    return whole * 10000 + partial * 1000 + all * 100 + first * 10 + every;
+}
+
+@Test
+public fn capturesAndNamedGroupsDescribeTheFirstMatch(): Unit performs TestFailure {
+    let found = match (Regex.compile("(?<word>[a-z]+)-([0-9]+)")) {
+        case Result.Ok(regex) -> firstMatch(regex);
+        case Result.Err(_) -> "bad pattern";
+    };
+    assertEquals("abc-42|abc|abc", found);
+}
+
+@Test
+public fn queriesAndReplacementsCoverWholeAndPartialMatching(): Unit performs TestFailure {
+    let facts = match (Regex.compile("[0-9]+")) {
+        case Result.Ok(regex) -> queryFacts(regex);
+        case Result.Err(_) -> -1;
+    };
+    assertEquals(10211, facts);
+}
+
+@Test
+public fn invalidPatternsAreReported(): Unit performs TestFailure {
+    let compiled = Regex.compile("[");
+    let failed = match (compiled) {
+        case Result.Ok(_) -> false;
+        case Result.Err(_) -> true;
+    };
+    assertEquals(true, failed);
+}

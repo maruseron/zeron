@@ -25,6 +25,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Lambdas and function values](14-lambdas-and-function-values.md)
 1. [Collections and iteration](15-collections-and-iteration.md)
 1. [For-expressions](16-for-expressions.md)
+1. [Generators and the iteration protocol](46-generators-and-iteration.md)
 1. [Products, data classes, and sum types](17-sum-types-and-products.md)
 1. [Pattern matching](18-pattern-matching.md)
 1. [Option and Result](19-option-and-result.md)
@@ -47,6 +48,8 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 ## Part V — Use Zeron with the wider platform
 
 1. [File system and text I/O](27-file-system-and-text-io.md)
+1. [Binary data](44-binary-data.md)
+1. [Text processing](45-text-processing.md)
 1. [Java interoperability](23-java-interoperability.md)
 1. [Libraries and separate compilation](24-libraries-and-separate-compilation.md)
 1. [Configuration, releases, and the roadmap](25-configuration-releases-and-roadmap.md)

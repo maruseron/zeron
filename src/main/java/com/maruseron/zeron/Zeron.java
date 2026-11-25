@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static java.lang.IO.println;
 
@@ -194,33 +195,75 @@ public class Zeron {
     private static int runProjectCommand(final CliParser.ProjectCommand command) throws IOException {
         final var project = command.project();
         final var target = command.target();
-        final var testTarget = target.kind() == ProjectManifest.TargetKind.TEST;
-        final var compilation = testTarget
-                ? runTestProject(project.sourceRoots(), project.testRoots(),
-                        project.libraryRoots(), project.javaClassPathRoots(),
-                        project.standardLibraryMode(), target.outputDirectory(), target.displayName())
-                : runProject(project.sourceRoots(), target.entry(), project.libraryRoots(),
-                        project.javaClassPathRoots(), project.standardLibraryMode(),
-                        target.outputDirectory());
+        if (target.kind() == ProjectManifest.TargetKind.TEST) {
+            return runTestCommand(command);
+        }
+        final var compilation = runProject(project.sourceRoots(), target.entry(),
+                project.libraryRoots(), project.javaClassPathRoots(),
+                project.standardLibraryMode(), target.outputDirectory());
         if (compilation == null || exitCode() != 0) return exitCode();
-        if (!command.launch() && !command.testCommand()) return exitCode();
+        if (!command.launch()) return exitCode();
         return runGeneratedClass(compilation.mainClass(), target.outputDirectory(),
                 compilation.libraryRoots(), project.javaClassPathRoots());
     }
 
-    private static ProjectCompilation runTestProject(final List<Path> sourceRoots,
-                                                     final List<Path> testRoots,
-                                                     final List<Path> libraryRoots,
-                                                     final List<Path> javaClassPathRoots,
-                                                     final StandardLibraryMode standardLibraryMode,
-                                                     final Path outputDirectory,
-                                                     final String targetName) throws IOException {
-        final var setup = resolveStandardLibrary(standardLibraryMode, libraryRoots);
-        validateJavaClassPathRoots(javaClassPathRoots);
+    /// The result of preparing a test target: the compiled runner plus everything the host needs to
+    /// compile `@CompileFailure` fixtures after the ordinary runner finishes.
+    record TestProjectPreparation(ProjectCompilation compilation,
+                                  List<TestRunner.DiscoveredTest> compileFailureTests,
+                                  List<CompilationUnit> baseUnits,
+                                  StandardLibrarySetup setup,
+                                  List<Path> javaClassPathRoots,
+                                  ProjectManifest.ProjectTarget target) {
+        TestProjectPreparation {
+            compileFailureTests = List.copyOf(compileFailureTests);
+            baseUnits = List.copyOf(baseUnits);
+            javaClassPathRoots = List.copyOf(javaClassPathRoots);
+        }
+    }
+
+    private static int runTestCommand(final CliParser.ProjectCommand command) throws IOException {
+        final var project = command.project();
+        final var target = command.target();
+        final var filter = command.testFilter().orElse(null);
+        if (command.listTests()) {
+            final var sources = readTestSources(project.sourceRoots(), project.testRoots(),
+                    target.compileFailureRoots(), target.outputDirectory());
+            if (hadError) return exitCode();
+            final var tests = TestRunner.filter(TestRunner.discover(sources.units(),
+                    sources.testSourcePaths()), filter);
+            for (final var test : tests) {
+                println(test.qualifiedName() + (test.ignored() ? " (ignored)" : "")
+                        + (test.isCompileFailure() ? " (compile failure)" : ""));
+            }
+            println(tests.size() + " tests");
+            return exitCode();
+        }
+        final var preparation = runTestProject(project.sourceRoots(), project.testRoots(),
+                project.libraryRoots(), project.javaClassPathRoots(),
+                project.standardLibraryMode(), target, filter, command.failFast());
+        if (preparation == null || exitCode() != 0) return exitCode();
+        final var runnerExit = runGeneratedClass(preparation.compilation().mainClass(),
+                target.outputDirectory(), preparation.compilation().libraryRoots(),
+                project.javaClassPathRoots());
+        if (runnerExit != 0 && command.failFast()) return runnerExit;
+        final var compileFailureExit = runCompileFailureTests(preparation, command.failFast());
+        if (runnerExit != 0) return runnerExit;
+        return compileFailureExit;
+    }
+
+    private record TestSources(List<CompilationUnit> units, Set<String> testSourcePaths) {}
+
+    private static TestSources readTestSources(final List<Path> sourceRoots,
+                                               final List<Path> testRoots,
+                                               final List<Path> compileFailureRoots,
+                                               final Path outputDirectory) throws IOException {
         final var allRoots = new java.util.ArrayList<Path>();
         sourceRoots.stream().map(path -> path.toAbsolutePath().normalize()).forEach(allRoots::add);
         testRoots.stream().map(path -> path.toAbsolutePath().normalize()).forEach(allRoots::add);
         final var sourceCount = sourceRoots.size();
+        final var fixtureRoots = compileFailureRoots.stream()
+                .map(path -> path.toAbsolutePath().normalize()).toList();
         final var sourcePaths = new java.util.TreeSet<Path>();
         for (var index = 0; index < allRoots.size(); index++) {
             final var root = allRoots.get(index);
@@ -230,6 +273,11 @@ public class Zeron {
                         .filter(path -> path.getFileName().toString().endsWith(".zn"))
                         .filter(path -> !path.toAbsolutePath().normalize()
                                 .startsWith(outputDirectory.toAbsolutePath().normalize()))
+                        // Fixtures are deliberately invalid, so they never join the normal test
+                        // compilation. Each one is compiled on its own by the host.
+                        .filter(path -> fixtureRoots.stream()
+                                .noneMatch(fixture -> path.toAbsolutePath().normalize()
+                                        .startsWith(fixture)))
                         .map(path -> path.toAbsolutePath().normalize())
                         .forEach(sourcePaths::add);
             }
@@ -264,18 +312,159 @@ public class Zeron {
             units.add(unit);
             if (rootIndex >= sourceCount) testSourcePaths.add(unitSourcePath);
         }
+        return new TestSources(units, testSourcePaths);
+    }
+
+    private static TestProjectPreparation runTestProject(final List<Path> sourceRoots,
+                                                     final List<Path> testRoots,
+                                                     final List<Path> libraryRoots,
+                                                     final List<Path> javaClassPathRoots,
+                                                     final StandardLibraryMode standardLibraryMode,
+                                                     final ProjectManifest.ProjectTarget target,
+                                                     final String filter,
+                                                     final boolean failFast) throws IOException {
+        final var setup = resolveStandardLibrary(standardLibraryMode, libraryRoots);
+        validateJavaClassPathRoots(javaClassPathRoots);
+        final var outputDirectory = target.outputDirectory();
+        final var sources = readTestSources(sourceRoots, testRoots,
+                target.compileFailureRoots(), outputDirectory);
         if (hadError) return null;
-        final var tests = TestRunner.discover(units, testSourcePaths);
-        final var runnerSource = TestRunner.generate(tests, targetName);
+        final var baseUnits = List.copyOf(sources.units());
+        final var tests = TestRunner.filter(TestRunner.discover(sources.units(),
+                sources.testSourcePaths()), filter);
+        final var runnerSource = TestRunner.generate(tests, target.displayName(), failFast);
         final var runner = Parser.of(Scanner.from(runnerSource, "test-runner.zn").scanWithDiagnostics())
                 .parseCompilationUnitWithDiagnostics("test-runner.zn");
         reportParseDiagnostics(runner.diagnostics());
         if (hadError) return null;
+        final var units = new ArrayList<CompilationUnit>(sources.units());
         units.addFirst(runner.compilationUnit());
         final var programName = "zeron.generated.test.TestRunner";
         runUnits(units, programName, "zeron.generated.test", setup.libraries(),
                 setup.bundleStandardLibrarySources(), javaClassPathRoots, outputDirectory);
-        return new ProjectCompilation(programName, setup.libraryRoots());
+        if (exitCode() != 0) return null;
+        final var compileFailureTests = tests.stream()
+                .filter(TestRunner.DiscoveredTest::isCompileFailure).toList();
+        return new TestProjectPreparation(
+                new ProjectCompilation(programName, setup.libraryRoots()),
+                compileFailureTests, baseUnits, setup, javaClassPathRoots, target);
+    }
+
+    /// Runs the `@CompileFailure` fixtures of a prepared test target. Each fixture is compiled on
+    /// its own, in process, with warnings suppressed and without touching the suite's error flags.
+    private static int runCompileFailureTests(final TestProjectPreparation preparation,
+                                              final boolean failFast) throws IOException {
+        if (preparation.compileFailureTests().isEmpty()) return 0;
+        final var outputDirectory = preparation.target().outputDirectory()
+                .resolve(".compile-failure").toAbsolutePath().normalize();
+        var passed = 0;
+        var failed = 0;
+        for (final var test : preparation.compileFailureTests()) {
+            if (test.ignored()) {
+                println("compile-failure test " + test.qualifiedName() + " ... skipped"
+                        + (test.ignoreReason().isEmpty() ? "" : ": " + test.ignoreReason()));
+                continue;
+            }
+            final var reason = checkCompileFailure(preparation, test, outputDirectory);
+            if (reason == null) {
+                println("compile-failure test " + test.qualifiedName() + " ... ok");
+                passed++;
+            } else {
+                println("compile-failure test " + test.qualifiedName() + " ... FAILED: " + reason);
+                failed++;
+                if (failFast) break;
+            }
+        }
+        println(passed + " compile-failure tests passed, " + failed + " failed");
+        return failed > 0 ? 1 : 0;
+    }
+
+    /// Returns `null` when the fixture fails compilation as the annotation expects, or a
+    /// human-readable reason when the expectation is not met.
+    private static String checkCompileFailure(final TestProjectPreparation preparation,
+                                              final TestRunner.DiscoveredTest test,
+                                              final Path outputDirectory) throws IOException {
+        final var expectation = test.compileFailure();
+        final var fixture = locateFixture(preparation.target().compileFailureRoots(),
+                expectation.fixture());
+        if (fixture == null) {
+            return "fixture '" + expectation.fixture() + "' was not found under "
+                    + (preparation.target().compileFailureRoots().isEmpty()
+                            ? "any configured compile-failure root"
+                            : preparation.target().compileFailureRoots().toString());
+        }
+        final var source = Files.readString(fixture);
+        final var result = Parser.of(Scanner.from(source, fixture.toString()).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics(fixture.toString());
+        final var diagnostics = new ArrayList<Diagnostic>();
+        result.diagnostics().stream()
+                .filter(diagnostic -> diagnostic.severity() == Severity.ERROR)
+                .forEach(diagnostics::add);
+        if (diagnostics.isEmpty()) {
+            final var units = new ArrayList<CompilationUnit>();
+            units.add(result.compilationUnit());
+            units.addAll(preparation.baseUnits());
+            final var packageName = result.compilationUnit().packageName();
+            final var savedWarnings = new ArrayList<>(warnings);
+            final var savedWarningKeys = new java.util.HashSet<>(warningKeys);
+            final var savedHadWarning = hadWarning;
+            final var savedSuppressWarnings = suppressWarnings;
+            suppressWarnings = true;
+            try {
+                final var compiler = CompilationService.forCompilationUnits(units,
+                        packageName.isEmpty() ? "Fixture" : packageName + ".Fixture",
+                        packageName, preparation.setup().libraries(),
+                        preparation.setup().bundleStandardLibrarySources(),
+                        preparation.javaClassPathRoots(), outputDirectory);
+                final var resolution = compiler.resolveWithDiagnostics();
+                resolution.errors().forEach(diagnostics::add);
+                if (diagnostics.isEmpty()) {
+                    final var compilation = compiler.compileWithDiagnostics();
+                    compilation.diagnostics().stream()
+                            .filter(diagnostic -> diagnostic.severity() == Severity.ERROR)
+                            .forEach(diagnostics::add);
+                }
+            } catch (final RuntimeException exception) {
+                return "the compiler failed internally: " + exception.getMessage();
+            } finally {
+                suppressWarnings = savedSuppressWarnings;
+                hadWarning = savedHadWarning;
+                warnings.clear();
+                warnings.addAll(savedWarnings);
+                warningKeys.clear();
+                warningKeys.addAll(savedWarningKeys);
+                deleteTree(outputDirectory);
+            }
+        }
+        if (diagnostics.isEmpty()) return "the fixture compiled successfully";
+        final var code = expectation.code();
+        final var matching = code.isEmpty()
+                ? diagnostics
+                : diagnostics.stream()
+                        .filter(diagnostic -> diagnostic.code().value().equals(code))
+                        .toList();
+        if (matching.isEmpty()) {
+            return "expected diagnostic " + code + " but got "
+                    + diagnostics.stream().map(diagnostic -> diagnostic.code().value())
+                            .distinct().toList();
+        }
+        final var message = expectation.message();
+        if (!message.isEmpty() && matching.stream()
+                .noneMatch(diagnostic -> diagnostic.message().contains(message))) {
+            return "expected a diagnostic containing '" + message + "' but got "
+                    + matching.stream().map(Diagnostic::message).toList();
+        }
+        return null;
+    }
+
+    private static Path locateFixture(final List<Path> roots, final String fixture) {
+        if (fixture == null || fixture.isBlank()) return null;
+        for (final var root : roots) {
+            final var candidate = root.resolve(fixture).toAbsolutePath().normalize();
+            if (!candidate.startsWith(root.toAbsolutePath().normalize())) continue;
+            if (Files.isRegularFile(candidate)) return candidate;
+        }
+        return null;
     }
 
     private static int exitCode() {

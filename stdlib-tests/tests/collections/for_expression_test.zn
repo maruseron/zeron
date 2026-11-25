@@ -1,0 +1,207 @@
+package collections;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Step;
+import zeron.collections.Stream;
+import zeron.test.CompileFailure;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+public class ForCalls {
+    value: Int;
+
+    public constructor new;
+
+    public mut record(item: Int): Int {
+        this.value = this.value + 1;
+        return item;
+    }
+
+    public read(): Int = this.value;
+}
+
+@Test
+public fn aForExpressionYieldsALazyStream(): Unit performs TestFailure {
+    let values = for item in [1, 2, 3] yield item * item;
+    assertEquals(14, values.fold(0, (total, item) -> total + item));
+}
+
+@Test
+public fn collectedForExpressionsFilter(): Unit performs TestFailure {
+    let values = for item in [1, 2, 3, 4, 5, 6]
+        if item % 2 == 0
+        collect item into ArrayList<Int>.empty();
+    assertEquals(330, values.size * 100 + values.at(0).getOrElse(-1) * 10
+        + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1));
+}
+
+@Test
+public fn flatMapIsLazy(): Unit performs TestFailure {
+    let calls = ForCalls.new(0);
+    let values = for item in [1, 2, 3]
+        for output in ArrayList<Int>.of(calls.record(item), calls.record(item + 10))
+        yield output;
+    let before = calls.read();
+    let sum = values.fold(0, (total, item) -> total + item);
+    assertEquals(642, before * 1000 + calls.read() * 100 + sum);
+}
+
+@Test
+public fn collectedFlatMapKeepsOrder(): Unit performs TestFailure {
+    let values = for item in [1, 2, 3]
+        for output in ArrayList<Int>.of(item, item + 1)
+        if output % 2 == 0
+        collect output into ArrayList<Int>.empty();
+    assertEquals(326, values.size * 100 + values.at(0).getOrElse(-1) * 10
+        + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1));
+}
+
+@Test
+public fn nestedFlatMapsMultiply(): Unit performs TestFailure {
+    let values = for outer in [1, 2]
+        for middle in ArrayList<Int>.of(outer, outer + 1)
+        for inner in ArrayList<Int>.of(middle * 10, middle * 100)
+        collect inner into ArrayList<Int>.empty();
+    assertEquals(9310, values.size * 1000 + values.at(0).getOrElse(-1)
+        + values.at(1).getOrElse(-1) * 10 + values.at(7).getOrElse(-1));
+}
+
+@Test
+public fn limitsAndWhileOperatorsStack(): Unit performs TestFailure {
+    let values: Stream<Int> = (for item in [1, 2, 3, 4, 5, 6, 7]
+        yield item).drop(1).take(5)
+            .dropWhile((item) -> item < 3)
+            .takeWhile((item) -> item < 6);
+    assertEquals(345, values.fold(0, (sum, item) -> sum * 10 + item));
+}
+
+@Test
+public fn takeStopsTheGeneratorAfterEnoughItems(): Unit performs TestFailure {
+    let calls = ForCalls.new(0);
+    let values = (for item in [1, 2, 3, 4]
+        yield calls.record(item)).take(2).toList();
+    assertEquals(223, calls.read() * 100 + values.size * 10
+        + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1));
+}
+
+@Test
+public fn takeBeforeFlatMapCountsFlatMappedItems(): Unit performs TestFailure {
+    let values = (for item in [1, 2, 3]
+        for output in [item, item * 10]
+        yield output).take(4).toList();
+    assertEquals(433, values.size * 100 + values.at(0).getOrElse(-1)
+        + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1)
+        + values.at(3).getOrElse(-1));
+}
+
+@Test
+public fn takeWhileAlsoStopsUpstream(): Unit performs TestFailure {
+    let calls = ForCalls.new(0);
+    let values = (for item in [1, 2, 3, 4]
+        yield calls.record(item))
+            .takeWhile((item) -> item < 3).toList();
+    assertEquals(323, calls.read() * 100 + values.size * 10
+        + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1));
+}
+
+@CompileFailure(fixture = "collections/immutable_for_sink.zn")
+public fn collectRequiresAMutableSink(): Unit {
+}
+
+@Test
+public fn arraySourcesStayLazyUnderFilters(): Unit performs TestFailure {
+    let calls = ForCalls.new(0);
+    let values: Stream<Int> = for item in [1, 2, 3]
+        if item > 1
+        yield calls.record(item);
+    let before = calls.read();
+    let total = values.fold(0, (sum, item) -> sum + item);
+    assertEquals(52, before * 100 + total * 10 + calls.read());
+}
+
+@Test
+public fn collectedPipelinesMapAndFilter(): Unit performs TestFailure {
+    let filtered = for item in [1, 2, 3, 4]
+        if item % 2 == 0
+        collect item * 3 into ArrayList<Int>.empty();
+    assertEquals(272, filtered.size * 100 + filtered.at(0).getOrElse(-1) * 10
+        + filtered.at(1).getOrElse(-1));
+
+    let mapped = for item in [1, 2, 3, 4]
+        collect item * 3 into ArrayList<Int>.empty();
+    assertEquals(436, mapped.size * 100 + mapped.at(0).getOrElse(-1) * 10
+        + mapped.at(1).getOrElse(-1));
+
+    let unfiltered = for item in [1, 2, 3, 4]
+        collect item into ArrayList<Int>.empty();
+    assertEquals(4123, unfiltered.size * 1000 + unfiltered.at(0).getOrElse(-1) * 100
+        + unfiltered.at(1).getOrElse(-1) * 10 + unfiltered.at(2).getOrElse(-1));
+}
+
+@Test
+public fn aStreamIteratorSeesFilteredAndMappedElements(): Unit performs TestFailure {
+    let stream = Stream<Int>.fromArray([1, 2, 3, 4])
+        .filter(item -> item % 2 == 0)
+        .map(item -> item * 3);
+    let iterator = stream.iterator();
+    let first = iterator.next();
+    let second = iterator.next();
+    assertEquals(612, match (first) {
+        case Step.Yield(a) ->
+            match (second) {
+                case Step.Yield(b) -> a * 100 + b;
+                case Step.Done() -> -1;
+            };
+        case Step.Done() -> -2;
+    });
+    assertEquals(612, stream.fold(0, (acc, item) -> acc * 100 + item));
+}
+
+@Test
+public fn iterableSourcesFeedForExpressions(): Unit performs TestFailure {
+    let values = for item in Stream<Int>.fromArray([2, 5])
+        collect item + 1 into ArrayList<Int>.empty();
+    assertEquals(36, values.at(0).getOrElse(-1) * 10 + values.at(1).getOrElse(-1));
+}
+
+@Test
+public fn bindingsAndCapturesInsideForExpressions(): Unit performs TestFailure {
+    let factor = 2;
+    let values = for item in [1, 2, 3]
+        let scaled = item * factor
+        if scaled > factor
+        for expanded in ArrayList<Int>.of(scaled, scaled + factor)
+        collect expanded into ArrayList<Int>.empty();
+    assertEquals(424, values.size * 100 + values.at(0).getOrElse(-1)
+        + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1)
+        + values.at(3).getOrElse(-1));
+}
+
+@Test
+public fn collectedWhileAndLimitPipelines(): Unit performs TestFailure {
+    let values = (for item in [1, 2, 3, 4, 5, 6, 7, 8]
+        yield item).drop(1).take(6)
+            .dropWhile((item) -> item < 4)
+            .takeWhile((item) -> item < 7).toList();
+    assertEquals(351, values.size * 100 + values.at(0).getOrElse(-1) * 10
+        + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1));
+}
+
+@Test
+public fn limitsAfterFlatMapCountExpandedItems(): Unit performs TestFailure {
+    let values = (for item in [1, 2, 3]
+        for output in ArrayList<Int>.of(item, item * 10)
+        yield output).drop(2).take(3).toList();
+    assertEquals(3403, values.size * 1000 + values.at(0).getOrElse(-1) * 100
+        + values.at(1).getOrElse(-1) * 10 + values.at(2).getOrElse(-1));
+}
+
+@Test
+public fn takeCountsBeforeDownstreamFiltering(): Unit performs TestFailure {
+    let calls = ForCalls.new(0);
+    let values = (for item in [1, 2, 3, 4]
+        yield calls.record(item)).take(2)
+            .filter((item) -> item > 2).toList();
+    assertEquals(200, calls.read() * 100 + values.size);
+}

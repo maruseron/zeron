@@ -186,11 +186,13 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0166](./ZEP-0166.md) | Open Generic Effect Applications | Implemented | Candidate | 0.9.0 |
 | [ZEP-0167](./ZEP-0167.md) | Capability Requirements in Generic Type Arguments | Draft | Unscheduled | — |
 | [ZEP-0168](./ZEP-0168.md) | Return Covariance in Contract Inheritance | Draft | Unscheduled | — |
-| [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Accepted | Candidate | 0.9.0 |
+| [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Implemented | Candidate | 0.9.0 |
 | [ZEP-0170](./ZEP-0170.md) | For-Expression and Do-Notation Boundary | Draft | Unscheduled | — |
 | [ZEP-0171](./ZEP-0171.md) | Fail-Fast Concurrent Scopes and the `concurrent` Helper | Implemented | Candidate | 0.9.0 |
 | [ZEP-0172](./ZEP-0172.md) | Portable Compiler-Managed Continuation Backend | Draft | Unscheduled | — |
 | [ZEP-0173](./ZEP-0173.md) | Source-Level Debug Metadata and IDE Stepping | Draft | Unscheduled | — |
+| [ZEP-0174](./ZEP-0174.md) | `if` Guards in Do-Notation through `Filterable` | Implemented | Candidate | 0.9.0 |
+| [ZEP-0175](./ZEP-0175.md) | Structured Test Reports and JSON Diagnostics | Draft | Unscheduled | — |
 
 ## Release bundles
 
@@ -205,7 +207,7 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 18 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0166 (implemented; open generic effect applications), ZEP-0165 (implemented; unifies `Task`/`Future`), ZEP-0164 (implemented; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0169 (accepted; library portion implemented), ZEP-0171 (implemented; fail-fast scopes and the `concurrent` helper), ZEP-0119 (implemented; continuations, tail transfer, generation tokens, task cancellation), ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157 (implemented) |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 19 candidates | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0166 (implemented; open generic effect applications), ZEP-0165 (implemented; unifies `Task`/`Future`), ZEP-0164 (implemented; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0169 (implemented; suite split, compile-failure runner, and parity table), ZEP-0171 (implemented; fail-fast scopes and the `concurrent` helper), ZEP-0119 (implemented; continuations, tail transfer, generation tokens, task cancellation), ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157 (implemented), and ZEP-0174 (implemented; `if` guards through `Filterable`) |
 | `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -355,13 +357,14 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 
 ### `0.9.0` — effect control and response typing
 
-`0.9.0` is the effect-control bundle. It has eighteen `Candidate` rows; [ZEP-0112](./ZEP-0112.md),
+`0.9.0` is the effect-control bundle. It has nineteen `Candidate` rows; [ZEP-0112](./ZEP-0112.md),
 [ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), [ZEP-0147](./ZEP-0147.md),
 [ZEP-0166](./ZEP-0166.md), [ZEP-0165](./ZEP-0165.md), [ZEP-0164](./ZEP-0164.md), and
-[ZEP-0119](./ZEP-0119.md) are implemented, [ZEP-0169](./ZEP-0169.md) is accepted with its library
-portion implemented, and the remaining library rows and [ZEP-0171](./ZEP-0171.md) are implemented.
-The effect-control rows carry the depth, and the library rows add surface that does not touch
-handler typing or code generation:
+[ZEP-0119](./ZEP-0119.md) are implemented, [ZEP-0169](./ZEP-0169.md) is implemented, the remaining
+library rows and [ZEP-0171](./ZEP-0171.md) are implemented, and
+[ZEP-0174](./ZEP-0174.md) is an implemented language rider. The effect-control rows carry the depth,
+the library rows add surface that does not touch handler typing or code generation, and the language
+rider uses the library's `Filterable` contract without changing effect handling:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
   an effect declares a response type, `perform` becomes an expression whose value the handler
@@ -423,11 +426,12 @@ handler typing or code generation:
   and a compiled `Regex` with matches, group access, replacement, and match iteration.
 - [ZEP-0157](./ZEP-0157.md) — collection building APIs. `List.build`, `Set.build`, `Map.build`, and
   `Stream.build` receiver-lambda blocks over curated builder types.
-- [ZEP-0169](./ZEP-0169.md) — standard-library test split and `@CompileFailure`. Accepted:
-  moves library runtime behavior to a `zeron.test` target, keeps diagnostics, ABI/API-index,
-  separate compilation, CLI, packaging, and process-isolation tests in the Java suite, and adds
-  expected-compilation-failure fixtures plus runner reporting and filtering. Release support for
-  the expanded library surface, not a language feature.
+- [ZEP-0169](./ZEP-0169.md) — standard-library test split and `@CompileFailure`. Implemented for
+  the infrastructure slice and the suite migration: test targets accept `compile-failure-roots`,
+  fixtures compile in process against `code`/`message` expectations, `zeron test` gained `--filter`,
+  `--list`, `--fail-fast`, assertion-message output, and an error count, and `stdlib-tests/` holds
+  the runtime suite with a coverage-parity table. Per-test timing and the JSON report remain.
+  Release support for the expanded library surface, not a language feature.
 - [ZEP-0171](./ZEP-0171.md) — fail-fast concurrent scopes and the `concurrent` helper.
   Implemented: makes fail-fast the default for `ConcurrentScope`, adds `openManual`/`openManualWith` as the
   caller-coordinated escape hatch, narrows `dispose` to effect-free `Unit`, and adds
@@ -435,6 +439,11 @@ handler typing or code generation:
   and cancel-and-join leftovers on exit. The first genuine task failure cancels siblings and is
   reported at a join or at close if unobserved. A fully typed close-time failure needs
   binder-dependent effect rows and remains future compiler work.
+- [ZEP-0174](./ZEP-0174.md) — `if` guards in do-notation through `Filterable`. Implemented: adds
+  `if (condition);` clauses that lower to witness-dispatched `filter`, requires `Filterable<F>` in
+  addition to `Monad<F>` for guarded blocks, and supplies `Option` and `Stream` implementations
+  while leaving `Result<_, E>` without a default. No runtime or ABI change; parser, resolution, and
+  standard-library surface only.
 - [ZEP-0172](./ZEP-0172.md) — portable compiler-managed continuation backend. Draft,
   `Unscheduled`, split out of ZEP-0119: owns the state-machine transform, the descriptor and
   API-index schema change, cleanup states, stack-trace costs, and the 1 µs/1 KB gate. It is not part

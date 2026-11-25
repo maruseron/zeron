@@ -72,9 +72,11 @@ final class CliMetadata {
                     + "generated main class from that target's output directory."),
             new Command("test", "zeron test [<target>] [options]",
                     "Build and run the selected test target's generated runner.",
-                    List.of("--manifest", "--debug", "--deny-warnings", "--no-deny-warnings", "--no-warnings"),
+                    List.of("--manifest", "--debug", "--deny-warnings", "--no-deny-warnings", "--no-warnings",
+                            "--filter", "--list", "--fail-fast"),
                     "Selects a target with kind = \"test\", or synthesizes an implicit test target when "
-                    + "none exists. The generated runner reports each test and exits with its status."),
+                    + "none exists. The generated runner reports each test and exits with its status. "
+                    + "Tests marked @CompileFailure run through the host compiler after the runner."),
             new Command("fmt", "zeron fmt [--check] [<file-or-directory>...]",
                     "Format selected sources or the project's source roots.",
                     List.of("--check"),
@@ -138,7 +140,18 @@ final class CliMetadata {
                     "Explicitly selects the transport used by language clients."),
             new Option("--check", "", "", Set.of("fmt"),
                     "Report formatting differences without modifying files.",
-                    "The command exits unsuccessfully when a selected file differs from canonical style."));
+                    "The command exits unsuccessfully when a selected file differs from canonical style."),
+            new Option("--filter", "", "pattern", Set.of("test"),
+                    "Run only tests whose fully qualified name contains the pattern.",
+                    "Applies to ordinary and compile-failure tests. Matching is a plain substring test, "
+                    + "so a package name selects every test in that package."),
+            new Option("--list", "", "", Set.of("test"),
+                    "Print the discovered tests without running them.",
+                    "Marks ignored tests and compile-failure tests, then prints the discovered total."),
+            new Option("--fail-fast", "", "", Set.of("test"),
+                    "Stop after the first failing test.",
+                    "Remaining ordinary tests are skipped, and a runner failure also skips the "
+                    + "compile-failure phase."));
 
     static final List<ManifestTable> MANIFEST_TABLES = List.of(
             new ManifestTable("project", "Project-wide source and output configuration.", List.of(
@@ -185,7 +198,10 @@ final class CliMetadata {
                             "Generated-program directory for this target.",
                             "Effective target outputs must be distinct after normalization."),
                     new ManifestKey("targets.<name>", "deny-warnings", "boolean", "[build].deny-warnings",
-                            "optional", "Per-target warning policy.", "Command-line options take precedence."))));
+                            "optional", "Per-target warning policy.", "Command-line options take precedence."),
+                    new ManifestKey("targets.<name>", "compile-failure-roots", "array of strings", "[]",
+                            "optional", "Directories holding deliberately invalid @CompileFailure fixtures.",
+                            "Only valid on a test target, and must not overlap a project source root."))));
 
     static Optional<Command> command(final String name) {
         return COMMANDS.stream().filter(command -> command.name().equals(name)).findFirst();

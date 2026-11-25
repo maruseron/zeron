@@ -1,0 +1,68 @@
+package ranges;
+
+import zeron.collections.Stream;
+import zeron.ranges.IntRange;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn count(range: IntRange): Int {
+    let mut values = 0;
+    for (let value in range) values = values + 1;
+    return values;
+}
+
+fn sum(range: IntRange): Int {
+    let mut total = 0;
+    for (let value in range) total = total + value;
+    return total;
+}
+
+fn first(range: IntRange): Int {
+    for (let value in range) return value;
+    return -1;
+}
+
+@Test
+public fn ascendingRangesIncludeTheirBounds(): Unit performs TestFailure {
+    let range = IntRange.ascending(1, 3);
+    assertEquals(3, count(range));
+    assertEquals(1, first(range));
+    assertEquals(6, sum(range));
+}
+
+@Test
+public fn descendingRangesWalkBackwards(): Unit performs TestFailure {
+    let range = IntRange.descending(3, 1);
+    assertEquals(3, count(range));
+    assertEquals(3, first(range));
+    assertEquals(6, sum(range));
+}
+
+@Test
+public fn closedRangesPickTheirDirection(): Unit performs TestFailure {
+    assertEquals(6, sum(IntRange.closed(1, 3)));
+    assertEquals(6, sum(IntRange.closed(3, 1)));
+    assertEquals(1, count(IntRange.closed(2, 2)));
+}
+
+@Test
+public fn invertedRangesAreEmpty(): Unit performs TestFailure {
+    assertEquals(0, count(IntRange.ascending(3, 1)));
+    assertEquals(0, count(IntRange.descending(1, 3)));
+}
+
+@Test
+public fn rangesFeedStreams(): Unit performs TestFailure {
+    assertEquals(4, Stream<Int>.from(IntRange.closed(1, 4)).count());
+    assertEquals(10, Stream<Int>.from(IntRange.closed(1, 4))
+        .fold(0, (total, value) -> total + value));
+}
+
+@Test
+public fn rangesStopAtIntegerLimits(): Unit performs TestFailure {
+    let max = 2147483647;
+    assertEquals(2, count(IntRange.ascending(max - 1, max)));
+    let min = -2147483647 - 1;
+    assertEquals(2, count(IntRange.descending(min + 1, min)));
+}

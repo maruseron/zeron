@@ -1,0 +1,86 @@
+package buffer;
+
+import zeron.buffer.*;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn littleEndianBufferRoundTripsIntegersAndVarInts(): Unit performs TestFailure {
+    let buffer = ByteBuffer.empty();
+    buffer.order = ByteOrder.LittleEndian();
+    buffer.putInt(0x01020304);
+    buffer.putVarInt(300);
+    let bytes = buffer.toArray();
+    assertEquals("04030201ac02", Hex.encode(bytes));
+
+    let reader = ByteReader.over(bytes);
+    reader.order = ByteOrder.LittleEndian();
+    let decoded = match (reader.getInt()) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> 0;
+    };
+    let varInt = match (reader.getVarInt()) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> 0;
+    };
+    assertEquals(0x01020304, decoded);
+    assertEquals(300, varInt);
+}
+
+@Test
+public fn encodingsRoundTrip(): Unit performs TestFailure {
+    let bytes = match (Hex.decode("ff00")) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> ByteBuffer.empty().toArray();
+    };
+    let base64 = Base64.encode(bytes);
+    assertEquals("/wA=", base64);
+    let decoded = match (Base64.decode(base64)) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> ByteBuffer.empty().toArray();
+    };
+    assertEquals(2, decoded.length);
+    assertEquals(255, decoded[0].toInt());
+    assertEquals(-7, VarInt.zigZagDecodeInt(VarInt.zigZagEncodeInt(-7)));
+    assertEquals(-9L, VarInt.zigZagDecodeLong(VarInt.zigZagEncodeLong(-9L)));
+}
+
+fn byteArray(hex: String): Array<Byte> =
+    match (Hex.decode(hex)) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> ByteBuffer.empty().toArray();
+    };
+
+fn truncationFacts(): Int {
+    let reader = ByteReader.over(byteArray("010203"));
+    let position = reader.position;
+    let result = reader.getLong();
+    let facts = match (result) {
+        case Result.Ok(_) -> -1;
+        case Result.Err(BufferError.Truncated(needed, remaining)) -> needed * 10 + remaining;
+    };
+    return position * 1000 + facts;
+}
+
+@Test
+public fn shortReadsReportTruncationWithoutMovingTheCursor(): Unit performs TestFailure =
+    assertEquals(83, truncationFacts());
+
+@Test
+public fn seekSliceAndRemainderRespectTheCursor(): Unit performs TestFailure {
+    let reader = ByteReader.over(byteArray("01020304"));
+    assertEquals(false, reader.seek(9));
+    assertEquals(true, reader.seek(1));
+    assertEquals(3, reader.remaining());
+    let empty: Array<Byte> = [];
+    assertEquals(2, reader.slice(1, 3).getOrElse(empty).length);
+    assertEquals(3, reader.remainder().length);
+}
+
+@Test
+public fn bitHelpersExposeTheIntegerRepresentation(): Unit performs TestFailure {
+    assertEquals(2, 10.bitCount());
+    assertEquals(31, 1.leadingZeros());
+    assertEquals(2, 1.rotateLeft(1));
+}

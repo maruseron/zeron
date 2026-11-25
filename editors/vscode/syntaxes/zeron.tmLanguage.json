@@ -259,6 +259,14 @@
     "contextual-keywords": {
       "patterns": [
         {
+          "match": "\\b(responds)\\b(?=\\s+[^{};\\n=]*?(?:\\{|deriving\\b))",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
           "match": "\\b(admits)\\b(?=\\s+(?:nullable|mutable|effect)\\b)",
           "captures": {
             "1": {

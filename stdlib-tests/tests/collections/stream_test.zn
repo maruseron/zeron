@@ -1,0 +1,100 @@
+package collections;
+
+import zeron.collections.Stream;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertTrue;
+
+public class Calls {
+    value: Int;
+
+    public constructor new;
+
+    public mut record(item: Int): Int {
+        this.value = this.value + 1;
+        return item;
+    }
+
+    public read(): Int = this.value;
+}
+
+@Test
+public fn streamOperatorsCompose(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([1, 2, 3, 4, 5, 6])
+        .map(value -> value * 2)
+        .filter(value -> value > 4)
+        .drop(1)
+        .take(2);
+    assertEquals(18, values.fold(0, (total, value) -> total + value));
+}
+
+@Test
+public fn foldedAndCountedStreams(): Unit performs TestFailure {
+    assertEquals(10, Stream<Int>.fromArray([1, 2, 3, 4]).fold(0,
+        (total, value) -> total + value));
+    assertEquals(2, Stream<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count());
+}
+
+@Test
+public fn predicatesShortCircuit(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([2, 4, 6]);
+    assertTrue(values.any(value -> value == 4));
+    assertTrue(values.all(value -> value > 0));
+}
+
+@Test
+public fn whileOperatorsCombine(): Unit performs TestFailure =
+    assertEquals(12, Stream<Int>.fromArray([1, 2, 3, 4, 5, 6])
+        .dropWhile(value -> value < 3)
+        .takeWhile(value -> value < 6)
+        .fold(0, (sum, value) -> sum + value));
+
+@Test
+public fn forEachVisitsEveryElement(): Unit performs TestFailure {
+    let calls = Calls.new(0);
+    Stream<Int>.fromArray([3, 5, 7]).forEach(value -> {
+        calls.record(value);
+    });
+    assertEquals(3, calls.read());
+}
+
+@Test
+public fn streamsAreLazyUntilConsumed(): Unit performs TestFailure {
+    let calls = Calls.new(0);
+    let values = Stream<Int>.fromArray([4, 5, 6]).map(value -> calls.record(value));
+    let beforeConsumption = calls.read();
+    let first = values.take(1).fold(0, (sum, value) -> sum + value);
+    assertEquals(41, beforeConsumption * 100 + first * 10 + calls.read());
+}
+
+@Test
+public fn emptyStreamPredicatesAreVacuous(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([1, 2, 3]).filter(value -> false);
+    assertTrue(values.count() == 0);
+    assertTrue(not values.any(value -> true));
+    assertTrue(values.all(value -> false));
+}
+
+@Test
+public fn takeZeroDoesNotPullUpstream(): Unit performs TestFailure {
+    let calls = Calls.new(0);
+    let values = Stream<Int>.fromArray([1, 2, 3]).map(value -> calls.record(value)).take(0);
+    assertEquals(0, values.count());
+    assertEquals(0, calls.read());
+}
+
+@Test
+public fn zeroAndNegativeLimitsAreTotal(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([1, 2, 3]);
+    assertEquals(33, values.take(0).count() * 1000
+        + values.take(-1).count() * 100
+        + values.drop(0).count() * 10
+        + values.drop(-1).count());
+}
+
+@Test
+public fn aStreamCanBeTraversedRepeatedly(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([2, 3]);
+    assertEquals(22, values.count() * 10 + values.count());
+}

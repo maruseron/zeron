@@ -1,0 +1,70 @@
+package collections;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Collector;
+import zeron.collections.ConsList;
+import zeron.collections.HashMap;
+import zeron.collections.HashSet;
+import zeron.collections.LinkedList;
+import zeron.collections.Stream;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn collectorsBuildListShapes(): Unit performs TestFailure {
+    let array = Stream<Int>.fromArray([1, 2, 3]).collectWith(Collector.toArrayList<Int>());
+    assertEquals(313, array.count() * 100 + array.at(0).getOrElse(0) * 10
+        + array.at(2).getOrElse(0));
+
+    let linked = Stream<Int>.fromArray([1, 2, 3]).collectWith(Collector.toLinkedList<Int>());
+    assertEquals(313, linked.count() * 100 + linked.at(0).getOrElse(0) * 10
+        + linked.at(2).getOrElse(0));
+
+    let cons = Stream<Int>.fromArray([1, 2, 3]).collectWith(Collector.toConsList<Int>());
+    assertEquals(313, cons.count() * 100 + cons.first().getOrElse(0) * 10
+        + cons.last().getOrElse(0));
+}
+
+@Test
+public fn anEmptyStreamCollectsIntoAnEmptyCollection(): Unit performs TestFailure =
+    assertEquals(0, Stream<Int>.fromArray([]).collectWith(Collector.toArrayList<Int>()).count());
+
+@Test
+public fn hashMapCollectorRoundTripsEntries(): Unit performs TestFailure {
+    let mut source = HashMap.empty<String, Int>();
+    source.put("a", 1);
+    source.put("b", 2);
+    let copied = source.stream().collectWith(Collector.toHashMap<String, Int>());
+    assertEquals(14, copied.get("a").getOrElse(0) * 10 + copied.get("b").getOrElse(0)
+        + copied.count());
+}
+
+@Test
+public fn hashSetCollectorDeduplicates(): Unit performs TestFailure {
+    let values = Stream<Int>.fromArray([1, 2, 2, 3])
+        .collectWith(Collector.toHashSet<Int>());
+    assertEquals(3, if (values.contains(2) and not values.contains(9)) then values.count() else -1);
+}
+
+@Test
+public fn summingCollectorsCoverIntLongAndFloat(): Unit performs TestFailure {
+    assertEquals(10, Stream<Int>.fromArray([1, 2, 3, 4]).collectWith(Collector.summing<Int>()));
+    assertEquals(6L, Stream<Long>.fromArray([1L, 2L, 3L]).collectWith(Collector.summing<Long>()));
+    assertEquals(1.75, Stream<Float>.fromArray([0.5, 1.25])
+        .collectWith(Collector.summing<Float>()));
+    assertEquals(0, Stream<Int>.fromArray([]).collectWith(Collector.summing<Int>()));
+}
+
+@Test
+public fn collectOperationsMatchACollector(): Unit performs TestFailure =
+    assertEquals(12, Stream<Int>.fromArray([1, 2, 3]).collect(0,
+        (total, value) -> total + value, (total) -> total * 2));
+
+@Test
+public fn aCollectorCanBeReusedAcrossStreams(): Unit performs TestFailure {
+    let collector = Collector.toConsList<Int>();
+    let first = Stream<Int>.fromArray([1, 2]).collectWith(collector);
+    let second = Stream<Int>.fromArray([3]).collectWith(collector);
+    assertEquals("2-3", first.count().toString() + "-" + second.count().toString());
+}

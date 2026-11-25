@@ -75,28 +75,27 @@ iterator should make `close` idempotent.
 
 ## Pull generators
 
-`generator<T>` turns a body that performs `Yield<T>` into a replayable source:
+A generator implements the same protocol from the other direction: you write a body that emits
+values with `perform Yield<T>(value)` instead of an iterator class with a stored position.
+`generator<T>` returns a replayable `GeneratorSource<T>` whose cursors are `Generator<T>` values.
 
 ```zeron
 import zeron.collections.generator;
 import zeron.lang.Yield;
 
-let body: () -> Unit performs Yield<Int> = () -> {
+let numbers = generator<Int> {
     perform Yield<Int>(0);
     perform Yield<Int>(1);
     perform Yield<Int>(2);
 };
-let numbers = generator<Int>(body);
 
 for (let number in numbers) println(number);
 ```
 
-The body starts on the first `next()` and stays suspended between pulls. Each `iterator()` call
-starts a fresh body, so the source can be traversed repeatedly; the returned `Generator<T>` is a
-one-shot cursor with `cancel()` and `isDone()`. `cancel()` reports cleanup failure as
-`DisposeFailure`; `close()`, which `for` uses, does not. The body may leave only `Yield<T>` and the
-`DisposeFailure` that `using` cleanup can raise unhandled, because `next()` has no effect row. The
-signature also accepts a trailing lambda: `generator<Int> { perform Yield<Int>(1); }`.
+The body starts on the first pull and stays suspended between yields. Each `iterator()` call starts
+a fresh body, so the source can be traversed repeatedly; the cursor it returns is one-shot and is
+not itself an `Iterable`. [Generators and the iteration protocol](46-generators-and-iteration.md)
+covers the generator side of the protocol, effects in the body, and cleanup.
 
 ## Ranges of integers
 
@@ -188,6 +187,9 @@ do not prescribe storage:
 | `ArrayDeque<T>` | mutable circular array | `List`, `Sequenced`, `Deque`, `RandomAccess`, `Sink`, `Clearable` |
 | `ConsList<T>` | persistent singly linked list | `List`, `Sequenced`; `prepend` returns a new list |
 | `IdentityHashMap<K, V>` | hash table keyed by reference identity | `Map`, `KeyedSink`, `Sized`, `Clearable` |
+| `PriorityQueue<T>` | mutable binary min-heap | `Sized`; `peek`, `add`, `poll`, `remove`, `clear` |
+| `SortedSet<T>` | ordered keys of an array-backed map | `Set`, `Sized`, `Sequenced`, `Sink`, `Removable`, `Clearable` |
+| `SortedMap<K, V>` | paired ordered key and value arrays | `Map`, `Sized`, `Sequenced`, `Clearable` |
 
 `Deque<T>` is a capability contract requiring `List<T> + Sequenced<T>`, with `addFirst`, `addLast`,
 `removeFirst`, and `removeLast`. `LinkedList` and `ArrayDeque` implement it; `ConsList` does not,
@@ -208,7 +210,9 @@ import zeron.collections.ArrayList;
 let ordered = names.sorted();
 let mut values = ArrayList.of(3, 1, 2);
 values.sortBy((a, b) -> b.compareTo(a)); // 3, 2, 1
-``` `IdentityHashMap` compares keys with `===`, so its keys need neither `Eq` nor
+```
+
+`IdentityHashMap` compares keys with `===`, so its keys need neither `Eq` nor
 `Hashable`, and two structurally equal objects are distinct keys.
 
 ```zeron
@@ -219,6 +223,44 @@ deque.addFirst(1);
 deque.addLast(3);
 let first = deque.removeFirst();
 ```
+
+## Ordered collections
+
+Three implementations keep their elements ordered by `Comparable` instead of by insertion or hash.
+`SortedSet<T>` and `SortedMap<K, V>` maintain ascending order and support `O(log n)` lookup;
+`PriorityQueue<T>` is a min-heap where `peek` is constant time and `add`/`poll` are `O(log n)`.
+
+```zeron
+import zeron.collections.PriorityQueue;
+import zeron.collections.SortedMap;
+import zeron.collections.SortedSet;
+
+let queue = PriorityQueue<Int>.empty();
+queue.add(3);
+queue.add(1);
+queue.add(2);
+let smallest = queue.poll().getOrElse(-1); // 1
+
+let ports = SortedMap<String, Int>.empty();
+ports.put("http", 80);
+ports.put("https", 443);
+let firstKey = ports.firstKey().getOrElse(""); // http
+
+let ids = SortedSet<Int>.empty();
+ids.add(3);
+ids.add(1);
+ids.add(3); // ignored: already present
+let first = ids.first().getOrElse(-1); // 1
+```
+
+`SortedSet` and `SortedMap` use the element's `compareTo`, not `Eq`, so two values that compare
+equal are the same element or key. `PriorityQueue` is not sorted during iteration: it yields the
+backing heap array order, and only `poll` returns ascending values. Use it when the program needs
+repeated access to the smallest (or, with a reversed comparator, largest) element rather than a
+full ordering.
+
+`SortedMap` iterates an in-order snapshot of the keys it holds when iteration begins; mutating the
+map while iterating it is a programming error. `SortedSet` iterates ascending elements.
 
 A `Stream<T>` is useful when you want to describe steps for producing or transforming values. Its
 operations include `map`, `filter`, `flatMap`, `take`, `drop`, `takeWhile`, and `dropWhile`:
@@ -290,6 +332,40 @@ let bracket = Collector.of<String, Int, String>("",
     (text, value) -> text + value.toString(), (text) -> "[" + text + "]");
 let text = numbers.collectWith(bracket);
 ```
+
+## Complexity and ordering guarantees
+
+Contracts describe capabilities, not performance. The guarantees below belong to the implementations
+the standard library ships. The hash-based rows state expected cost rather than a documented bound,
+because it depends on how `Hashable` distributes keys.
+
+| Type | Access and update | Iteration order |
+| --- | --- | --- |
+| `ArrayList<T>` | index read and write `O(1)`; append amortized `O(1)`; insert or remove in the middle `O(n)` (shifts the tail) | insertion order |
+| `LinkedList<T>` | add or remove at either end `O(1)`; indexed access `O(n)`, walking from the nearer end; no middle editing by index | insertion order |
+| `ArrayDeque<T>` | add or remove at either end amortized `O(1)`; index read `O(1)`; no middle removal | insertion order |
+| `ConsList<T>` | `prepend` `O(1)`; `size` `O(1)`; `last` `O(n)`; persistent, never mutates | head to tail |
+| `HashSet<T>`, `HashMap<K, V>` | hash-based; expected constant time, with cost depending on `Hashable` distribution | not specified |
+| `IdentityHashMap<K, V>` | hash-based on identity; expected constant time | not specified |
+| `SortedSet<T>`, `SortedMap<K, V>` | lookup `O(log n)`; insertion and removal `O(n)` because the ordered arrays shift | ascending by `Comparable` |
+| `PriorityQueue<T>` | `peek` `O(1)`; `add` and `poll` `O(log n)`; remove by value `O(n)` | backing heap order, not sorted; `poll` is ascending |
+| `Stream<T>` | one pass per traversal; most stages `O(1)` per element; `sorted`/`sortedBy` `O(n log n)` time and `O(n)` space | source order, except stateful stages |
+| `IntRange` | `O(1)` per element | ascending or descending, inclusive bounds |
+
+Ordering rules to keep in mind:
+
+- A contract such as `List<T>` or `Set<T>` promises no iteration order. Only the implementation
+you hold does.
+- `ArrayList`, `LinkedList`, `ArrayDeque`, and `ConsList` preserve insertion order. `HashSet`,
+  `HashMap`, and `IdentityHashMap` iterate in an unspecified order that can differ between runs.
+- `SortedSet`, `SortedMap`, and `PriorityQueue` order by `Comparable`. `SortedSet` and `SortedMap`
+  treat values that compare equal as the same element or key.
+- `sorted` and `sort` are unstable: equal elements may change relative order. Use `sortedBy` with a
+  comparator that breaks ties when the order of equal elements matters.
+- `Stream` preserves the encounter order of its source. `sortedBy` buffers and reorders, so it is
+  the one stage that costs `O(n)` space per traversal.
+- Do not mutate a collection while iterating it, except through the cursor the iteration created.
+  `SortedMap` documents this as a programming error; the same discipline applies everywhere.
 
 ## Collections of anonymous existential elements
 

@@ -69,6 +69,13 @@ try {
         throw "Expected shaded compiler JAR was not produced: $builtCompilerJar"
     }
 
+    $stdlibSuiteManifest = Join-Path $repositoryRoot "stdlib-tests\zeron.toml"
+    $stdlibSuiteOutput = & zeron test --manifest $stdlibSuiteManifest stdlib-runtime 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $stdlibSuiteReport = $stdlibSuiteOutput -join [Environment]::NewLine
+        throw "Packaged compiler failed the standard-library test suite: $stdlibSuiteReport"
+    }
+
     if (Test-Path -LiteralPath $stageRoot) {
         Remove-Item -LiteralPath $stageRoot -Recurse -Force
     }

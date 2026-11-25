@@ -155,5 +155,7 @@ Each set has a different job. Keep them separate:
   adding or changing a diagnostic.
 - [`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md) — test
   layout and focused runs.
+- [`stdlib-suite-parity.md`](./documents/developer_guides/stdlib-suite-parity.md) — the Zeron
+  standard-library suite, its coverage, and the Java assertions that remain.
 - [`generated-artifacts-and-release.md`](./documents/developer_guides/generated-artifacts-and-release.md) —
   `dist/`, API index, and release packaging.

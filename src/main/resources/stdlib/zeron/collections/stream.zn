@@ -5,6 +5,7 @@ import zeron.internal.unwrapSome;
 import zeron.control.Functor;
 import zeron.control.Applicative;
 import zeron.control.Monad;
+import zeron.control.Filterable;
 
 class ArrayStream<T admits mutable> is Iterable<T> {
     values: Array<T>;
@@ -218,6 +219,36 @@ class FilteredStream<T admits mutable> is Iterable<T> {
     }
 }
 
+class MapFilteredStream<T admits mutable, R admits mutable> is Iterable<R> {
+    source: Iterable<T>;
+    transform: (T) -> Option<R>;
+
+    public iterator(): &Iterator<R> {
+        let upstream = source.iterator();
+        let mapper = transform;
+        return object: Iterator<R> {
+            source: &Iterator<T> = upstream;
+            transform: (T) -> Option<R> = mapper;
+
+            public mut next(): Step<R> {
+                let mut item = this.source.next();
+                loop {
+                    if (item matches Step.Yield(value)) {
+                        let mapped = this.transform(value);
+                        if (mapped matches Option.Some(result)) return Step.Yield(result);
+                    } else {
+                        return Step<R>.Done();
+                    }
+                    item = this.source.next();
+                }
+                return Step<R>.Done();
+            }
+
+            public mut close(): Unit = this.source.close();
+        };
+    }
+}
+
 class TakenStream<T admits mutable> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
@@ -394,6 +425,7 @@ public class Stream<T admits mutable>
        Functor<Stream<_>>, 
        Applicative<Stream<_>>,
        Monad<Stream<_>>, 
+       Filterable<Stream<_>>,
        Foldable<Stream<_>> {
     source: Iterable<T>;
 
@@ -516,6 +548,11 @@ public class Stream<T admits mutable>
     delegating implementation Monad<Stream<_>> {
         fn flatMap<A, B>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
             Stream<B>.new(MonadFlatMappedStream<A, B>.new(this.source, transform));
+    }
+
+    delegating implementation Filterable<Stream<_>> {
+        fn mapFilter<A, B>(this: Stream<A>, transform: (A) -> Option<B>): Stream<B> =
+            Stream<B>.new(MapFilteredStream<A, B>.new(this.source, transform));
     }
 
     delegating implementation Foldable<Stream<_>> {

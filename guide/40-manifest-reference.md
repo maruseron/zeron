@@ -56,6 +56,7 @@ Named application or test targets.
 | `entry` | string | [project].entry | optional | Entry source for an application target. | Must have a .zn extension and be under a configured source root. |
 | `output` | string | <project.output>/<name> | optional | Generated-program directory for this target. | Effective target outputs must be distinct after normalization. |
 | `deny-warnings` | boolean | [build].deny-warnings | optional | Per-target warning policy. | Command-line options take precedence. |
+| `compile-failure-roots` | array of strings | [] | optional | Directories holding deliberately invalid @CompileFailure fixtures. | Only valid on a test target, and must not overlap a project source root. |
 
 ## Path resolution
 

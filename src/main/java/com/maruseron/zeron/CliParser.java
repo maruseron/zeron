@@ -120,10 +120,26 @@ final class CliParser {
         var noDenyWarningsSpecified = false;
         String targetName = null;
         var noWarnings = false;
+        String testFilter = null;
+        var listTests = false;
+        var failFast = false;
         for (var index = 1; index < args.length; index++) {
             final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
                 debug = true;
+            } else if (argument.equals("--filter")) {
+                if (!testCommand) return invalid("--filter is only valid for 'zeron test'.");
+                if (testFilter != null) return invalid("The --filter option may only be specified once.");
+                if (++index >= args.length) return invalid("--filter requires a test-name pattern.");
+                testFilter = args[index];
+            } else if (argument.equals("--list")) {
+                if (!testCommand) return invalid("--list is only valid for 'zeron test'.");
+                if (listTests) return invalid("The --list option may only be specified once.");
+                listTests = true;
+            } else if (argument.equals("--fail-fast")) {
+                if (!testCommand) return invalid("--fail-fast is only valid for 'zeron test'.");
+                if (failFast) return invalid("The --fail-fast option may only be specified once.");
+                failFast = true;
             } else if (argument.equals("--deny-warnings")) {
                 if (denyWarningsSpecified) {
                     return invalid("The --deny-warnings option may only be specified once.");
@@ -188,7 +204,8 @@ final class CliParser {
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
         return parsed(new ProjectCommand(launch, testCommand, manifest, debug,
-                Optional.ofNullable(targetName), project, target, denyWarnings, noWarnings));
+                Optional.ofNullable(targetName), project, target, denyWarnings, noWarnings,
+                Optional.ofNullable(testFilter), listTests, failFast));
     }
 
     private static ParseResult parseLspCommand(final String[] args) {
@@ -569,9 +586,12 @@ final class CliParser {
     record ProjectCommand(boolean launch, boolean testCommand, Path manifest, boolean debug,
                           Optional<String> targetName,
                           ProjectManifest project, ProjectManifest.ProjectTarget target,
-                          Boolean denyWarningsOverride, boolean noWarnings) implements Invocation {
+                          Boolean denyWarningsOverride, boolean noWarnings,
+                          Optional<String> testFilter, boolean listTests, boolean failFast)
+            implements Invocation {
         ProjectCommand {
             targetName = targetName == null ? Optional.empty() : targetName;
+            testFilter = testFilter == null ? Optional.empty() : testFilter;
         }
 
         public boolean denyWarnings() {

@@ -42,6 +42,29 @@ public final class CliParserTest {
     }
 
     @Test
+    public void parsesTestSelectionOptions() throws Exception {
+        final var manifest = createProjectManifest("test-project.toml", "test-src");
+        final var test = (CliParser.ProjectCommand) parse("test",
+                "--manifest", manifest.toString(), "--filter", "app.add", "--list", "--fail-fast");
+        assertTrue(test.testFilter().orElseThrow().equals("app.add"));
+        assertTrue(test.listTests());
+        assertTrue(test.failFast());
+
+        final var plain = (CliParser.ProjectCommand) parse("test",
+                "--manifest", manifest.toString());
+        assertTrue(plain.testFilter().isEmpty());
+        assertFalse(plain.listTests());
+        assertFalse(plain.failFast());
+
+        assertTrue(invalid("test", "--filter")
+                .message().contains("requires a test-name pattern"));
+        assertTrue(invalid("build", "--filter", "app", "--manifest", manifest.toString())
+                .message().contains("only valid for 'zeron test'"));
+        assertTrue(invalid("test", "--list", "--list", "--manifest", manifest.toString())
+                .message().contains("only be specified once"));
+    }
+
+    @Test
     public void parsesTargetNamesAndWarningPolicyOverrides() throws Exception {
         final var manifest = createProjectManifest("target-project.toml", "target-src");
         Files.writeString(manifest, Files.readString(manifest) + """

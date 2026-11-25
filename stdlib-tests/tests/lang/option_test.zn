@@ -1,0 +1,37 @@
+package lang;
+
+import zeron.lang.Option;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn someFoldAddsOne(): Unit performs TestFailure =
+    assertEquals(42, Option.Some(41).fold(value -> value + 1, () -> 0));
+
+@Test
+public fn noneFoldUsesTheEmptyBranch(): Unit performs TestFailure =
+    assertEquals(42, Option<Int>.None().fold(value -> value, () -> 42));
+
+@Test
+public fn mapTransformsAPresentValue(): Unit performs TestFailure =
+    assertEquals(42, Option.Some(41).map(value -> value + 1).getOrElse(0));
+
+@Test
+public fn filterKeepsMatchingValues(): Unit performs TestFailure =
+    assertEquals(42, Option.Some(42).filter(value -> value > 0).getOrElse(0));
+
+@Test
+public fn filterDropsRejectedValues(): Unit performs TestFailure =
+    assertEquals(-1, Option.Some(42).filter(value -> false).getOrElse(-1));
+
+@Test
+public fn someNullIsPresent(): Unit performs TestFailure {
+    let option: Option<String?> = Option.Some(null);
+    assertEquals(true, option.isSome());
+    assertEquals(true, option.fold(value -> value == null, () -> false));
+}
+
+@Test
+public fn noneIsAbsent(): Unit performs TestFailure =
+    assertEquals(false, Option<String?>.None().isSome());

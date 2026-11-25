@@ -1631,10 +1631,17 @@ public final class Parser {
                         "An effect-row type parameter cannot be reified.");
                 markers.reified = false;
             }
-            descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded,
-                    variance, markers.nullable, markers.effectKind, markers.effectRowKind,
-                    markers.mutable, markers.reified);
-            parameters.put(parameter.lexeme(), descriptor);
+            if (higherKinded) {
+                // Bounds are parsed while this parameter is the one in scope, so a higher-kinded
+                // bound such as `S<_>: Monad<S>` must keep referring to this same descriptor.
+                // Markers are rejected for higher-kinded parameters, so only the bounds change.
+                descriptor.initializeBounds(bounds);
+            } else {
+                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded,
+                        variance, markers.nullable, markers.effectKind, markers.effectRowKind,
+                        markers.mutable, markers.reified);
+                parameters.put(parameter.lexeme(), descriptor);
+            }
         } while (match(COMMA));
         consume(GREATER, "Expect '>' after type parameters.");
         if (parameters.isEmpty()) error(declarationName, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
@@ -4589,10 +4596,39 @@ public final class Parser {
         }
     }
 
-    /// A parsed `do` bind clause together with the local `let` clauses that follow it. Plain locals
-    /// are evaluated inside the bind's continuation, which is why they must follow a bind.
-    private record DoBind(Token keyword, Token name, Expr source,
+    /// A parsed `do` bind clause together with the `if` guards and plain `let` clauses that follow
+    /// it. Guards filter the bound source, and plain locals are evaluated inside the bind's
+    /// continuation, which is why they must follow the bind's guards.
+    private record DoBind(Token keyword, Token name, Expr source, List<Expr> guards,
                           List<Token> localNames, List<Expr> localValues) {}
+
+    /// Whether the clause that starts at the current `if` is a `do` guard rather than a
+    /// value-level conditional expression. A guard is `if (condition);`; a value-level conditional
+    /// always continues with `then` after the closing parenthesis.
+    private boolean looksLikeDoGuardClause() {
+        if (!check(IF) || current + 1 >= tokens.size()) return false;
+        var index = current + 1;
+        if (tokens.get(index).type() != LEFT_PAREN) return false;
+        var depth = 0;
+        for (; index < tokens.size(); index++) {
+            final var type = tokens.get(index).type();
+            if (type == LEFT_PAREN) {
+                depth++;
+            } else if (type == RIGHT_PAREN) {
+                depth--;
+                if (depth > 0) continue;
+                for (var next = index + 1; next < tokens.size(); next++) {
+                    final var nextType = tokens.get(next).type();
+                    if (nextType.isComment()) continue;
+                    return nextType == SEMICOLON;
+                }
+                return false;
+            } else if (type == EOF) {
+                return false;
+            }
+        }
+        return false;
+    }
 
     private Expr doExpression(final Token keyword) {
         TypeDescriptor declaredConstructor = null;
@@ -4623,7 +4659,8 @@ public final class Parser {
                 if (match(LEFT_ARROW)) {
                     final var source = expression();
                     consume(SEMICOLON, "Expect ';' after a 'do' bind clause.");
-                    binds.add(new DoBind(let, name, source, new ArrayList<>(), new ArrayList<>()));
+                    binds.add(new DoBind(let, name, source, new ArrayList<>(), new ArrayList<>(),
+                            new ArrayList<>()));
                 } else if (match(EQUAL)) {
                     final var value = expression();
                     consume(SEMICOLON, "Expect ';' after a 'do' local binding.");
@@ -4639,6 +4676,24 @@ public final class Parser {
                     throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
                             "Expect '<-' for a 'do' bind or '=' for a local binding.");
                 }
+            } else if (looksLikeDoGuardClause()) {
+                final var guard = advance();
+                consume(LEFT_PAREN, "Expect '(' after 'if' in a 'do' guard.");
+                final var condition = expression();
+                consume(RIGHT_PAREN, "Expect ')' after the 'do' guard condition.");
+                consume(SEMICOLON, "Expect ';' after a 'do' guard clause.");
+                if (binds.isEmpty()) {
+                    throw error(guard, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A 'do' guard must follow a bind clause; it filters the nearest "
+                                    + "preceding 'let name <- expression' generator.");
+                }
+                final var current = binds.getLast();
+                if (!current.localNames().isEmpty()) {
+                    throw error(guard, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A 'do' guard must precede the bind group's plain 'let name = ...' "
+                                    + "locals so it can filter the preceding generator.");
+                }
+                current.guards().add(condition);
             } else if (isSoftKeyword("yield")) {
                 final var yield = consumeSoftKeyword("yield");
                 doYieldKeywords.add(yield);
@@ -4704,8 +4759,8 @@ public final class Parser {
                     TypeDescriptor.ofInfer());
             final var method = index == binds.size() - 1 && !monadicResult ? "map" : "flatMap";
             final var name = new Token(TokenType.IDENTIFIER, method, null, bind.keyword().span());
-            final var call = new Expr.MemberCall(bind.source(), name, bind.keyword(), List.of(lambda),
-                    List.of(), TypeDescriptor.ofInfer());
+            final var call = new Expr.MemberCall(filteredSource(bind), name, bind.keyword(),
+                    List.of(lambda), List.of(), TypeDescriptor.ofInfer());
             // `do` steps are monadic: they must dispatch through the receiver's contract witness,
             // never through an instance method that happens to share the name.
             call.setWitnessDispatched(true);
@@ -4719,6 +4774,23 @@ public final class Parser {
                     TypeDescriptor.ofInfer(), false);
         }
         return new Expr.Do(keyword, declaredConstructor, lowered);
+    }
+
+    /// Wraps a guarded bind's source in one witness-dispatched `filter` call per guard, in source
+    /// order. Each guard is a lambda over the bind's name, so a false guard skips the rest of that
+    /// path before the bind's `map` or `flatMap` runs.
+    private Expr filteredSource(final DoBind bind) {
+        var source = bind.source();
+        for (final var guard : bind.guards()) {
+            final var name = new Token(TokenType.IDENTIFIER, "filter", null, bind.keyword().span());
+            final var lambda = new Expr.Lambda(bind.keyword(), List.of(bind.name()),
+                    List.of(new Stmt.Return(guard, bind.keyword())), TypeDescriptor.ofInfer());
+            final var call = new Expr.MemberCall(source, name, bind.keyword(), List.of(lambda),
+                    List.of(), TypeDescriptor.ofInfer());
+            call.setWitnessDispatched(true);
+            source = call;
+        }
+        return source;
     }
 
     /// Parses a binder-prefixed lambda such as {@code <T> (value: T) -> value}.

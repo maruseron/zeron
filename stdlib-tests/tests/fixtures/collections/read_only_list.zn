@@ -1,0 +1,7 @@
+package readOnlyList;
+
+import zeron.collections.ArrayList;
+
+fn invalid(values: ArrayList<Int>): Unit {
+    values.add(1);
+}

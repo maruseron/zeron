@@ -1,0 +1,35 @@
+package math;
+
+import zeron.math.*;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertApproximatelyEquals;
+import zeron.test.assertEquals;
+
+@Test
+public fn populationStatisticsDescribeTheInput(): Unit performs TestFailure {
+    assertEquals(2.0, Statistics.mean([1.0, 2.0, 3.0]).getOrElse(-1.0));
+    assertEquals(2.5, Statistics.median([4.0, 1.0, 3.0, 2.0]).getOrElse(-1.0));
+    assertApproximatelyEquals(0.6666666666666666,
+        Statistics.variance([1.0, 2.0, 3.0]).getOrElse(-1.0), 0.000000000001);
+    assertApproximatelyEquals(0.816496580927726,
+        Statistics.standardDeviation([1.0, 2.0, 3.0]).getOrElse(-1.0), 0.000000000001);
+}
+
+@Test
+public fn sampleStatisticsUseTheSampleDivisor(): Unit performs TestFailure {
+    assertEquals(1.0, Statistics.sampleVariance([1.0, 2.0, 3.0]).getOrElse(-1.0));
+    assertEquals(1.0, Statistics.sampleStandardDeviation([1.0, 2.0, 3.0]).getOrElse(-1.0));
+}
+
+@Test
+public fn undefinedStatisticsReturnNone(): Unit performs TestFailure {
+    let empty: Array<Float> = [];
+    assertEquals(false, Statistics.mean(empty).isSome());
+    assertEquals(false, Statistics.median(empty).isSome());
+    assertEquals(false, Statistics.variance(empty).isSome());
+    assertEquals(false, Statistics.sampleVariance(empty).isSome());
+    assertEquals(false, Statistics.standardDeviation(empty).isSome());
+    assertEquals(false, Statistics.sampleStandardDeviation(empty).isSome());
+    assertEquals(false, Statistics.sampleVariance([1.0]).isSome());
+}

@@ -1614,6 +1614,29 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void hoverShowsAnEffectResponseTypeAndCompletionsIncludeResponds() throws Exception {
+        final var source = """
+                public effect Translate<T> responds T {}
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Translate") + 1)));
+
+        assertNotNull(String.valueOf(snapshot.diagnostics()), hover);
+        assertTrue("Unexpected effect hover: " + hover.getContents().getRight().getValue(),
+                hover.getContents().getRight().getValue().contains("responds"));
+
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source,
+                        source.indexOf("fn main() {") + "fn main() {".length()));
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("responds")));
+    }
+
+    @Test
     public void completionIncludesVisibleFunctionsAndReceiverMembers() throws Exception {
         final var source = """
                 public class Box {

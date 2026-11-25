@@ -150,8 +150,28 @@ The declared constructor also fixes any argument the witness leaves open, such a
 `do<Result<_, String>>`. The `pure` step is a type-level contract call, so `Option.pure(5)` and
 `Result<Int, String>.pure(5)` work anywhere the constructor's `Applicative` evidence is active.
 
-There are no `do` guards and no `collect` clause: put an `if` expression in a bind when a step is
-conditional, and use a [for-expression](16-for-expressions.md) when you want to collect values.
+A `do` block accepts `if` guard clauses after a bind. A false guard skips the rest of that path, so
+no later bind, local, or `yield` expression runs for it:
+
+```zeron
+fn scaled(values: Array<Int>, index: Int): Option<Int> = do {
+    let value <- Option.Some(values[index]);
+    if (value > 0);
+    if (value < 100);
+    yield value * 2;
+};
+```
+
+A guard lowers to a witness-dispatched `filter` call on the preceding generator, so a block with a
+guard requires `Filterable<F>` in addition to `Monad<F>`. `Option` and `Stream` supply standard
+`Filterable` witnesses; `Result<_, E>` does not, because filtering out an `Ok` has no canonical error
+value. Guards keep their left-to-right order, run only after the preceding guards pass, and preserve
+`Stream` laziness. Write the guard before the bind group's plain `let` locals, and require a bind
+first; guards in a bind-free `do<C<_>>` block and guards before the first bind are rejected. The
+condition must be an effect-free `Boolean`.
+
+There is no `collect` clause in `do`: use a [for-expression](16-for-expressions.md) when you want to
+collect values.
 
 ## When a function must stop normal work
 

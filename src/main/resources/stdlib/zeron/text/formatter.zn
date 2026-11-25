@@ -133,7 +133,8 @@ class FormatState {
         let specification = if (colon < 0) then ""
                             else body.substring(colon + 1, body.length()).getOrElse("");
         let mut argumentIndex = 0;
-        if (head == "") {
+        let sequential = head == "";
+        if (sequential) {
             argumentIndex = this.nextIndex;
             this.nextIndex = this.nextIndex + 1;
         } else {
@@ -144,7 +145,9 @@ class FormatState {
             argumentIndex = parsed.getOrElse(0);
         }
         if (argumentIndex < 0 or argumentIndex >= this.arguments.length) {
-            this.error = Option.Some(FormatError.IndexOutOfRange(argumentIndex));
+            this.error = Option.Some(if (sequential)
+                then FormatError.MissingArgument(argumentIndex)
+                else FormatError.IndexOutOfRange(argumentIndex));
             return false;
         }
         this.used.replaceAt(argumentIndex, true);

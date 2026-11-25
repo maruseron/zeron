@@ -71,6 +71,7 @@ public final class AnsiSyntaxHighlighter {
             case "string" -> followsSuffixStringInput(tokens, index);
             case "out" -> isTypeProjection(tokens, index);
             case "admits" -> followsAdmissibilityClause(tokens, index);
+            case "responds" -> followsEffectResponseClause(tokens, index);
             case "reified" -> isLeadingReifiedCapability(tokens, index);
             case "nullable", "mutable" -> isGenericAdmissibilityMarker(tokens, index);
             case "where" -> followsNewtypeRepresentation(tokens, index);
@@ -131,6 +132,20 @@ public final class AnsiSyntaxHighlighter {
         return tokens.get(next).type() == TokenType.IDENTIFIER
                 && (tokens.get(next).lexeme().equals("nullable")
                         || tokens.get(next).lexeme().equals("mutable"));
+    }
+
+    private static boolean followsEffectResponseClause(final List<Token> tokens, final int index) {
+        final var next = nextSignificantIndex(tokens, index);
+        if (next < 0) return false;
+        final var nextType = tokens.get(next).type();
+        if (nextType != TokenType.IDENTIFIER && nextType != TokenType.LEFT_PAREN) return false;
+        for (var cursor = next; cursor >= 0; cursor = nextSignificantIndex(tokens, cursor)) {
+            final var token = tokens.get(cursor);
+            if (token.type() == TokenType.LEFT_BRACE) return true;
+            if (token.type() == TokenType.SEMICOLON || token.type() == TokenType.EQUAL) return false;
+            if (token.type() == TokenType.IDENTIFIER && token.lexeme().equals("deriving")) return true;
+        }
+        return false;
     }
 
     private static boolean isLeadingReifiedCapability(final List<Token> tokens, final int index) {

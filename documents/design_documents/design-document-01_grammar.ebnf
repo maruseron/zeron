@@ -515,8 +515,12 @@ forClause = "for", IDENTIFIER, "in", expression
           | "if", expression ;
 forResult = 'yield', expression | 'collect', expression, 'into', expression ;
 doExpr = "do", [ "<", type, ">" ], "{", doClause, { doClause }, doResult, "}" ;
+(* [NEW] ZEP-0174: an `if (condition);` guard filters the nearest preceding bind and must
+   precede that bind group's plain locals. The value-level conditional keeps its meaning because
+   it continues with `then` after the closing parenthesis. *)
 doClause = "let", IDENTIFIER, "<-", expression, ";"
-         | "let", IDENTIFIER, "=", expression, ";" ;
+         | "let", IDENTIFIER, "=", expression, ";"
+         | "if", "(", expression, ")", ";" ;
 doResult = "yield", expression, ";" | expression, ";" ;
 (* [NEW] ZEP-0109: a leading binder list makes a generic lambda; generic lambdas use the
    parenthesized parameter form. *)
@@ -577,8 +581,11 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
    clauses, not globally reserved keywords.
    - A `do` block is an expression with at least one bind clause (`let name <- expression;`), plain
-   local clauses (`let name = expression;`) only after the first bind, and one final result clause:
-   either `yield expression;` or a monad-valued expression ending in `;`. `do` is a contextual
+   local clauses (`let name = expression;`) only after the first bind, optional `if (condition);`
+   guard clauses after a bind and before that bind group's plain locals, and one final result
+   clause: either `yield expression;` or a monad-valued expression ending in `;`. A guard lowers to
+   witness-dispatched `filter` calls on the preceding generator, so a guarded block requires
+   `Filterable<F>` evidence in addition to `Monad<F>`. `do` is a contextual
    identifier in expression position, and `<-` is a single
    token that appears nowhere else. An optional constructor prefix (`do<Option<_>>`,
    `do<Result<_, E>>`) must be an applied type with exactly one open slot and is checked against the

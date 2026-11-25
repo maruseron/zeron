@@ -1,0 +1,39 @@
+package random;
+
+import zeron.collections.ArrayList;
+import zeron.random.Random;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn theSameSeedProducesTheSameSequence(): Unit performs TestFailure {
+    let first = Random.seeded(42L);
+    let second = Random.seeded(42L);
+    assertEquals(first.nextLong(), second.nextLong());
+    assertEquals(first.nextInt(), second.nextInt());
+    assertEquals(first.nextBoolean(), second.nextBoolean());
+}
+
+@Test
+public fn boundedValuesStayInsideTheirRange(): Unit performs TestFailure {
+    let random = Random.seeded(42L);
+    let below = random.nextIntBelow(10).getOrElse(-1);
+    assertEquals(true, below >= 0 and below < 10);
+    assertEquals(3, random.nextIntBetween(3, 4).getOrElse(-1));
+    assertEquals(false, random.nextIntBelow(0).isSome());
+    assertEquals(false, random.nextIntBetween(5, 5).isSome());
+}
+
+@Test
+public fn pickAndShuffleUseTheWholeCollection(): Unit performs TestFailure {
+    let random = Random.seeded(7L);
+    let values = ArrayList<Int>.fromArray([1, 2, 3, 4, 5]);
+    let picked = random.pick(values).getOrElse(-1);
+    assertEquals(true, picked >= 1 and picked <= 5);
+    random.shuffle<Int>(values);
+    assertEquals(5, values.size);
+    let mut total = 0;
+    for (let value in values) total = total + value;
+    assertEquals(15, total);
+}

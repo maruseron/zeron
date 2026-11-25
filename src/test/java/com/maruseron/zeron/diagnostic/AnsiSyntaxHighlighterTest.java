@@ -121,6 +121,18 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
+    public void highlightsRespondsOnlyAsAnEffectResponseClause() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                public effect Ask<T> responds T {}
+                public effect Log responds Unit deriving Eq;
+                let responds = 1;
+                """);
+
+        assertEquals(2, occurrences(highlighted, AnsiColor.apply("responds", "35")));
+        assertFalse(highlighted.contains(AnsiColor.apply("responds", "35") + " = 1"));
+    }
+
+    @Test
     public void leavesAdmitsAndReifiedAsIdentifiersOutsideTheirSyntaxPositions() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 let admits = 1;

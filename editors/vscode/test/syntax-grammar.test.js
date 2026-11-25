@@ -156,6 +156,21 @@ test('highlights admits clauses and generic admissibility markers', () => {
   assert.equal(markers.test('let nullable = true; fn read(nullable: Int): Int = 1;'), false);
 });
 
+test('highlights responds only in an effect response clause', () => {
+  const respondsPattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('(responds)'));
+  assert.ok(respondsPattern);
+
+  const matcher = new RegExp(respondsPattern.match, 'g');
+  assert.deepEqual(
+    Array.from('public effect Log responds Unit deriving Eq;'.matchAll(matcher),
+      match => match[1]),
+    ['responds']);
+  const single = new RegExp(respondsPattern.match);
+  assert.ok(single.test('effect Ask<T> responds T {'));
+  assert.equal(single.test('let responds = 1;'), false);
+});
+
 test('highlights reified as a leading capability', () => {
   const reifiedPattern = grammar.repository['contextual-keywords'].patterns
     .find(pattern => pattern.match.includes('(reified)'));

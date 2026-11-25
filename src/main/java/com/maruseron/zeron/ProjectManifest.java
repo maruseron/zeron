@@ -35,7 +35,8 @@ record ProjectManifest(List<Path> sourceRoots,
     private static final Set<String> DEPENDENCY_KEYS =
             Set.of("zeron-libraries", "java-classpath", "java-sources");
     private static final Set<String> BUILD_KEYS = Set.of("deny-warnings");
-    private static final Set<String> TARGET_KEYS = Set.of("entry", "output", "deny-warnings", "kind");
+    private static final Set<String> TARGET_KEYS = Set.of("entry", "output", "deny-warnings", "kind",
+            "compile-failure-roots");
     enum TargetKind { APPLICATION, TEST }
     private static final Pattern TARGET_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
 
@@ -44,9 +45,16 @@ record ProjectManifest(List<Path> sourceRoots,
                          Path outputDirectory,
                          boolean denyWarnings,
                          boolean implicit,
-                         TargetKind kind) {
+                         TargetKind kind,
+                         List<Path> compileFailureRoots) {
         ProjectTarget {
             if (name == null) name = "";
+            compileFailureRoots = List.copyOf(compileFailureRoots);
+        }
+
+        ProjectTarget(final String name, final Path entry, final Path outputDirectory,
+                      final boolean denyWarnings, final boolean implicit, final TargetKind kind) {
+            this(name, entry, outputDirectory, denyWarnings, implicit, kind, List.of());
         }
 
         public String displayName() {
@@ -177,8 +185,24 @@ record ProjectManifest(List<Path> sourceRoots,
                         outputDirectory.resolve(name), "[targets." + name + "]");
                 final var targetDenyWarnings = optionalBoolean(table, "deny-warnings",
                         denyWarnings, "[targets." + name + "]");
+                final var compileFailureRoots = resolvePaths(baseDirectory,
+                        optionalStringArray(table, "compile-failure-roots",
+                                "[targets." + name + "]"));
+                if (!compileFailureRoots.isEmpty() && targetKind != TargetKind.TEST) {
+                    throw new IllegalArgumentException("[targets." + name
+                            + "].compile-failure-roots is only valid on a test target.");
+                }
+                for (final var fixtureRoot : compileFailureRoots) {
+                    final var normalizedFixture = fixtureRoot.toAbsolutePath().normalize();
+                    if (sourceRoots.stream().map(root -> root.toAbsolutePath().normalize())
+                            .anyMatch(source -> normalizedFixture.startsWith(source)
+                                    || source.startsWith(normalizedFixture))) {
+                        throw new IllegalArgumentException("Compile-failure root " + fixtureRoot
+                                + " must not overlap a project source root.");
+                    }
+                }
                 targets.put(name, new ProjectTarget(name, targetEntry, targetOutput,
-                        targetDenyWarnings, false, targetKind));
+                        targetDenyWarnings, false, targetKind, compileFailureRoots));
             }
         }
         if (defaultTargetName.isPresent() && !targets.containsKey(defaultTargetName.get())) {

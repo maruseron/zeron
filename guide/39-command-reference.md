@@ -66,7 +66,7 @@ zeron test [<target>] [options]
 
 Build and run the selected test target's generated runner.
 
-Selects a target with kind = "test", or synthesizes an implicit test target when none exists. The generated runner reports each test and exits with its status.
+Selects a target with kind = "test", or synthesizes an implicit test target when none exists. The generated runner reports each test and exits with its status. Tests marked @CompileFailure run through the host compiler after the runner.
 
 ### `fmt`
 
@@ -273,6 +273,42 @@ Report formatting differences without modifying files.
 The command exits unsuccessfully when a selected file differs from canonical style.
 
 Applies to: `fmt`.
+
+### `--filter`
+
+```text
+--filter <pattern>
+```
+
+Run only tests whose fully qualified name contains the pattern.
+
+Applies to ordinary and compile-failure tests. Matching is a plain substring test, so a package name selects every test in that package.
+
+Applies to: `test`.
+
+### `--list`
+
+```text
+--list
+```
+
+Print the discovered tests without running them.
+
+Marks ignored tests and compile-failure tests, then prints the discovered total.
+
+Applies to: `test`.
+
+### `--fail-fast`
+
+```text
+--fail-fast
+```
+
+Stop after the first failing test.
+
+Remaining ordinary tests are skipped, and a runner failure also skips the compile-failure phase.
+
+Applies to: `test`.
 
 ## Target selection and precedence
 

@@ -1,0 +1,33 @@
+package lang;
+
+import zeron.lang.Cell;
+import zeron.test.CompileFailure;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn cellSharesMutableStateAcrossClosures(): Unit performs TestFailure {
+    let cell = Cell<Int>.new(0);
+    let increment = () -> {
+        cell.set(cell.get() + 1);
+        return cell.get();
+    };
+    let current = () -> cell.get();
+    increment();
+    increment();
+    assertEquals(2, current());
+}
+
+fn escapedCell(): () -> Int {
+    let cell = Cell<Int>.new(42);
+    return () -> cell.get();
+}
+
+@Test
+public fn cellEscapesItsDeclaringScope(): Unit performs TestFailure
+    = assertEquals(42, escapedCell()());
+
+@CompileFailure(fixture = "lang/cell_read_only.zn")
+public fn cellMutationRequiresMutableReferenceView(): Unit {
+}

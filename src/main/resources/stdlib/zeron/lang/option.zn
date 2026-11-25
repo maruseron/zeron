@@ -5,6 +5,7 @@ import zeron.control.Functor;
 import zeron.control.Applicative;
 import zeron.control.Monad;
 import zeron.control.Alternative;
+import zeron.control.Filterable;
 
 /// A value that may be absent.
 ///
@@ -87,6 +88,14 @@ default witness Applicative<Option<_>> for Option<_> {
 
 default witness Monad<Option<_>> for Option<_> {
     fn flatMap<A, B>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
+        match (this) {
+            case Some(value) -> transform(value);
+            case None() -> Option<B>.None();
+        };
+}
+
+default witness Filterable<Option<_>> for Option<_> {
+    fn mapFilter<A, B>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
         match (this) {
             case Some(value) -> transform(value);
             case None() -> Option<B>.None();

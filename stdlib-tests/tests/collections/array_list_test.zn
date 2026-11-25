@@ -1,0 +1,41 @@
+package collections;
+
+import zeron.collections.ArrayList;
+import zeron.test.CompileFailure;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn listMutatesGrowsAndProjectsToReadOnlyView(): Unit performs TestFailure {
+    let mut values: &ArrayList<Int> = ArrayList<Int>.empty();
+    values.add(2);
+    values.add(4);
+    values.add(6);
+    values.add(8);
+    values.add(10);
+    values.insert(1, 3);
+    let replaced = values.replaceAt(2, 5);
+    let removed = values.removeAt(4);
+    let readonly: ArrayList<Int> = values;
+    let mut total = 0;
+    for (let value in readonly) total += value;
+    assertEquals(43, total + replaced.getOrElse(-1) + removed.getOrElse(-1) + readonly.size);
+}
+
+@Test
+public fn emptyListIsEmpty(): Unit performs TestFailure =
+    assertEquals(true, ArrayList<Int>.empty().isEmpty());
+
+@Test
+public fn clearKeepsTheListUsable(): Unit performs TestFailure {
+    let mut values: &ArrayList<Int> = ArrayList<Int>.fromArray([7, 8, 9]);
+    values.add(10);
+    values.clear();
+    values.add(11);
+    assertEquals(12, values.at(0).getOrElse(-1) + values.size);
+}
+
+@CompileFailure(fixture = "collections/read_only_list.zn")
+public fn listMutationRequiresMutableReferenceView(): Unit {
+}

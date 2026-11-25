@@ -56,7 +56,7 @@ final class LspFeatures {
             "default", "else", "effect", "extension", "external", "false", "fn", "for",
             "handle", "if", "implement", "import", "in", "is", "let", "loop",
             "match", "mut", "namespace", "newtype", "not", "null", "object", "or",
-            "package", "pattern", "property", "public", "perform", "performs", "return", "sealed",
+            "package", "pattern", "property", "public", "perform", "performs", "responds", "return", "sealed",
             "super", "this", "throw", "true", "try", "type", "unsafe", "using", "var", "while",
             "witness");
     private LspFeatures() {}
@@ -2401,19 +2401,11 @@ final class LspFeatures {
                 final var declaration = binding.declaration();
                 final var isPublic = declaration instanceof Stmt.FunctionDeclaration function
                         && function.isPublic();
-                final var parts = qualifiedName.split("\\.");
-                if (parts.length == 1) continue;
-                final var candidateNamespace = parts[parts.length - 2];
-                final var ownerPackage = resolution.typePackages().get(candidateNamespace);
-                final String packageName;
-                final String namespace;
-                if (ownerPackage != null) {
-                    packageName = ownerPackage;
-                    namespace = candidateNamespace;
-                } else {
-                    packageName = String.join(".", java.util.Arrays.copyOf(parts, parts.length - 1));
-                    namespace = null;
-                }
+                final var separator = qualifiedName.lastIndexOf('.');
+                if (separator < 0) continue;
+                final var ownerInfo = owner(qualifiedName.substring(0, separator), resolution);
+                final var packageName = ownerInfo.packageName();
+                final var namespace = ownerInfo.namespace();
                 final var parameterNames = declaration instanceof Stmt.FunctionDeclaration function
                         ? function.parameters().stream().map(Token::lexeme).toList() : List.<String>of();
                 recordParameterNames(qualifiedName, parameterNames);
@@ -2461,8 +2453,13 @@ final class LspFeatures {
                     byToken.put(value.name(), symbol);
                 } else if (declaration instanceof Stmt.ClassDecl value) {
                     if (value.isEffect()) {
+                        final var typeParameters = formatTypeParameters(value.typeParameters());
+                        final var response = value.responseType() == null
+                                ? "" : " responds " + TypeFormatter.format(value.responseType());
                         addType(value.name(), unit.packageName(), value.isPublic(), path,
-                                "effect", formatTypeParameters(value.typeParameters()));
+                                "effect", typeParameters,
+                                "effect " + simpleTypeName(value.name().lexeme()) + typeParameters
+                                        + response);
                     } else {
                         final var implementations = java.util.stream.Stream.concat(
                                         value.contractUses().stream(),

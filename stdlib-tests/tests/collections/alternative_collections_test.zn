@@ -1,0 +1,103 @@
+package collections;
+
+import zeron.collections.ArrayDeque;
+import zeron.collections.ArrayList;
+import zeron.collections.ConsList;
+import zeron.collections.IdentityHashMap;
+import zeron.collections.LinkedList;
+import zeron.collections.List;
+import zeron.collections.Map;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertTrue;
+
+fn total(values: List<Int>): Int {
+    let mut sum = 0;
+    for (let value in values) sum = sum + value;
+    return sum;
+}
+
+fn lookup(values: Map<ArrayList<Int>, Int>, key: ArrayList<Int>): Int =
+    values.get(key).getOrElse(0);
+
+@Test
+public fn linkedListSupportsBothEnds(): Unit performs TestFailure {
+    let mut list = LinkedList<Int>.of(1, 2, 3);
+    list.addFirst(0);
+    list.addLast(4);
+    assertEquals(5, list.size);
+    assertEquals(0, list.first().getOrElse(-1));
+    assertEquals(4, list.last().getOrElse(-1));
+    assertEquals(2, list.at(2).getOrElse(-1));
+    assertEquals(0, list.removeFirst().getOrElse(-1));
+    assertEquals(4, list.removeLast().getOrElse(-1));
+    assertEquals(6, total(list));
+    assertEquals(3, list.reversed().first().getOrElse(-1));
+}
+
+@Test
+public fn consListIsPersistent(): Unit performs TestFailure {
+    let list = ConsList<Int>.of(1, 2, 3);
+    assertEquals(3, list.size);
+    assertEquals(1, list.first().getOrElse(-1));
+    assertEquals(3, list.last().getOrElse(-1));
+    assertEquals(6, total(list));
+    assertEquals(3, list.reversed().first().getOrElse(-1));
+    let prepended = list.prepend(0);
+    assertEquals(4, prepended.size);
+    assertEquals(0, prepended.first().getOrElse(-1));
+    assertEquals(3, list.size);
+}
+
+@Test
+public fn arrayDequeGrowsFromEitherEnd(): Unit performs TestFailure {
+    let mut deque = ArrayDeque<Int>.empty();
+    deque.addLast(2);
+    deque.addLast(3);
+    deque.addFirst(1);
+    deque.addFirst(0);
+    assertEquals(4, deque.size);
+    assertEquals(0, deque.first().getOrElse(-1));
+    assertEquals(3, deque.last().getOrElse(-1));
+    assertEquals(2, deque.at(2).getOrElse(-1));
+    assertEquals(0, deque.removeFirst().getOrElse(-1));
+    assertEquals(3, deque.removeLast().getOrElse(-1));
+    assertEquals(3, total(deque));
+    assertEquals(2, deque.reversed().first().getOrElse(-1));
+    deque.clear();
+    assertTrue(deque.isEmpty());
+}
+
+@Test
+public fn identityMapComparesKeysByReference(): Unit performs TestFailure {
+    let mut map = IdentityHashMap<ArrayList<Int>, String>.empty();
+    let first = ArrayList<Int>.of(1);
+    let second = ArrayList<Int>.of(1);
+    map.put(first, "first");
+    map.put(second, "second");
+    assertEquals(2, map.size);
+    assertEquals("first", map.get(first).getOrElse(""));
+    assertEquals("second", map.get(second).getOrElse(""));
+    let third = ArrayList<Int>.of(1);
+    assertTrue(not map.containsKey(third));
+    assertEquals("first", map.remove(first).getOrElse(""));
+    assertEquals(1, map.size);
+    map.clear();
+    assertTrue(map.isEmpty());
+}
+
+@Test
+public fn everyListImplementationHonorsTheListContract(): Unit performs TestFailure {
+    let list: List<Int> = LinkedList<Int>.of(1, 2, 3);
+    let cons: List<Int> = ConsList<Int>.of(1, 2, 3);
+    let deque: List<Int> = ArrayDeque<Int>.of(1, 2, 3);
+    assertEquals(6, total(list));
+    assertEquals(6, total(cons));
+    assertEquals(6, total(deque));
+
+    let mut map = IdentityHashMap<ArrayList<Int>, Int>.empty();
+    let key = ArrayList<Int>.of(1);
+    map.put(key, 7);
+    assertEquals(7, lookup(map, key));
+}

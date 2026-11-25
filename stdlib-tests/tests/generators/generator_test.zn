@@ -1,0 +1,199 @@
+package generators;
+
+import zeron.collections.Step;
+import zeron.collections.Stream;
+import zeron.collections.generator;
+import zeron.lang.Yield;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertTrue;
+
+public class Tracker is Disposable {
+    state: &Array<Int>;
+
+    public constructor new;
+
+    public mut dispose(): Unit performs DisposeFailure {
+        this.state[0] = this.state[0] + 1;
+    }
+}
+
+fn sumBody(): Int {
+    let body: () -> Unit performs Yield<Int> = () -> {
+        perform Yield<Int>(1);
+        perform Yield<Int>(2);
+        perform Yield<Int>(3);
+    };
+    let source = generator<Int>(body);
+    let mut total = 0;
+    for (let number in source) total = total + number;
+    return total;
+}
+
+fn manualCursor(): Int {
+    let body: () -> Unit performs Yield<Int> = () -> {
+        perform Yield<Int>(4);
+        perform Yield<Int>(5);
+    };
+    let mut cursor = generator<Int>(body).iterator();
+    let mut total = 0;
+    let mut finished = false;
+    until (finished) {
+        let step = cursor.next();
+        if (step matches Step.Yield(value)) {
+            total = total + value;
+        } else {
+            finished = true;
+        }
+    }
+    return if (cursor.isDone()) then total else -1;
+}
+
+fn replayableSource(): Int {
+    let body: () -> Unit performs Yield<Int> = () -> {
+        perform Yield<Int>(1);
+        perform Yield<Int>(2);
+    };
+    let source = generator<Int>(body);
+    let mut total = 0;
+    for (let number in source) total = total + number;
+    for (let number in source) total = total + number;
+    return total;
+}
+
+fn cleanupOnCancelRaw(): Int performs DisposeFailure {
+    let state: &Array<Int> = [0];
+    let body: () -> Unit performs Yield<Int>, DisposeFailure = () -> {
+        using (let tracker = Tracker.new(state)) {
+            perform Yield<Int>(1);
+            perform Yield<Int>(2);
+        }
+    };
+    let mut cursor = generator<Int>(body).iterator();
+    let first = cursor.next();
+    if (first matches Step.Done()) return -1;
+    cursor.cancel();
+    return state[0];
+}
+
+fn breakClosesRaw(): Int performs DisposeFailure {
+    let state: &Array<Int> = [0];
+    let body: () -> Unit performs Yield<Int>, DisposeFailure = () -> {
+        using (let tracker = Tracker.new(state)) {
+            perform Yield<Int>(1);
+            perform Yield<Int>(2);
+        }
+    };
+    for (let value in generator<Int>(body)) {
+        break;
+    }
+    return state[0];
+}
+
+fn exhaustionClosesRaw(): Int performs DisposeFailure {
+    let state: &Array<Int> = [0];
+    let body: () -> Unit performs Yield<Int>, DisposeFailure = () -> {
+        using (let tracker = Tracker.new(state)) {
+            perform Yield<Int>(1);
+        }
+    };
+    let mut total = 0;
+    for (let value in generator<Int>(body)) total = total + value;
+    return total * 10 + state[0];
+}
+
+fn streamClosesRaw(): Int performs DisposeFailure {
+    let state: &Array<Int> = [0];
+    let body: () -> Unit performs Yield<Int>, DisposeFailure = () -> {
+        using (let tracker = Tracker.new(state)) {
+            perform Yield<Int>(1);
+            perform Yield<Int>(2);
+        }
+    };
+    let stream = Stream<Int>.from(generator<Int>(body)).map(value -> value * 2);
+    let mut total = 0;
+    for (let value in stream) total = total + value;
+    return total * 10 + state[0];
+}
+
+fn lazyStart(): Int {
+    let state: &Array<Int> = [0];
+    let body: () -> Unit performs Yield<Int> = () -> {
+        state[0] = state[0] + 1;
+        perform Yield<Int>(1);
+    };
+    let mut cursor = generator<Int>(body).iterator();
+    let before = state[0];
+    cursor.next();
+    return if (before == 0 and state[0] == 1) then 1 else 0;
+}
+
+fn exhaustedCursorStaysDone(): Int {
+    let body: () -> Unit performs Yield<Int>, DisposeFailure = () -> {
+        perform Yield<Int>(1);
+    };
+    let mut cursor = generator<Int>(body).iterator();
+    cursor.next();
+    let second = cursor.next();
+    return if (second matches Step.Done() and cursor.isDone()) then 1 else 0;
+}
+
+@Test
+public fn aGeneratorBodyRunsOnlyWhileBeingPulled(): Unit performs TestFailure {
+    assertEquals(6, sumBody());
+    assertEquals(1, lazyStart());
+    assertEquals(9, manualCursor());
+}
+
+@Test
+public fn aGeneratorSourceIsReplayable(): Unit performs TestFailure =
+    assertEquals(6, replayableSource());
+
+@Test
+public fn aTrailingLambdaBuildsAGenerator(): Unit performs TestFailure {
+    let mut total = 0;
+    for (let value in generator<Int> {
+        perform Yield<Int>(1);
+        perform Yield<Int>(2);
+    }) total = total + value;
+    assertEquals(3, total);
+}
+
+@Test
+public fn cancelRunsTheBodyCleanup(): Unit performs TestFailure {
+    let closed: Int = handle (cleanupOnCancelRaw()) with {
+        case DisposeFailure -> -1;
+    };
+    assertEquals(1, closed);
+}
+
+@Test
+public fn breakClosesACursor(): Unit performs TestFailure {
+    let closed: Int = handle (breakClosesRaw()) with {
+        case DisposeFailure -> -1;
+    };
+    assertEquals(1, closed);
+}
+
+@Test
+public fn exhaustionClosesACursor(): Unit performs TestFailure {
+    let closed: Int = handle (exhaustionClosesRaw()) with {
+        case DisposeFailure -> -1;
+    };
+    assertEquals(11, closed);
+}
+
+@Test
+public fn streamsOverGeneratorsCloseThem(): Unit performs TestFailure {
+    let closed: Int = handle (streamClosesRaw()) with {
+        case DisposeFailure -> -1;
+    };
+    assertEquals(61, closed);
+}
+
+@Test
+public fn anExhaustedCursorStaysDone(): Unit performs TestFailure =
+    assertEquals(1, exhaustedCursorStaysDone());

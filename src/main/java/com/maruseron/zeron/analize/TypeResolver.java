@@ -63,40 +63,66 @@ final class TypeResolver {
     }
 
     static void resolveTypeNames(final ResolutionContext context, final TypeDescriptor type, final Token where) {
+        resolveTypeNames(context, type, where,
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+    }
+
+    private static void resolveTypeNames(final ResolutionContext context, final TypeDescriptor type,
+                                         final Token where,
+                                         final java.util.Set<TypeParameterDescriptor> visitedParameters) {
         switch (type) {
             case NominalDescriptor nominal ->
                     nominal.resolveName(resolveTypeName(context, nominal.name(), where, false));
             case GenericDescriptor generic -> {
                 generic.baseType().resolveName(
                         resolveTypeName(context, generic.baseType().name(), where, false));
-                generic.typeParameters().forEach(argument -> resolveTypeNames(context, argument, where));
+                generic.typeParameters().forEach(argument ->
+                        resolveTypeNames(context, argument, where, visitedParameters));
             }
             case TypeConstructorDescriptor constructor -> {
                 constructor.baseType().resolveName(
                         resolveTypeName(context, constructor.baseType().name(), where, false));
-                constructor.arguments().forEach(argument -> resolveTypeNames(context, argument, where));
+                constructor.arguments().forEach(argument ->
+                        resolveTypeNames(context, argument, where, visitedParameters));
             }
-            case ArrayDescriptor array -> resolveTypeNames(context, array.elementType(), where);
-            case NullableDescriptor nullable -> resolveTypeNames(context, nullable.baseType(), where);
-            case ReferenceDescriptor reference -> resolveTypeNames(context, reference.baseType(), where);
-            case AppliedConstructorDescriptor applied -> resolveTypeNames(context, applied.argument(), where);
+            case ArrayDescriptor array ->
+                    resolveTypeNames(context, array.elementType(), where, visitedParameters);
+            case NullableDescriptor nullable ->
+                    resolveTypeNames(context, nullable.baseType(), where, visitedParameters);
+            case ReferenceDescriptor reference ->
+                    resolveTypeNames(context, reference.baseType(), where, visitedParameters);
+            case AppliedConstructorDescriptor applied ->
+                    resolveTypeNames(context, applied.argument(), where, visitedParameters);
             case FunctionDescriptor function -> {
                 if (function.receiverType() != null) {
-                    resolveTypeNames(context, function.receiverType(), where);
+                    resolveTypeNames(context, function.receiverType(), where, visitedParameters);
                 }
-                function.parameters().forEach(parameter -> resolveTypeNames(context, parameter, where));
-                resolveTypeNames(context, function.returnType(), where);
-                function.raisedEffects().forEach(effect -> resolveTypeNames(context, effect, where));
-                function.handledEffects().forEach(effect -> resolveTypeNames(context, effect, where));
-                function.typeParameters().forEach(parameter -> resolveTypeNames(context, parameter, where));
+                function.parameters().forEach(parameter ->
+                        resolveTypeNames(context, parameter, where, visitedParameters));
+                resolveTypeNames(context, function.returnType(), where, visitedParameters);
+                function.raisedEffects().forEach(effect ->
+                        resolveTypeNames(context, effect, where, visitedParameters));
+                function.handledEffects().forEach(effect ->
+                        resolveTypeNames(context, effect, where, visitedParameters));
+                function.typeParameters().forEach(parameter ->
+                        resolveTypeNames(context, parameter, where, visitedParameters));
             }
-            case TypeParameterDescriptor parameter ->
-                    parameter.bounds().forEach(bound -> resolveTypeNames(context, bound, where));
+            // A higher-kinded bound such as `S<_>: Monad<S>` refers to its own parameter, so a
+            // parameter's bounds are visited once per traversal.
+            case TypeParameterDescriptor parameter -> {
+                if (visitedParameters.add(parameter)) {
+                    parameter.bounds().forEach(bound ->
+                            resolveTypeNames(context, bound, where, visitedParameters));
+                }
+            }
             case EffectRowDescriptor row -> {
-                row.effects().forEach(effect -> resolveTypeNames(context, effect, where));
-                row.variables().forEach(variable -> resolveTypeNames(context, variable, where));
+                row.effects().forEach(effect ->
+                        resolveTypeNames(context, effect, where, visitedParameters));
+                row.variables().forEach(variable ->
+                        resolveTypeNames(context, variable, where, visitedParameters));
             }
-            case TypeProjectionDescriptor projection -> resolveTypeNames(context, projection.bound(), where);
+            case TypeProjectionDescriptor projection ->
+                    resolveTypeNames(context, projection.bound(), where, visitedParameters);
             default -> { }
         }
     }

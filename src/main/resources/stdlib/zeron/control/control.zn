@@ -80,11 +80,35 @@ public contract Alternative<F<_>> requires Applicative<F> {
     orElse<A>(this: F<A>, other: F<A>): F<A>;
 }
 
-/// An `Alternative` that is also a `Monad`.
+/// A functor whose elements can be discarded selectively.
 ///
-/// The contract adds no requirements of its own; it names the combination so generic code can
-/// require both capabilities at once.
-public contract MonadPlus<M<_>> requires Alternative<M> + Monad<M> {}
+/// `mapFilter` is the primitive: it transforms each element and drops those for which the
+/// function returns `None`, so the shape of the structure may shrink but its elements are never
+/// reordered. `filter` and `compact` are derived from it. This is also the contract required by
+/// `if` guards in do-notation, which lower to `filter` on the preceding generator.
+///
+/// Filterables must adhere to the following laws:
+///
+/// ```zeron
+/// f.mapFilter(a -> Option.Some(a)) == f
+/// f.mapFilter(g).mapFilter(h)      == f.mapFilter(a -> g(a).flatMap(h))
+/// f.map(g)                         == f.mapFilter(a -> Option.Some(g(a)))
+/// ```
+public contract Filterable<F<_>> requires Functor<F> {
+    /// Applies `transform` to each element, keeping only those that produced `Some`.
+    mapFilter<A, B>(this: F<A>, transform: A -> Option<B>): F<B>;
+
+    /// Keeps only the elements that satisfy `predicate`.
+    default filter<A>(this: F<A>, predicate: A -> Boolean): F<A> =
+        this.mapFilter(a ->
+            if (predicate(a))
+            then Option.Some(a)
+            else Option.None<A>());
+
+    /// Drops the `None`s and unwraps the `Some`s.
+    default compact<A>(this: F<Option<A>>): F<A> =
+        this.mapFilter(identity);
+}
 
 /// A structure whose elements can be folded into a single value.
 ///
@@ -101,6 +125,9 @@ public contract Foldable<F<_>> {
     /// Whether the structure has no elements.
     default isEmpty<A>(this: F<A>): Boolean =
         this.foldLeft(true) { accumulator, item -> false };
+
+    default forEach<A>(this: F<A>, action: A -> Unit): Unit =
+        this.foldLeft(()) { _, item -> action(item) };
 }
 
 /// A structure whose elements can be visited with an effectful, structure-producing function.

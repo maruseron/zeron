@@ -1,0 +1,46 @@
+package collections;
+
+import zeron.collections.ArrayList;
+import zeron.collections.ListBuilder;
+import zeron.collections.MapBuilder;
+import zeron.collections.SetBuilder;
+import zeron.collections.StreamBuilder;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+@Test
+public fn listBuilderAccumulatesInOrder(): Unit performs TestFailure {
+    let builder = ListBuilder<Int>.empty();
+    builder.add(1);
+    builder.addAll(ArrayList<Int>.fromArray([2, 3]));
+    let values = builder.build();
+    assertEquals(3, values.size);
+    assertEquals(1, values.at(0).getOrElse(-1));
+    assertEquals(3, values.at(2).getOrElse(-1));
+}
+
+@Test
+public fn setBuilderKeepsDistinctValues(): Unit performs TestFailure {
+    let builder = SetBuilder<Int>.empty();
+    builder.add(7);
+    builder.add(7);
+    builder.addAll(ArrayList<Int>.fromArray([8, 8, 9]));
+    let values = builder.build();
+    assertEquals(3, values.size);
+}
+
+@Test
+public fn mapBuilderAndStreamBuilderFinishTheirValues(): Unit performs TestFailure {
+    let mapBuilder = MapBuilder<String, Int>.empty();
+    mapBuilder.put("a", 1);
+    mapBuilder.put("b", 2);
+    let map = mapBuilder.build();
+    assertEquals(2, map.size);
+    assertEquals(2, map.get("b").getOrElse(-1));
+
+    let streamBuilder = StreamBuilder<Int>.empty();
+    streamBuilder.add(5);
+    streamBuilder.add(6);
+    assertEquals(11, streamBuilder.build().fold(0, (total, item) -> total + item));
+}

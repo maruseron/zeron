@@ -1,0 +1,12 @@
+[project]
+source-roots = ["src"]
+test-roots = ["tests"]
+output = "dist"
+
+[platform]
+stdlib = "source"
+
+[targets.stdlib-runtime]
+kind = "test"
+output = "dist/test"
+compile-failure-roots = ["tests/fixtures"]

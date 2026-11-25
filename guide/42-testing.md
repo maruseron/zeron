@@ -112,9 +112,8 @@ The `zeron.test` module currently provides:
 absolute difference in either direction.
 
 Messages are optional. When an equality assertion has no explicit message, it builds a message from
-the expected value and actual value. The generated runner currently reports the test name and
-status; assertion messages are carried by the `TestFailure` effect but are not printed in the
-per-test output.
+the expected value and actual value. A failed assertion prints its message under the test line, so
+a failure is diagnosable without rerunning the test.
 
 You can also perform a failure directly:
 
@@ -127,6 +126,44 @@ public fn rejectsEmptyName(): Unit performs TestFailure {
 }
 ```
 
+### Expected compilation failures
+
+A test that must *not* compile is marked `@CompileFailure` instead of `@Test`. The runner never calls
+the function; it compiles the named fixture and checks the reported diagnostics.
+
+```zeron
+import zeron.test.CompileFailure;
+
+@CompileFailure(fixture = "cell/read_only.zn", code = "ZR2005")
+public fn cellMutationRequiresMutableReferenceView(): Unit {
+}
+```
+
+The annotation carries:
+
+- `fixture`: a path relative to a configured compile-failure root; required;
+- `code`: an optional diagnostic code that must appear among the reported errors;
+- `message`: an optional substring that must appear in that diagnostic’s text.
+
+A missing `code` accepts any resolution, type, parse, or compilation error, but a fixture that
+compiles successfully, a missing fixture, or an internal compiler failure is reported as a failed
+test, never as a pass.
+
+Fixtures are deliberately invalid, so they are excluded from the normal suite compilation. Point
+the test target at one or more roots:
+
+```toml
+[targets.unit]
+kind = "test"
+output = "dist/test"
+compile-failure-roots = ["tests/fixtures"]
+```
+
+`compile-failure-roots` is only valid on a test target, and a root must not overlap a project source
+root. A fixture may import the project’s public API and the standard library. Each fixture is
+compiled on its own, so several annotations may reference several fixtures; one annotation asserts
+one fixture.
+
 ## Running tests
 
 From the project root:
@@ -134,6 +171,13 @@ From the project root:
 ```text
 zeron test
 ```
+
+The test command accepts three selection and reporting options:
+
+- `--filter <pattern>` keeps the tests whose fully qualified name contains `pattern`, for both
+  ordinary and compile-failure tests;
+- `--list` prints the discovered tests without compiling or running them;
+- `--fail-fast` stops after the first failing test, including the compile-failure phase.
 
 The command selects a test target as follows:
 
@@ -145,41 +189,52 @@ The command selects a test target as follows:
 If several test targets exist and none is selected explicitly or by `default-target`, `zeron test`
 reports the available names instead of choosing one.
 
-A successful run prints one line per test and a summary:
+A run prints one line per test and a summary:
 
 ```text
 running 2 tests in target 'unit'
+1 expected-compilation-failure tests run by the host
 test app.additionAddsOperands ... ok
-test app.parsesLargeDocument ... skipped: waiting for fixture support
-1 passed, 0 failed, 1 skipped
+test app.rejectsEmptyName ... FAILED
+  empty names should be rejected
+1 passed, 1 failed, 0 errors, 0 skipped
+compile-failure test app.cellMutationRequiresMutableReferenceView ... ok
+1 compile-failure tests passed, 0 failed
 ```
 
+Ordinary tests run first through the generated runner; compile-failure tests then run through the
+host compiler and print their own summary. `--list` adds `(ignored)` and `(compile failure)` markers
+to distinguish the two kinds.
+
 The command exits with status `0` only when every runnable test passes. Assertion failures and
-other unhandled effects produce a nonzero status.
+other unhandled effects produce a nonzero status, as does an unmet compile-failure expectation.
 
 ## How the runner works
 
-Discovery is limited to top-level functions marked `@Test` in the configured test roots. Tests are
-sorted by fully qualified name for a stable run order. The compiler then generates a synthetic
-`zeron.generated.test.TestRunner` source unit that imports each runnable test and calls it inside a
-handler:
+Discovery is limited to top-level functions marked `@Test` or `@CompileFailure` in the configured
+test roots. Tests are sorted by fully qualified name for a stable run order. The compiler then
+generates a synthetic `zeron.generated.test.TestRunner` source unit that imports each runnable test
+and calls it inside a handler:
 
-- `TestFailure.message(message)` marks the test failed;
+- `TestFailure.message(message)` marks the test failed and prints the message;
 - any other effect marks the test as an error and still makes the runner fail.
+
+Compile-failure tests are not called. After the generated runner exits, the host compiles each
+fixture in process, collects the compiler diagnostics, and matches them against the annotation; the
+fixture’s output directory is removed afterwards. Warnings produced by a fixture are suppressed, so
+an expected failure does not disturb the suite’s warning state.
 
 Application targets never emit this unit, and the generated runner is not part of the library API
 index.
 
 ## Current limits
 
-The initial testing API is deliberately small. It does not yet provide test filtering, fixtures,
-setup or teardown hooks, parameterized tests, parallel or isolated execution, or a machine-readable
-report format. The runner also does not print assertion messages or per-test timings.
+The testing API is deliberately small. It does not yet provide fixtures with setup or teardown
+hooks, parameterized tests, parallel or isolated execution, or a machine-readable report format. The
+runner reports a distinct error count but not per-test timings, and a `--diagnostics json` mode for
+compiler diagnostics is not implemented.
 
-`zeron.test` declares the `@CompileFailure(fixture, code, message)` annotation for expected
-compilation failures, but the compile-failure runner and fixture-root configuration described by
-ZEP-0169 are not part of this slice. Until they land, the annotation is declarative and does not
-change how `zeron test` treats a function.
-
-A test that performs an effect other than `TestFailure` is reported as `FAILED` and makes the command
-exit nonzero, but the current summary does not include a separate error count.
+The standard library’s own runtime tests use this facility: the compiler repository keeps them in
+`stdlib-tests/`, a project whose test target runs against `stdlib = "source"`. The coverage map,
+including the assertions that deliberately remain Java tests, is in
+[`documents/developer_guides/stdlib-suite-parity.md`](../documents/developer_guides/stdlib-suite-parity.md).

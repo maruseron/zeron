@@ -150,6 +150,8 @@ final class CallResolver {
             descriptor = declaration.typeDescriptor();
         } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
+            call.setResolvedGlobalCallee(
+                    context.symbols.getSymbol(callableSymbol).lvt() == com.maruseron.zeron.domain.SymbolTable.GLOBAL);
             final var declaredCalleeType = context.symbols.getSymbol(callableSymbol).type();
             final var symbol = NewtypeRepresentations.resolve(declaredCalleeType);
             call.setResolvedCalleeType(symbol);

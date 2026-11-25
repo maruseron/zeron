@@ -25,6 +25,10 @@ Tests mirror the compiler phases. Put a test next to the layer you changed.
 
 Root-level tests cover the CLI, projects, the REPL, the standard library, and the formatter.
 
+Standard-library runtime behavior lives in the Zeron suite under [`stdlib-tests/`](../../stdlib-tests/)
+rather than in Java tests. See [`stdlib-suite-parity.md`](./stdlib-suite-parity.md) for the file map,
+the command line, and the list of assertions that deliberately stay on the Java side.
+
 There is no `src/test/resources` tree. Fixtures are Java sources under `fixtures/`, and generated
 Zeron projects are written to temporary directories.
 
@@ -83,6 +87,19 @@ Editor tests are separate:
 ```powershell
 npm --prefix editors/vscode test
 ```
+
+## Running the standard-library suite
+
+The suite is separate from Maven and needs the compiled compiler plus its dependency classpath:
+
+```powershell
+mvn -q dependency:build-classpath -Dmdep.outputFile=target/cp.txt
+$classpath = "target/classes;" + (Get-Content target/cp.txt -Raw).Trim()
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+java -cp $classpath com.maruseron.zeron.Zeron test --manifest stdlib-tests/zeron.toml stdlib-runtime
+```
+
+It currently takes roughly 10–15 seconds and is part of `scripts/release.ps1`.
 
 ## Working directories and project-root reads
 

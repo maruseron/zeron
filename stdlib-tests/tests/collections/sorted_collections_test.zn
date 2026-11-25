@@ -1,0 +1,96 @@
+package collections;
+
+import zeron.collections.PriorityQueue;
+import zeron.collections.SortedMap;
+import zeron.collections.SortedSet;
+import zeron.collections.Step;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertTrue;
+
+@Test
+public fn priorityQueuePollsTheSmallestElement(): Unit performs TestFailure {
+    let mut queue = PriorityQueue<Int>.empty();
+    queue.add(5);
+    queue.add(1);
+    queue.add(3);
+    assertEquals(3, queue.size);
+    assertEquals(1, queue.peek().getOrElse(-1));
+    assertEquals(1, queue.poll().getOrElse(-1));
+    assertEquals(3, queue.poll().getOrElse(-1));
+    assertEquals(5, queue.poll().getOrElse(-1));
+    assertTrue(not queue.poll().isSome());
+    assertTrue(queue.isEmpty());
+
+    let mut removed = PriorityQueue<Int>.empty();
+    removed.add(2);
+    removed.add(4);
+    assertTrue(removed.remove(2));
+    assertTrue(not removed.remove(9));
+    assertEquals(4, removed.poll().getOrElse(-1));
+}
+
+@Test
+public fn priorityQueueIteratesItsBackingHeapArray(): Unit performs TestFailure {
+    let mut queue = PriorityQueue<Int>.empty();
+    queue.add(4);
+    queue.add(2);
+    queue.add(6);
+    let mut total = 0;
+    let mut count = 0;
+    for (let value in queue) {
+        total = total * 10 + value;
+        count = count + 1;
+    }
+    assertEquals(3, count);
+    assertEquals(246, total);
+}
+
+@Test
+public fn sortedSetKeepsItsElementsOrdered(): Unit performs TestFailure {
+    let mut values = SortedSet<Int>.empty();
+    assertTrue(values.add(5));
+    assertTrue(values.add(1));
+    assertTrue(not values.add(5));
+    values.add(3);
+    assertEquals(3, values.size);
+    assertEquals(1, values.first().getOrElse(-1));
+    assertEquals(5, values.last().getOrElse(-1));
+    assertTrue(values.contains(3));
+    assertTrue(values.remove(1));
+    assertEquals(3, values.first().getOrElse(-1));
+
+    let mut iterated = 0;
+    for (let value in values) iterated = iterated * 10 + value;
+    assertEquals(35, iterated);
+}
+
+@Test
+public fn sortedMapOrdersKeysAndKeepsValues(): Unit performs TestFailure {
+    let mut values = SortedMap.empty<Int, String>();
+    values.put(3, "three");
+    values.put(1, "one");
+    values.put(2, "two");
+    assertEquals(3, values.size);
+    assertEquals(1, values.firstKey().getOrElse(-1));
+    assertEquals(3, values.lastKey().getOrElse(-1));
+    assertEquals(2, values.keyAt(1).getOrElse(-1));
+    assertEquals("two", values.entryAt(1).map((entry) -> entry.snd).getOrElse(""));
+    assertEquals("one", values.get(1).getOrElse(""));
+    assertEquals("three", values.remove(3).getOrElse(""));
+    assertEquals(2, values.lastKey().getOrElse(-1));
+
+    let mut keys = 0;
+    let mut cursor = values.keyIterator();
+    let mut finished = false;
+    until (finished) {
+        let step = cursor.next();
+        if (step matches Step.Yield(key)) {
+            keys = keys * 10 + key;
+        } else {
+            finished = true;
+        }
+    }
+    assertEquals(12, keys);
+}

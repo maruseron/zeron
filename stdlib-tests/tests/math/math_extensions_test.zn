@@ -1,0 +1,92 @@
+package math;
+
+import zeron.math.*;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertApproximatelyEquals;
+
+@Test
+public fn integerAbsMinMaxAndClamp(): Unit performs TestFailure {
+    let minimum = -2147483647 - 1;
+    assertEquals(minimum, minimum.abs());
+    assertEquals(7, 7.min(9));
+    assertEquals(-2, (-2).max(-5));
+    assertEquals(4, 9.clamp(1, 4));
+}
+
+@Test
+public fn longAbsMinMaxAndClamp(): Unit performs TestFailure {
+    let minimum = -9223372036854775807L - 1L;
+    assertEquals(minimum, minimum.abs());
+    assertEquals(7L, 7L.min(9L));
+    assertEquals(-2L, (-2L).max(-5L));
+    assertEquals(4L, 9L.clamp(1L, 4L));
+}
+
+@Test
+public fn floatAbsMinMaxAndClamp(): Unit performs TestFailure {
+    assertEquals(3.0, (-3.0).abs());
+    assertEquals(1.0, 0.5.clamp(1.0, 4.0));
+    assertEquals(4.0, 9.0.clamp(1.0, 4.0));
+}
+
+@Test
+public fn rootAndPowerFunctionsFollowJvmSemantics(): Unit performs TestFailure {
+    assertEquals(3.0, 9.0.sqrt());
+    assertEquals(8.0, 2.0.pow(3.0));
+    assertEquals(true, (-1.0).sqrt().isNaN());
+}
+
+@Test
+public fn exponentialAndLogarithmFunctions(): Unit performs TestFailure {
+    assertApproximatelyEquals(2.718281828459045, 1.0.exp(), 0.000000000001);
+    assertApproximatelyEquals(1.0, 2.718281828459045.ln(), 0.000000000001);
+    assertEquals(2.0, 100.0.log10());
+    assertEquals(-1.0 / 0.0, 0.0.ln());
+}
+
+@Test
+public fn trigonometricFunctionsAndConstants(): Unit performs TestFailure {
+    assertApproximatelyEquals(1.0, (PI / 2.0).sin(), 0.000000000000001);
+    assertEquals(1.0, 0.0.cos());
+    assertEquals(0.0, 0.0.tan());
+    assertApproximatelyEquals(PI / 2.0, 1.0.asin(), 0.000000000000001);
+    assertEquals(0.0, 1.0.acos());
+    assertApproximatelyEquals(PI / 4.0, 1.0.atan(), 0.000000000000001);
+    assertApproximatelyEquals(PI / 2.0, 1.0.atan2(0.0), 0.000000000000001);
+    assertEquals(3.141592653589793, PI);
+    assertEquals(6.283185307179586, TAU);
+    assertEquals(2.718281828459045, E);
+}
+
+@Test
+public fn roundingFunctionsFollowJvmSemantics(): Unit performs TestFailure {
+    assertEquals(1.0, 1.9.floor());
+    assertEquals(2.0, 1.1.ceil());
+    assertEquals(-1.0, (-1.9).trunc());
+    assertEquals(0L, (-0.5).round());
+    assertEquals(2L, 1.5.round());
+}
+
+@Test
+public fn nanAndInfinityEdgeCases(): Unit performs TestFailure {
+    let nan = 0.0 / 0.0;
+    let infinity = 1.0 / 0.0;
+    assertEquals(true, nan.isNaN());
+    assertEquals(0L, nan.round());
+    assertEquals(true, nan.min(1.0).isNaN());
+    assertEquals(9223372036854775807L, infinity.round());
+    assertEquals(true, Float.NaN.isNaN());
+    assertEquals(infinity, Float.POSITIVE_INFINITY);
+    assertEquals(-1.0 / 0.0, Float.NEGATIVE_INFINITY);
+}
+
+@Test
+public fn signedZeroKeepsMinAndMaxDistinct(): Unit performs TestFailure {
+    let minimum = (-0.0).min(0.0);
+    let maximum = (-0.0).max(0.0);
+    assertEquals(true, 1.0 / minimum < 0.0);
+    assertEquals(true, 1.0 / maximum > 0.0);
+    assertEquals(true, 1.0 / (-0.0).abs() > 0.0);
+}

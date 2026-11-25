@@ -1,0 +1,6 @@
+package immutableForSink;
+
+import zeron.collections.ArrayList;
+
+fn collect(sink: ArrayList<Int>): ArrayList<Int> =
+    for item in [1, 2] collect item into sink;

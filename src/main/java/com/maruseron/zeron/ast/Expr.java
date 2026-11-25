@@ -1201,6 +1201,7 @@ public sealed interface Expr {
         private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private Token resolvedSymbolToken;
         private TypeDescriptor resolvedCalleeType;
+        private boolean resolvedGlobalCallee;
         private MemberCall implicitMemberCall;
         private ResolvedIntrinsicOperation intrinsicOperation;
         private TypeDescriptor variadicElementType;
@@ -1249,6 +1250,10 @@ public sealed interface Expr {
         public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
         public TypeDescriptor resolvedCalleeType() { return resolvedCalleeType; }
         public void setResolvedCalleeType(final TypeDescriptor type) { resolvedCalleeType = type; }
+        /// Records that the callee resolved to a top-level declaration, so lambda capture analysis
+        /// does not mistake a same-named local from another unit for a captured value.
+        public boolean resolvedGlobalCallee() { return resolvedGlobalCallee; }
+        public void setResolvedGlobalCallee(final boolean global) { resolvedGlobalCallee = global; }
         public MemberCall implicitMemberCall() { return implicitMemberCall; }
         public void setImplicitMemberCall(final MemberCall call) { implicitMemberCall = call; }
         public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }

@@ -1,0 +1,88 @@
+package collections;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Stream;
+import witness zeron.collections.ArrayFoldable;
+import zeron.control.Foldable;
+import zeron.control.Functor;
+import zeron.control.Monad;
+import zeron.function.identity;
+import zeron.lang.Option;
+import zeron.lang.Result;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn mapAll<F<_>: Functor<F>, A, B>(source: F<A>, transform: (A) -> B): F<B> =
+    source.map(transform);
+
+fn flatMapAll<F<_>: Monad<F>, A, B>(source: F<A>, transform: (A) -> F<B>): F<B> =
+    source.flatMap(transform);
+
+fn flattenAll<F<_>: Monad<F>, A>(source: F<F<A>>): F<A> = source.flatten();
+
+fn flatMapIdentity<F<_>: Monad<F>, A>(source: F<F<A>>): F<A> =
+    source.flatMap(identity);
+
+fn applyAll<F<_>: Monad<F>, A, B>(values: F<A>, functions: F<(A) -> B>): F<B> =
+    values.ap(functions);
+
+fn pureAll<F<_>: Monad<F>, A>(value: A): F<A> = F.pure(value);
+
+fn foldAll<F<_>: Foldable<F>>(values: F<Int>): Int =
+    values.foldLeft(0, (total, value) -> total + value);
+
+@Test
+public fn genericStreamOperations(): Unit performs TestFailure {
+    assertEquals(9, foldAll<Stream<_>>(
+        mapAll<Stream<_>, Int, Int>(Stream<Int>.of(1, 2, 3), value -> value + 1)));
+    assertEquals(26, foldAll<Stream<_>>(flatMapAll<Stream<_>, Int, Int>(
+        Stream<Int>.of(1, 2), value -> Stream<Int>.of(value, value + 10))));
+    assertEquals(11, foldAll<Stream<_>>(applyAll<Stream<_>, Int, Int>(
+        Stream<Int>.of(1, 2),
+        Stream<(Int) -> Int>.of(value -> value + 1, value -> value * 2))));
+    assertEquals(7, foldAll<Stream<_>>(pureAll<Stream<_>, Int>(7)));
+}
+
+@Test
+public fn genericOptionOperations(): Unit performs TestFailure {
+    assertEquals(5, foldAll<Option<_>>(
+        mapAll<Option<_>, Int, Int>(Option.Some(4), value -> value + 1)));
+    assertEquals(6, foldAll<Option<_>>(flatMapAll<Option<_>, Int, Int>(
+        Option.Some(5), value -> Option.Some(value + 1))));
+    let inner: Option<Int> = Option.Some(6);
+    let outer: Option<Option<Int>> = Option.Some(inner);
+    let flattened = flattenAll<Option<_>, Int>(outer);
+    let direct = flatMapIdentity<Option<_>, Int>(outer);
+    assertEquals(12, foldAll<Option<_>>(flattened) + foldAll<Option<_>>(direct));
+    let transform: (Int) -> Int = value -> value * 3;
+    assertEquals(12, foldAll<Option<_>>(applyAll<Option<_>, Int, Int>(
+        Option.Some(4), Option.Some(transform))));
+    assertEquals(8, foldAll<Option<_>>(pureAll<Option<_>, Int>(8)));
+}
+
+@Test
+public fn genericResultOperations(): Unit performs TestFailure {
+    assertEquals(7, foldAll<Result<_, String>>(
+        mapAll<Result<_, String>, Int, Int>(
+            Result.ok<Int, String>(5), value -> value + 2)));
+    assertEquals(7, foldAll<Result<_, String>>(
+        flatMapAll<Result<_, String>, Int, Int>(
+            Result.ok<Int, String>(5), value -> Result.ok<Int, String>(value + 2))));
+    assertEquals(12, foldAll<Result<_, String>>(
+        applyAll<Result<_, String>, Int, Int>(
+            Result.ok<Int, String>(2),
+            Result.ok<(Int) -> Int, String>(value -> value + 10))));
+    assertEquals(9, foldAll<Result<_, String>>(pureAll<Result<_, String>, Int>(9)));
+    assertEquals(0, foldAll<Result<_, String>>(Result.err<Int, String>("bad")));
+}
+
+@Test
+public fn arrayAndListAreFoldable(): Unit performs TestFailure {
+    assertEquals(6, ArrayList<Int>.of(1, 2, 3).foldLeft(0,
+        (total, value) -> total + value));
+    assertEquals(6, foldAll<ArrayList<_>>(ArrayList<Int>.of(1, 2, 3)));
+    let values: &Array<Int> = [4, 5, 6];
+    assertEquals(15, values.foldLeft(0, (total, value) -> total + value));
+    assertEquals(15, foldAll<Array<_>>(values));
+}

@@ -975,45 +975,55 @@ public final class PublicMemberCatalog {
     }
 
     private static TypeDescriptor copyType(final TypeDescriptor type) {
+        return copyType(type, new IdentityHashMap<>());
+    }
+
+    private static TypeDescriptor copyType(final TypeDescriptor type,
+                                           final IdentityHashMap<TypeDescriptor, TypeDescriptor> copies) {
+        final var existing = copies.get(type);
+        if (existing != null) return existing;
         return switch (type) {
             case TypeParameterDescriptor parameter -> {
-                final var copy = new TypeParameterDescriptor(parameter.scopeId(),
-                        parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
+                final var copy = new TypeParameterDescriptor(parameter.scopeId(), parameter.name(), List.of(),
                         parameter.isHigherKinded(), parameter.variance(),
                         parameter.admitsNullableArguments(), parameter.isEffectKind(),
                         parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
                         parameter.isReified());
+                copies.put(parameter, copy);
+                copy.initializeBounds(parameter.bounds().stream()
+                        .map(bound -> copyType(bound, copies)).toList());
                 if (parameter.isStoredExistential()) copy.markStoredExistential();
                 yield copy;
             }
             case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
-                    (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
+                    (TypeParameterDescriptor) copyType(applied.constructor(), copies),
+                    copyType(applied.argument(), copies));
             case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
                     new NominalDescriptor(constructor.baseType().name()),
-                    constructor.arguments().stream().map(PublicMemberCatalog::copyType).toList());
+                    constructor.arguments().stream().map(argument -> copyType(argument, copies)).toList());
             case NominalDescriptor nominal -> new NominalDescriptor(nominal.name());
             case GenericDescriptor generic -> TypeDescriptor.genericOf(
                     new NominalDescriptor(generic.baseType().name()),
-                    generic.typeParameters().stream().map(PublicMemberCatalog::copyType).toList());
+                    generic.typeParameters().stream().map(argument -> copyType(argument, copies)).toList());
             case TypeProjectionDescriptor projection -> new TypeProjectionDescriptor(
-                    projection.kind(), copyType(projection.bound()));
-            case ArrayDescriptor array -> TypeDescriptor.arrayOf(copyType(array.elementType()));
-            case NullableDescriptor nullable -> copyType(nullable.baseType()).toNullable();
-            case ReferenceDescriptor reference -> new ReferenceDescriptor(copyType(reference.baseType()));
+                    projection.kind(), copyType(projection.bound(), copies));
+            case ArrayDescriptor array -> TypeDescriptor.arrayOf(copyType(array.elementType(), copies));
+            case NullableDescriptor nullable -> copyType(nullable.baseType(), copies).toNullable();
+            case ReferenceDescriptor reference -> new ReferenceDescriptor(copyType(reference.baseType(), copies));
             case FunctionDescriptor function when function.isHandler() -> TypeDescriptor.handlerOf(
-                    copyType(function.returnType()),
-                    function.handledEffects().stream().map(PublicMemberCatalog::copyType).toList(),
-                    function.raisedEffects().stream().map(PublicMemberCatalog::copyType).toList());
+                    copyType(function.returnType(), copies),
+                    function.handledEffects().stream().map(effect -> copyType(effect, copies)).toList(),
+                    function.raisedEffects().stream().map(effect -> copyType(effect, copies)).toList());
             case FunctionDescriptor function -> TypeDescriptor.functionWithEffectsOf(function.name(),
-                    copyType(function.returnType()),
-                    function.parameters().stream().map(PublicMemberCatalog::copyType).toList(),
+                    copyType(function.returnType(), copies),
+                    function.parameters().stream().map(parameter -> copyType(parameter, copies)).toList(),
                     function.typeParameters().stream().map(parameter -> (TypeParameterDescriptor)
-                            copyType(parameter)).toList(),
-                    function.raisedEffects().stream().map(PublicMemberCatalog::copyType).toList());
+                            copyType(parameter, copies)).toList(),
+                    function.raisedEffects().stream().map(effect -> copyType(effect, copies)).toList());
             case EffectRowDescriptor row -> new EffectRowDescriptor(
-                    row.effects().stream().map(PublicMemberCatalog::copyType).toList(),
+                    row.effects().stream().map(effect -> copyType(effect, copies)).toList(),
                     row.variables().stream()
-                            .map(variable -> (TypeParameterDescriptor) copyType(variable))
+                            .map(variable -> (TypeParameterDescriptor) copyType(variable, copies))
                             .toList());
             default -> type;
         };

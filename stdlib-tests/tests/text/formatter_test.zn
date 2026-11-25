@@ -1,0 +1,52 @@
+package text;
+
+import zeron.text.*;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn failureOf(template: String, arguments: Array<String>): FormatError =
+    match (Formatter.format(template, arguments)) {
+        case Result.Ok(_) -> FormatError.LeftoverArgument(-1);
+        case Result.Err(error) -> error;
+    };
+
+@Test
+public fn placeholdersConsumeArgumentsInOrder(): Unit performs TestFailure {
+    let formatted = match (Formatter.format("{} {:>4} {{ok}}", ["a", "b"])) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> "error";
+    };
+    assertEquals("a    b {ok}", formatted);
+}
+
+@Test
+public fn explicitIndicesCanRepeatArguments(): Unit performs TestFailure {
+    let explicit = match (Formatter.format("{0} {1} {0}", ["x", "y"])) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> "error";
+    };
+    assertEquals("x y x", explicit);
+}
+
+@Test
+public fn fixedAndZeroPaddedAvoidLocaleFormatting(): Unit performs TestFailure {
+    assertEquals("1.3", Formatter.fixed(1.25, 1));
+    assertEquals("0042", Formatter.zeroPadded(42L, 4));
+}
+
+@Test
+public fn templateErrorsDistinguishMissingAndOutOfRangeIndices(): Unit performs TestFailure {
+    match (failureOf("{} {}", ["only"])) {
+        case FormatError.MissingArgument(index) -> assertEquals(1, index);
+        case _ -> assertEquals(false, true);
+    };
+    match (failureOf("{5}", ["a"])) {
+        case FormatError.IndexOutOfRange(index) -> assertEquals(5, index);
+        case _ -> assertEquals(false, true);
+    };
+    match (failureOf("{}", ["a", "b"])) {
+        case FormatError.LeftoverArgument(index) -> assertEquals(1, index);
+        case _ -> assertEquals(false, true);
+    };
+}

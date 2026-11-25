@@ -281,6 +281,60 @@ public final class ProjectManifestTest {
     }
 
     @Test
+    public void validatesCompileFailureRoots() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-compile-failure-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.createDirectories(projectRoot.resolve("src"));
+            Files.createDirectories(projectRoot.resolve("tests/fixtures"));
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    test-roots = ["tests"]
+
+                    [targets.unit]
+                    kind = "test"
+                    compile-failure-roots = ["tests/fixtures"]
+                    """);
+            final var project = ProjectManifest.load(manifest);
+            final var unit = project.targets().get("unit");
+            assertEquals(1, unit.compileFailureRoots().size());
+            assertTrue(unit.compileFailureRoots().getFirst().endsWith("tests/fixtures"));
+
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    test-roots = ["tests"]
+
+                    [targets.app]
+                    compile-failure-roots = ["tests/fixtures"]
+                    """);
+            assertTrue(assertThrows(IllegalArgumentException.class,
+                    () -> ProjectManifest.load(manifest)).getMessage()
+                    .contains("only valid on a test target"));
+
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    test-roots = ["tests"]
+
+                    [targets.unit]
+                    kind = "test"
+                    compile-failure-roots = ["src/fixtures"]
+                    """);
+            assertTrue(assertThrows(IllegalArgumentException.class,
+                    () -> ProjectManifest.load(manifest)).getMessage()
+                    .contains("must not overlap a project source root"));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
     public void buildsEachSelectedTargetIntoItsOwnOutput() throws Exception {
         final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-build-")
                 .toAbsolutePath().normalize();

@@ -743,7 +743,10 @@ final class LambdaCompilationPlan {
             }
             case Expr.Call call -> {
                 collectEvidenceCaptures(call.evidenceArguments(), localNames, captured, seen);
-                if (call.implicitMemberCall() == null) {
+                if (call.implicitMemberCall() == null
+                        && call.resolvedFunctionDeclaration() == null
+                        && call.resolvedFunctionName() == null
+                        && !call.resolvedGlobalCallee()) {
                     final var callee = call.resolvedSymbolToken();
                     final var calleeName = callee.lexeme();
                     if (callee.type() == TokenType.THIS && call.resolvedCalleeType() != null
@@ -911,6 +914,7 @@ final class LambdaCompilationPlan {
                     }
                     return;
                 }
+                if (variable.resolvedFunctionDeclaration() != null) return;
                 if ((symbols.containsSymbol(resolvedName) || symbols.containsAnySymbol(resolvedName))
                         && lookupCapture(resolvedName).lvt() != SymbolTable.GLOBAL
                         && seen.add(resolvedName.lexeme())) {

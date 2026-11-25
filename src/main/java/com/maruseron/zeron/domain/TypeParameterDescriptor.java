@@ -143,6 +143,13 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
         return bounds;
     }
 
+    /// Publishes the bounds declared for this parameter. Bounds are not part of type-parameter
+    /// identity, so a higher-kinded parameter can be registered before its own bounds are parsed
+    /// and later observe the finished list, including self-references such as `S<_>: Monad<S>`.
+    public void initializeBounds(final List<TypeDescriptor> declaredBounds) {
+        bounds = List.copyOf(declaredBounds);
+    }
+
     public boolean isHigherKinded() {
         return higherKinded;
     }

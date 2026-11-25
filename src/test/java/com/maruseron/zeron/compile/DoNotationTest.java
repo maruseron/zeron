@@ -14,7 +14,9 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public final class DoNotationTest {
     @Test
@@ -311,6 +313,186 @@ public final class DoNotationTest {
             final var main = loader.loadClass(packageName + ".Main");
             assertEquals(4, main.getMethod("optionValue").invoke(null));
         }
+    }
+
+    @Test
+    public void optionGuardsFilterThePrecedingBind() throws Exception {
+        final var packageName = "doGuards" + suffix();
+        final var source = """
+                package %s;
+
+                fn positive(value: Int): Option<Int> = do {
+                    let base <- Option.Some(value);
+                    if (base > 0);
+                    yield base;
+                };
+
+                fn inRange(value: Int): Option<Int> = do {
+                    let base <- Option.Some(value);
+                    if (base > 0);
+                    if (base < 10);
+                    let scaled = base * 2;
+                    yield scaled;
+                };
+
+                fn positiveValue(value: Int): Int = match (positive(value)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+
+                fn rangeValue(value: Int): Int = match (inRange(value)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+
+                fn safeDivide(value: Int): Option<Int> = do {
+                    let base <- Option.Some(value);
+                    if (base > 0);
+                    let scaled <- Option.Some(100 / base);
+                    yield scaled;
+                };
+
+                fn divided(value: Int): Int = match (safeDivide(value)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(4, main.getMethod("positiveValue", int.class).invoke(null, 4));
+            assertEquals(-1, main.getMethod("positiveValue", int.class).invoke(null, -4));
+            assertEquals(14, main.getMethod("rangeValue", int.class).invoke(null, 7));
+            assertEquals(-1, main.getMethod("rangeValue", int.class).invoke(null, 11));
+            assertEquals(50, main.getMethod("divided", int.class).invoke(null, 2));
+            assertEquals(-1, main.getMethod("divided", int.class).invoke(null, 0));
+        }
+    }
+
+    @Test
+    public void streamGuardsFilterLazilyInOrder() throws Exception {
+        final var packageName = "doStreamGuards" + suffix();
+        final var source = """
+                package %s;
+
+                import zeron.collections.Stream;
+
+                fn evens(values: Stream<Int>): Stream<Int> = do<Stream<_>> {
+                    let value <- values;
+                    if (value %% 2 == 0);
+                    yield value * 10;
+                };
+
+                fn total(): Int = evens(Stream<Int>.of(1, 2, 3, 4))
+                    .fold(0, (accumulator, value) -> accumulator + value);
+
+                fn repeated(): Int = {
+                    let filtered = evens(Stream<Int>.of(1, 2, 3, 4));
+                    yield filtered.fold(0, (a, value) -> a + value)
+                        + filtered.fold(0, (a, value) -> a + value);
+                };
+
+                fn guardedDivide(): Stream<Int> = do<Stream<_>> {
+                    let value <- Stream<Int>.of(0);
+                    if (100 / value > 0);
+                    yield value;
+                };
+
+                fn evaluate(): Int = guardedDivide().fold(0, (a, value) -> a + value);
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(60, main.getMethod("total").invoke(null));
+            assertEquals(120, main.getMethod("repeated").invoke(null));
+            assertNotNull(main.getMethod("guardedDivide").invoke(null));
+            try {
+                main.getMethod("evaluate").invoke(null);
+                fail("The guarded stream should evaluate its predicate during traversal.");
+            } catch (final java.lang.reflect.InvocationTargetException exception) {
+                assertTrue(String.valueOf(exception.getCause()),
+                        exception.getCause() instanceof ArithmeticException);
+            }
+        }
+    }
+
+    @Test
+    public void genericGuardsRequireMonadAndFilterableBounds() throws Exception {
+        final var packageName = "doGenericGuards" + suffix();
+        final var source = """
+                package %s;
+
+                import zeron.control.Monad;
+                import zeron.control.Filterable;
+
+                fn active<S<_>: Monad<S> + Filterable<S>, A>(
+                    source: S<A>,
+                    predicate: (A) -> Boolean
+                ): S<A> = do {
+                    let value <- source;
+                    if (predicate(value));
+                    yield value;
+                };
+
+                fn value(): Int = match (active(Option.Some(4), number -> number > 0)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(4, main.getMethod("value").invoke(null));
+        }
+    }
+
+    @Test
+    public void guardsWithoutFilterableEvidenceAreRejected() {
+        assertDiagnostic("""
+                import zeron.control.Monad;
+
+                fn active<S<_>: Monad<S>, A>(source: S<A>, predicate: (A) -> Boolean): S<A> = do {
+                    let value <- source;
+                    if (predicate(value));
+                    yield value;
+                };
+                """, "Method is not provided by any of the type parameter's contract bounds");
+        assertDiagnostic("""
+                fn guarded(value: Int): Result<Int, String> = do {
+                    let base <- Result<Int, String>.Ok(value);
+                    if (base > 0);
+                    yield base;
+                };
+                """, "No contract witness provides 'filter'");
+    }
+
+    @Test
+    public void guardPlacementAndConditionTypeAreChecked() {
+        assertDiagnostic("""
+                fn early(): Option<Int> = do {
+                    if (true);
+                    let value <- Option.Some(1);
+                    yield value;
+                };
+                """, "must follow a bind clause");
+        assertDiagnostic("""
+                fn late(): Option<Int> = do<Option<_>> {
+                    if (true);
+                    yield 1;
+                };
+                """, "must follow a bind clause");
+        assertDiagnostic("""
+                fn afterLocal(): Option<Int> = do {
+                    let value <- Option.Some(1);
+                    let doubled = value * 2;
+                    if (doubled > 0);
+                    yield doubled;
+                };
+                """, "must precede the bind group's plain 'let name = ...' locals");
+        assertDiagnostic("""
+                fn nonBoolean(): Option<Int> = do {
+                    let value <- Option.Some(1);
+                    if (value + 1);
+                    yield value;
+                };
+                """, "Boolean");
     }
 
     @Test

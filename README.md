@@ -158,11 +158,15 @@ For contributors, build with Maven:
 mvn package
 ```
 
-Run the test suite:
+Run the compiler test suite:
 
 ```sh
 mvn test
 ```
+
+The standard library's runtime behavior is covered by a Zeron suite under [`stdlib-tests/`](stdlib-tests/).
+The [parity guide](documents/developer_guides/stdlib-suite-parity.md) has the command and the map
+between the suite and the Java tests.
 
 The project includes a compiler-backed language server for diagnostics, completion, hover, and
 definition navigation, a project-aware `zeron fmt` formatter with `--check` mode, and a portable

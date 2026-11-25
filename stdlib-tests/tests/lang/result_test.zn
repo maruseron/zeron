@@ -1,0 +1,55 @@
+package lang;
+
+import zeron.lang.Result;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn increment(value: Int): Result<Int, String> = Result.ok<Int, String>(value + 1);
+
+fn success(): Result<Int, String> = Result.ok<Int, String>(41)
+    .map(value -> value + 1)
+    .flatMap(value -> increment(value + 1));
+
+fn failure(): Result<Int, String> = Result.err<Int, String>("bad")
+    .map(value -> value + 1);
+
+@Test
+public fn successFoldsToItsValue(): Unit performs TestFailure =
+    assertEquals(44, success().fold(value -> value, error -> -1));
+
+@Test
+public fn errorFoldsToTheFallback(): Unit performs TestFailure =
+    assertEquals(-1, failure().fold(value -> value, error -> -1));
+
+@Test
+public fn patternMatchingSelectsThePresentCase(): Unit performs TestFailure =
+    assertEquals(44, match (success()) {
+        case Result.Ok(value) -> value;
+        case Result.Err(_) -> -1;
+    });
+
+@Test
+public fn patternMatchingSelectsTheErrorCase(): Unit performs TestFailure =
+    assertEquals(true, match (failure()) {
+        case Result.Ok(_) -> false;
+        case Result.Err(error) -> error == "bad";
+    });
+
+@Test
+public fn okAndErrPredicatesAgree(): Unit performs TestFailure
+    = assertEquals(true, success().isOk() and not success().isErr());
+
+@Test
+public fn mapErrorTransformsOnlyErrors(): Unit performs TestFailure {
+    let mapped: Result<Int, Int> = Result.err<Int, String>("bad").mapError(error -> 3);
+    let preserved: Result<Int, Int> = Result.ok<Int, String>(42).mapError(error -> 3);
+    assertEquals(true, mapped.fold(value -> false, error -> error == 3));
+    assertEquals(true, preserved.fold(value -> value == 42, error -> false));
+}
+
+@Test
+public fn flatMapShortCircuitsAfterAnError(): Unit performs TestFailure =
+    assertEquals(true, failure()
+        .flatMap(value -> increment(value + 1))
+        .fold(value -> false, error -> error == "bad"));

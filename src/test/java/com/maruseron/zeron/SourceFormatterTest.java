@@ -641,6 +641,28 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void formatsDoGuardClausesIdempotently() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                fn guarded(values:Array<Int>):Int=do{
+                    let value<-values;
+                    if(value>0);
+                    if(value<100);
+                    let doubled=value*2;
+                    yield doubled;
+                };
+                """;
+
+        final var formatted = SourceFormatter.format(source, "DoGuardFormatting.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("if (value > 0);"));
+        assertTrue(formatted, formatted.contains("if (value < 100);"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "DoGuardFormatting.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void keepsASpaceBeforeArrayLiteralsButNotBeforeIndexes() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = """

@@ -1,0 +1,171 @@
+package lang;
+
+import zeron.lang.JoinerConfig;
+import zeron.lang.Option;
+import zeron.lang.Result;
+import zeron.lang.StringJoiner;
+import zeron.collections.Collector;
+import zeron.collections.Stream;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+
+fn emptyStrings(): Array<String> = [];
+
+fn describe(value: Option<Char>): String = match (value) {
+    case Option.Some(char) -> char.toString();
+    case Option.None() -> "none";
+};
+
+@Test
+public fn splitJoinsPartsAndKeepsATrailingEmptyPart(): Unit performs TestFailure =
+    assertEquals("a|b|", String.join("a,b,".split(",")) {
+        this.separator = "|";
+    });
+
+@Test
+public fn splitCountsEveryPart(): Unit performs TestFailure =
+    assertEquals(3, "a b c".split(" ").count());
+
+@Test
+public fn emptySeparatorSplitsIntoCharacters(): Unit performs TestFailure =
+    assertEquals("a|b|c", String.join("abc".split("")) {
+        this.separator = "|";
+    });
+
+@Test
+public fn emptyTextSplitsIntoOneEmptyPart(): Unit performs TestFailure =
+    assertEquals(1, "".split(",").count());
+
+@Test
+public fn emptySeparatorOnEmptyTextYieldsNoParts(): Unit performs TestFailure =
+    assertEquals(0, "".split("").count());
+
+@Test
+public fn linesYieldsASingleLineForTextWithoutNewlines(): Unit performs TestFailure =
+    assertEquals("only", String.join("only".lines()) {
+        this.separator = "|";
+    });
+
+@Test
+public fn emptyTextHasNoLines(): Unit performs TestFailure =
+    assertEquals(0, "".lines().count());
+
+@Test
+public fn charAtAndAtIndexCharacters(): Unit performs TestFailure {
+    assertEquals("e", describe("hello".charAt(1)));
+    assertEquals("o", describe("hello".at(4)));
+}
+
+@Test
+public fn charAtOutsideTheTextIsNone(): Unit performs TestFailure {
+    assertEquals("none", describe("hello".charAt(5)));
+    assertEquals("none", describe("hello".charAt(-1)));
+}
+
+@Test
+public fn caseConversionUppercasesEveryCharacter(): Unit performs TestFailure =
+    assertEquals("ZERON GUIDE", "Zeron Guide".toUpperCase());
+
+@Test
+public fn trimVariantsRemoveOnlyTheirOwnSide(): Unit performs TestFailure {
+    let padded = "  padded  ";
+    assertEquals("[padded][padded  ][  padded]",
+        "[" + padded.trim() + "][" + padded.trimStart() + "][" + padded.trimEnd() + "]");
+}
+
+@Test
+public fn isBlankIgnoresWhitespaceOnlyText(): Unit performs TestFailure =
+    assertEquals(true, "   ".isBlank() and not " x ".isBlank());
+
+@Test
+public fn replaceRewritesEveryOccurrence(): Unit performs TestFailure =
+    assertEquals("a+b+c", "a-b-c".replace("-", "+"));
+
+@Test
+public fn toIntParsesSignedAndRejectsInvalidText(): Unit performs TestFailure {
+    assertEquals(42, "42".toInt().getOrElse(-1));
+    assertEquals(-7, "-7".toInt().getOrElse(-1));
+    assertEquals(-1, "4x".toInt().getOrElse(-1));
+    assertEquals(-1, "99999999999".toInt().getOrElse(-1));
+}
+
+@Test
+public fn toFloatParsesScientificNotationAndRejectsInvalidText(): Unit performs TestFailure {
+    assertEquals(250.0, "2.5e2".toFloat().getOrElse(-1.0));
+    assertEquals(-1.0, "1.2.3".toFloat().getOrElse(-1.0));
+}
+
+@Test
+public fn splitRegexSplitsOnMatches(): Unit performs TestFailure =
+    assertEquals("a|b|c", match ("a1b22c".splitRegex("[0-9]+")) {
+        case Result.Ok(parts) -> String.join(parts) {
+            this.separator = "|";
+        };
+        case Result.Err(_) -> "unexpected";
+    });
+
+@Test
+public fn splitRegexReportsAnInvalidPattern(): Unit performs TestFailure =
+    assertEquals(true, match ("abc".splitRegex("[")) {
+        case Result.Ok(_) -> false;
+        case Result.Err(_) -> true;
+    });
+
+@Test
+public fn joinWrapsAndSeparatesParts(): Unit performs TestFailure {
+    assertEquals("[]", String.join(emptyStrings()) {
+        this.prefix = "[";
+        this.suffix = "]";
+        this.separator = ", ";
+    });
+    assertEquals("solo", String.join(["solo"]) {
+        this.separator = ", ";
+    });
+    assertEquals("a, b, c", String.join(["a", "b", "c"]) {
+        this.separator = ", ";
+    });
+}
+
+@Test
+public fn joinerCollectsASplitStream(): Unit performs TestFailure {
+    let config = JoinerConfig.new();
+    config.separator = ":";
+    assertEquals("a:b:c", "abc".split("").collectWith(StringJoiner.fromConfig(config)));
+}
+
+@Test
+public fn aLocalJoinerCarriesItsStateBetweenCollections(): Unit performs TestFailure {
+    let config = JoinerConfig.new();
+    config.separator = ":";
+    let joiner = StringJoiner.fromConfig(config);
+    let first = "ab".split("").collectWith(joiner);
+    let second = "cd".split("").collectWith(joiner);
+    assertEquals("a:b|a:b:c:d", first + "|" + second);
+}
+
+@Test
+public fn collectorFactoryAndCollectOperationsAgree(): Unit performs TestFailure {
+    let collector = Collector.of<String, Int, String>("",
+        (text, value) -> text + value.toString(),
+        (text) -> "[" + text + "]");
+    assertEquals("[123]", Stream<Int>.fromArray([1, 2, 3]).collectWith(collector));
+    assertEquals("[1-2-3]", Stream<Int>.fromArray([1, 2, 3]).collect("",
+        (text, value) -> if (text.isEmpty()) then value.toString()
+            else text + "-" + value.toString(),
+        (text) -> "[" + text + "]"));
+}
+
+@Test
+public fn aJoinerCanConsumeAStreamDirectly(): Unit performs TestFailure {
+    let config = JoinerConfig.new();
+    config.separator = "-";
+    assertEquals("1-2-3", StringJoiner.fromConfig(config)
+        .join(Stream<Int>.fromArray([1, 2, 3]).map(value -> value.toString())));
+}
+
+@Test
+public fn eachTraversalOfASplitStartsFromTheBeginning(): Unit performs TestFailure {
+    let parts = "a,b,c".split(",");
+    assertEquals(6, parts.count() + parts.count());
+}

@@ -22,14 +22,48 @@
   cancel-and-join leftovers on exit. Task cancellation causes and failure observation are tracked,
   siblings are cancelled by the first genuine failure, and an unobserved failure is reported at
   close.
+- Added the `Filterable` contract and its standard implementations. `zeron.control.Filterable`
+  provides the `mapFilter` primitive plus derived `filter` and `compact`; `Option` and `Stream`
+  supply default witnesses, with `Stream.mapFilter` filtering lazily and preserving element order.
+  `Result<_, E>` deliberately has no default witness.
 - Extended `zeron.test` with `@CompileFailure` and the `assertContains`, `assertNotContains`,
-  `assertStartsWith`, `assertEndsWith`, `assertGreaterThan`, and `assertLessThan` helpers. The
-  compile-failure runner, fixture roots, filtering, and JSON reporting are still pending under
-  ZEP-0169. `STANDARD_LIBRARY_API_VERSION` is now 23 for this `0.9.0` cycle's public library
-  additions.
+  `assertStartsWith`, `assertEndsWith`, `assertGreaterThan`, and `assertLessThan` helpers.
+  `STANDARD_LIBRARY_API_VERSION` is now 23 for this `0.9.0` cycle's public library additions.
+- Migrated the standard library's Java runtime tests to the Zeron suite in `stdlib-tests/`. Its
+  `stdlib-runtime` target compiles the bundled sources with `stdlib = "source"` and runs 147 tests
+  plus three `@CompileFailure` fixtures covering `Option`, `Result`, `Cell`, strings, math and
+  statistics, collections and builders, streams, for-expressions, buffers, randomness, text
+  formatting and regular expressions, generators, and ranges. The parity map in
+  `documents/developer_guides/stdlib-suite-parity.md` records every removed Java test and the
+  assertions that deliberately stay Java, and `scripts/release.ps1` runs the suite with the packaged
+  launcher.
+- `Formatter.format` now reports `MissingArgument(index)` for a sequential `{}` field that has no
+  argument left, matching its documented error model. An explicit index beyond the argument array
+  still reports `IndexOutOfRange(index)`.
+- Removed the `MonadPlus` contract. It bundled `Alternative` and `Monad` without operations of its
+  own; because Zeron has no structural contract checking, generic code obtained nothing from the
+  name over an intersection bound. Use `Alternative<M> + Monad<M>` directly.
+- Implemented the ZEP-0169 compile-failure runner. A test target may configure
+  `compile-failure-roots`; those fixtures are excluded from the suite compilation, and each
+  `@CompileFailure(fixture, code, message)` is compiled on its own in process after the generated
+  runner finishes, matching the reported diagnostics and cleaning up its output directory. A fixture
+  that compiles, is missing, or fails internally is reported as a failed test. `zeron test` gained
+  `--filter`, `--list`, and `--fail-fast`; the generated runner now prints a failed assertion's
+  message and the summary reports a distinct error count. A JSON report and per-test timing remain pending.
 
 ### Compiler and language work
 
+- Added the ZEP-0174 `if (condition);` guard clause to `do` blocks. A guard filters the preceding
+  generator through witness-dispatched `Filterable.filter` before that bind's `map`/`flatMap`, so a
+  false guard skips the rest of the path — including later binds, locals, and the `yield`
+  expression — and `Stream` guards stay lazy. A guarded block requires `Filterable<F>` in addition
+  to `Monad<F>`. Guards must follow a bind and precede the bind group's plain `let` locals; guards
+  before the first bind and in bind-free `do<C<_>>` blocks are rejected, and the condition must be
+  an effect-free `Boolean`. Higher-kinded bounds now keep one parameter descriptor whose bounds are
+  published after parsing, so chained bound-dispatched calls such as `S<_>: Monad<S> + Filterable<S>`
+  resolve against a constrained parameter. Editor surfaces also recognize `responds`: the terminal
+  highlighter and TextMate grammar color it only in an effect response clause, the language server
+  offers it as a keyword completion, and an effect's hover detail shows its declared response type.
 - Added the ZEP-0119 pull-generator surface and cleanup rules. `zeron.collections` gains
   `Generator<T>` (an `Iterator<T>` with `cancel` and `isDone`), a replayable `GeneratorSource<T>`,
   and `generator<T>(body)`. A body suspends at each `perform Yield<T>(...)` and resumes on the next

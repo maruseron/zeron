@@ -1,0 +1,125 @@
+package collections;
+
+import zeron.collections.HashMap;
+import zeron.collections.HashSet;
+import zeron.lang.Hashable;
+import zeron.lang.Pair;
+import zeron.test.Test;
+import zeron.test.TestFailure;
+import zeron.test.assertEquals;
+import zeron.test.assertTrue;
+
+fn emptyMapFor<T: Hashable<T>>(): &HashMap<T, Int> = HashMap.empty<T, Int>();
+
+fn emptySetFor<T: Hashable<T>>(): &HashSet<T> = HashSet.empty<T>();
+
+@Test
+public fn hashMapInsertsReplacesRemovesAndIterates(): Unit performs TestFailure {
+    let mut values = HashMap.empty<Int, String>();
+    let firstInsert = values.put(1, "one");
+    assertTrue(not firstInsert.isSome());
+    values.put(9, "nine");
+    values.put(2, "two");
+    values.put(3, "three");
+    values.put(4, "four");
+    values.put(5, "five");
+    values.put(6, "six");
+    assertEquals(7, values.size);
+    let replaced = values.put(1, "updated");
+    assertEquals("one", replaced.getOrElse("missing"));
+    assertEquals("updated", values.get(1).getOrElse("missing"));
+    let removed = values.remove(9);
+    assertEquals("nine", removed.getOrElse("missing"));
+    assertTrue(not values.containsKey(9));
+    assertTrue(not values.get(100).isSome());
+    let mut keySum = 0;
+    let mut pairCount = 0;
+    for (let entry in values) {
+        keySum = keySum + entry.fst;
+        pairCount = pairCount + 1;
+    }
+    assertEquals(21, keySum);
+    assertEquals(6, pairCount);
+
+    let mut initialized = HashMap.of(
+        Pair<Int, String>.new(12, "twelve"),
+        Pair<Int, String>.new(13, "thirteen"));
+    assertEquals(2, initialized.size);
+    assertEquals("thirteen", initialized.get(13).getOrElse(""));
+    initialized.clear();
+    assertTrue(initialized.isEmpty());
+}
+
+@Test
+public fn hashableBoundsEntailEquality(): Unit performs TestFailure {
+    let values = emptyMapFor<Int>();
+    let elements = emptySetFor<Int>();
+    assertTrue(values.isEmpty());
+    assertTrue(elements.isEmpty());
+}
+
+@Test
+public fn hashSetDeduplicatesAndRemoves(): Unit performs TestFailure {
+    let mut values = HashSet.empty<Int>();
+    assertTrue(values.add(1));
+    assertTrue(values.add(9));
+    assertTrue(not values.add(1));
+    values.add(2);
+    values.add(3);
+    values.add(4);
+    values.add(5);
+    values.add(6);
+    assertEquals(7, values.size);
+    assertTrue(values.contains(9));
+    assertTrue(values.remove(9));
+    assertTrue(not values.contains(9));
+    let mut count = 0;
+    for (let value in values) count = count + 1;
+    assertEquals(6, count);
+    assertEquals(6, values.size);
+
+    let mut initialized = HashSet.of(4, 4, 5);
+    assertEquals(2, initialized.size);
+    initialized.clear();
+    assertTrue(initialized.isEmpty());
+}
+
+@Test
+public fn collectedForExpressionsDeduplicateIntoASet(): Unit performs TestFailure {
+    let collected = for item in [1, 1, 2] collect item into HashSet.empty<Int>();
+    assertEquals(2, collected.size);
+    assertTrue(collected.contains(1));
+    assertTrue(collected.contains(2));
+}
+
+@Test
+public fn longKeysThatShareBitsStayDistinct(): Unit performs TestFailure {
+    let high = 0x0000000100000002L;
+    let low = 0x0000000200000001L;
+    let mut values = HashMap.empty<Long, String>();
+    values.put(high, "high");
+    values.put(low, "low");
+    assertEquals(2, values.size);
+    assertEquals("high", values.get(high).getOrElse(""));
+    assertEquals("low", values.get(low).getOrElse(""));
+    values.remove(high);
+    assertEquals(1, values.size);
+    assertTrue(values.containsKey(low));
+    assertTrue(not values.containsKey(high));
+}
+
+@Test
+public fn smallIntKeysSurviveCollisions(): Unit performs TestFailure {
+    let mut values = HashMap.empty<Int, Int>();
+    let mut key = -32;
+    while (key < 32) {
+        values.put(key, key);
+        key = key + 1;
+    }
+    assertEquals(64, values.size);
+    key = -32;
+    while (key < 32) {
+        assertEquals(key, values.get(key).getOrElse(9999));
+        key = key + 1;
+    }
+}

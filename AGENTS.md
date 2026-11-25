@@ -36,6 +36,8 @@ Workflow guides:
   catalog, explanation resources, and severities.
 - [`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md) — test
   layout, focused runs, and `dist/` handling.
+- [`stdlib-suite-parity.md`](./documents/developer_guides/stdlib-suite-parity.md) — the Zeron
+  standard-library suite, its command line, and the Java assertions that remain.
 - [`generated-artifacts-and-release.md`](./documents/developer_guides/generated-artifacts-and-release.md) —
   generated output, API index versions, and release packaging.
 

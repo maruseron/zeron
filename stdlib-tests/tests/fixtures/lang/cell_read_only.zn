@@ -1,0 +1,5 @@
+package cellReadOnly;
+
+import zeron.lang.Cell;
+
+fn invalid(cell: Cell<Int>): Unit = cell.set(1);

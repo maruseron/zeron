@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0] - Unreleased
+## [0.9.0] - 2026, 25 NOV
 
 ### Standard library
 
@@ -49,7 +49,8 @@
   runner finishes, matching the reported diagnostics and cleaning up its output directory. A fixture
   that compiles, is missing, or fails internally is reported as a failed test. `zeron test` gained
   `--filter`, `--list`, and `--fail-fast`; the generated runner now prints a failed assertion's
-  message and the summary reports a distinct error count. A JSON report and per-test timing remain pending.
+  message and the summary reports a distinct error count. A JSON report, per-test timing, and JSON
+  diagnostics remain pending under ZEP-0175.
 
 ### Compiler and language work
 

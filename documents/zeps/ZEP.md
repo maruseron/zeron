@@ -1,21 +1,26 @@
 # Zeron Enhancement Proposals
 
-This file tracks ZEPs in numerical order, including their proposal status and independent release
-state. Release state is maintained here as the single source of truth. See [ZEP-0000](./ZEP-0000.md)
-for the proposal process and [ZEP-0001](./ZEP-0001.md) for the proposal template.
+This file tracks ZEPs in numerical order, including proposal status and published release state.
+Current planning is recorded in the [workstream index](../workstreams/README.md), and release-scoped
+candidates in the active [release plan](../releases/current.md), not in future version labels. See
+[ZEP-0000](./ZEP-0000.md) for the proposal process,
+[ZEP-0001](./ZEP-0001.md) for the template, [ZEP-0176](./ZEP-0176.md) for workstream planning, and
+[ZEP-0179](./ZEP-0179.md) for release plans.
 
-Release states are defined in ZEP-0000. `Candidate` means a proposed release target, not a
-commitment; `Planned` means approved for a target bundle. Deferred rows have no release target or
-release reference. The proposal lifecycle status and release state are separate.
+Release states are defined in ZEP-0000. `Shipped` identifies a published release. `Unscheduled`
+means no published release contains the ZEP, including parts that are still being designed or
+implemented. `Deferred` and `Not applicable` record dispositions. `Candidate` and `Planned` are
+retired; do not assign a future version here. Workstream membership, part status, and dependencies
+are recorded in `documents/workstreams/`.
 
 A `Deferred` proposal has no approved design or implementation work. A `Deferred` release state
-means the proposal was considered and intentionally excluded from current release planning. Both
-are recorded for [ZEP-0121](./ZEP-0121.md): it is not unscheduled work that can enter a bundle
-without reopening the design. `Implemented` records the accepted design that landed; follow-up
-scope owned by other proposals does not keep the original row `Accepted` after its release row is
-`Shipped` (see [ZEP-0068](./ZEP-0068.md)).
+means the proposal was considered and intentionally excluded from current planning. Both are
+recorded for [ZEP-0121](./ZEP-0121.md): it is not unscheduled work that can enter a release without
+reopening the design. `Implemented` records the accepted design that landed; follow-up scope owned
+by other proposals does not keep the original row `Accepted` after its release row is `Shipped`
+(see [ZEP-0068](./ZEP-0068.md)).
 
-| Number | Name | Proposal status | Release state | Release / bundle reference |
+| Number | Name | Proposal status | Release state | Release reference |
 | ------ | ---- | --------------- | ------------- | -------------------------- |
 | [ZEP-0000](./ZEP-0000.md) | Zeron Enhancement Proposal Process | Accepted | Not applicable | — |
 | [ZEP-0001](./ZEP-0001.md) | ZEP Template | Accepted | Not applicable | — |
@@ -35,7 +40,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0015](./ZEP-0015.md) | Runtime Reification of Applied Type Identity | Implemented | Shipped | 0.7.0 |
 | [ZEP-0016](./ZEP-0016.md) | Standard Library Phase 2: Math, Characters, and Networking | Superseded | Unscheduled | — |
 | [ZEP-0017](./ZEP-0017.md) | Anonymous contract implementations | Implemented | Shipped | 0.3.0 |
-| [ZEP-0018](./ZEP-0018.md) | Final-Version Release Targets in ZEP Tracker | Accepted | Not applicable | — |
+| [ZEP-0018](./ZEP-0018.md) | Final-Version Published Release References in ZEP Tracker | Accepted | Not applicable | — |
 | [ZEP-0019](./ZEP-0019.md) | Higher-Kinded Abstractions and Declarative Contracts | Implemented | Shipped | 0.4.0 |
 | [ZEP-0020](./ZEP-0020.md) | Incremental Compilation | Deferred | Deferred | — |
 | [ZEP-0021](./ZEP-0021.md) | Zeron Language Server Protocol Support | Implemented | Shipped | 0.3.0 |
@@ -83,8 +88,8 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
-| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Implemented | Planned | 0.9.0 |
-| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Implemented | Planned | 0.9.0 |
+| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Implemented | Shipped | 0.9.0 |
+| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Implemented | Shipped | 0.9.0 |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Implemented | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Shipped | 0.8.0 |
@@ -108,13 +113,13 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0088](./ZEP-0088.md) | Non-Null Assertion Operator | Implemented | Shipped | 0.6.0 |
 | [ZEP-0089](./ZEP-0089.md) | Explicit Unchecked Casts | Draft | Unscheduled | - |
 | [ZEP-0090](./ZEP-0090.md) | Property References | Implemented | Shipped | 0.6.0 |
-| [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Accepted | Candidate | 0.10.0 |
+| [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Accepted | Unscheduled | — |
 | [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Implemented | Shipped | 0.6.0 |
 | [ZEP-0093](./ZEP-0093.md) | Unified Property Identity and a Typed Code-Model API | Implemented | Shipped | 0.6.0 |
 | [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Implemented | Shipped | 0.6.0 |
 | [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
 | [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |
-| [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Candidate | 0.10.0 |
+| [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Unscheduled | — |
 | [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Shipped | 0.8.0 |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
 | [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
@@ -129,18 +134,18 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0109](./ZEP-0109.md) | Rank-2 Polymorphism: Polymorphic Function Types and Generic Lambdas | Implemented | Shipped | 0.7.0 |
 | [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Superseded | Unscheduled | — |
 | [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Shipped | 0.7.0 |
-| [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Implemented | Planned | 0.9.0 |
+| [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Implemented | Shipped | 0.9.0 |
 | [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Implemented | Shipped | 0.8.0 |
 | [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Shipped | 0.7.0 |
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
 | [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Shipped | 0.8.0 |
-| [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Implemented | Planned | 0.9.0 |
-| [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Implemented | Planned | 0.9.0 |
+| [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Implemented | Shipped | 0.9.0 |
+| [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Implemented | Shipped | 0.9.0 |
 | [ZEP-0120](./ZEP-0120.md) | Direct-Style Futures with `spawn` and `await` | Superseded | Unscheduled | — |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
-| [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Leading Reification | Implemented | Planned | 0.9.0 |
+| [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Leading Reification | Implemented | Shipped | 0.9.0 |
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Shipped | 0.8.0 |
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Shipped | 0.8.0 |
 | [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Shipped | 0.8.0 |
@@ -164,51 +169,55 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0144](./ZEP-0144.md) | Parameter Type Refinement and Call-Site Preconditions | Draft | Unscheduled | - |
 | [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
 | [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Implemented | Shipped | 0.8.0 |
-| [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Implemented | Planned | 0.9.0 |
+| [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Implemented | Shipped | 0.9.0 |
 | [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Shipped | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Shipped | 0.8.0 |
 | [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Shipped | 0.8.0 |
-| [ZEP-0152](./ZEP-0152.md) | Standard Library Randomness | Implemented | Planned | 0.9.0 |
-| [ZEP-0153](./ZEP-0153.md) | Descriptive Statistics in `zeron.math` | Implemented | Planned | 0.9.0 |
-| [ZEP-0154](./ZEP-0154.md) | Ordered Collections | Implemented | Planned | 0.9.0 |
-| [ZEP-0155](./ZEP-0155.md) | Binary Buffers and Encodings | Implemented | Planned | 0.9.0 |
-| [ZEP-0156](./ZEP-0156.md) | Text Formatting and Regular Expressions | Implemented | Planned | 0.9.0 |
-| [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Implemented | Planned | 0.9.0 |
-| [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Candidate | 0.10.0 |
+| [ZEP-0152](./ZEP-0152.md) | Standard Library Randomness | Implemented | Shipped | 0.9.0 |
+| [ZEP-0153](./ZEP-0153.md) | Descriptive Statistics in `zeron.math` | Implemented | Shipped | 0.9.0 |
+| [ZEP-0154](./ZEP-0154.md) | Ordered Collections | Implemented | Shipped | 0.9.0 |
+| [ZEP-0155](./ZEP-0155.md) | Binary Buffers and Encodings | Implemented | Shipped | 0.9.0 |
+| [ZEP-0156](./ZEP-0156.md) | Text Formatting and Regular Expressions | Implemented | Shipped | 0.9.0 |
+| [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Implemented | Shipped | 0.9.0 |
+| [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Unscheduled | — |
 | [ZEP-0159](./ZEP-0159.md) | Generated Standard-Library Reference | Draft | Unscheduled | — |
-| [ZEP-0160](./ZEP-0160.md) | Scoped Projection Types | Draft | Candidate | 0.10.0 |
-| [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Candidate | 0.10.0 |
+| [ZEP-0160](./ZEP-0160.md) | Scoped Projection Types | Draft | Unscheduled | — |
+| [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Unscheduled | — |
 | [ZEP-0162](./ZEP-0162.md) | Scoped Generic Admissibility | Draft | Unscheduled | — |
 | [ZEP-0163](./ZEP-0163.md) | Automatic Read-Only Widening for Inherited Generic Method Bounds | Draft | Unscheduled | — |
-| [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Implemented | Planned | 0.9.0 |
-| [ZEP-0165](./ZEP-0165.md) | Unify `Task` and `Future` into a Single Async Handle | Implemented | Planned | 0.9.0 |
-| [ZEP-0166](./ZEP-0166.md) | Open Generic Effect Applications | Implemented | Planned | 0.9.0 |
+| [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Implemented | Shipped | 0.9.0 |
+| [ZEP-0165](./ZEP-0165.md) | Unify `Task` and `Future` into a Single Async Handle | Implemented | Shipped | 0.9.0 |
+| [ZEP-0166](./ZEP-0166.md) | Open Generic Effect Applications | Implemented | Shipped | 0.9.0 |
 | [ZEP-0167](./ZEP-0167.md) | Capability Requirements in Generic Type Arguments | Draft | Unscheduled | — |
 | [ZEP-0168](./ZEP-0168.md) | Return Covariance in Contract Inheritance | Draft | Unscheduled | — |
-| [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Implemented | Planned | 0.9.0 |
+| [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Implemented | Shipped | 0.9.0 |
 | [ZEP-0170](./ZEP-0170.md) | For-Expression and Do-Notation Boundary | Draft | Unscheduled | — |
-| [ZEP-0171](./ZEP-0171.md) | Fail-Fast Concurrent Scopes and the `concurrent` Helper | Implemented | Planned | 0.9.0 |
+| [ZEP-0171](./ZEP-0171.md) | Fail-Fast Concurrent Scopes and the `concurrent` Helper | Implemented | Shipped | 0.9.0 |
 | [ZEP-0172](./ZEP-0172.md) | Portable Compiler-Managed Continuation Backend | Draft | Unscheduled | — |
 | [ZEP-0173](./ZEP-0173.md) | Source-Level Debug Metadata and IDE Stepping | Draft | Unscheduled | — |
-| [ZEP-0174](./ZEP-0174.md) | `if` Guards in Do-Notation through `Filterable` | Implemented | Planned | 0.9.0 |
+| [ZEP-0174](./ZEP-0174.md) | `if` Guards in Do-Notation through `Filterable` | Implemented | Shipped | 0.9.0 |
 | [ZEP-0175](./ZEP-0175.md) | Structured Test Reports and JSON Diagnostics | Draft | Unscheduled | — |
+| [ZEP-0176](./ZEP-0176.md) | Workstream-Based Planning and Release Tracking | Accepted | Not applicable | — |
+| [ZEP-0177](./ZEP-0177.md) | Canonical Effect Payloads with Derived Behavior | Draft | Unscheduled | — |
+| [ZEP-0178](./ZEP-0178.md) | Generic Effect Propagation through Reified Effect Variables | Draft | Unscheduled | — |
+| [ZEP-0179](./ZEP-0179.md) | Release Plans and Candidate Tracking | Accepted | Not applicable | — |
 
-## Release bundles
+## Release history
 
-The row-level release state above is authoritative. This section summarizes the current bundle plan;
-see the [ZEP release plan](../developer_guides/zep-tracker-review.md) for the rationale and
-sequencing.
+The row-level release state above is authoritative. This section records published releases; see the
+[workstream release ledger](../workstreams/README.md#release-ledger) for parts and the
+[ZEP release review](../developer_guides/zep-tracker-review.md) for the historical rationale. Future
+work is not assigned a version here.
 
-### Bundle summary
+### Release summary
 
-| Bundle | Theme | Current state | Contents |
+| Release | Theme | Published | Contents |
 | --- | --- | --- | --- |
-| `0.6.0` | Stabilization | Shipped | 25 rows |
-| `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Planned; 19 rows | ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0166 (implemented; open generic effect applications), ZEP-0165 (implemented; unifies `Task`/`Future`), ZEP-0164 (implemented; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0169 (implemented; suite split, compile-failure runner, and parity table), ZEP-0171 (implemented; fail-fast scopes and the `concurrent` helper), ZEP-0119 (implemented; continuations, tail transfer, generation tokens, task cancellation), ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157 (implemented), and ZEP-0174 (implemented; `if` guards through `Filterable`) |
-| `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
+| `0.6.0` | Stabilization | — | 25 rows |
+| `0.7.0` | Type identity, reification, and type bounds | 2026-11-14 | 15 shipped; acceptance queue closed |
+| `0.8.0` | Normalization and nominal implementation | 2026-11-20 | 25 shipped; acceptance queue closed |
+| `0.9.0` | Effect control and response typing plus library breadth | 2026-11-25 | 19 shipped; acceptance queue closed; ZEPs: ZEP-0118 (headline, implemented), ZEP-0112 (implemented), ZEP-0123 (implemented), ZEP-0147 (implemented), ZEP-0166 (implemented; open generic effect applications), ZEP-0165 (implemented; unifies `Task`/`Future`), ZEP-0164 (implemented; non-generic `Await`, `Completion`, and blocking entry handler), ZEP-0169 (implemented; suite split, compile-failure runner, and parity table), ZEP-0171 (implemented; fail-fast scopes and the `concurrent` helper), ZEP-0119 (implemented; continuations, tail transfer, generation tokens, task cancellation), ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157 (implemented), and ZEP-0174 (implemented; `if` guards through `Filterable`) |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -357,20 +366,16 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 
 ### `0.9.0` — effect control and response typing
 
-`0.9.0` is the effect-control bundle. It has nineteen `Planned` rows; [ZEP-0112](./ZEP-0112.md),
-[ZEP-0118](./ZEP-0118.md), [ZEP-0123](./ZEP-0123.md), [ZEP-0147](./ZEP-0147.md),
-[ZEP-0166](./ZEP-0166.md), [ZEP-0165](./ZEP-0165.md), [ZEP-0164](./ZEP-0164.md), and
-[ZEP-0119](./ZEP-0119.md) are implemented, [ZEP-0169](./ZEP-0169.md) is implemented, the remaining
-library rows and [ZEP-0171](./ZEP-0171.md) are implemented, and
-[ZEP-0174](./ZEP-0174.md) is an implemented language rider. The effect-control rows carry the depth,
-the library rows add surface that does not touch handler typing or code generation, and the language
-rider uses the library's `Filterable` contract without changing effect handling:
+`0.9.0` is the effect-control bundle plus a library track. It shipped on 2026-11-25 with nineteen
+rows. The effect-control rows carry the depth, the library rows add surface that does not touch
+handler typing or code generation, and the language rider uses the library's `Filterable` contract
+without changing effect handling:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
   an effect declares a response type, `perform` becomes an expression whose value the handler
   supplies, and tail-resumptive cases compile to direct handler calls without stack capture. It
   also introduces the `Yield<T>`, `Ask<T>`, and `Log` library effects and the push direction of
-  generators. The row stays `Candidate` until the bundle ships.
+  generators.
 - [ZEP-0147](./ZEP-0147.md) — replace `raise` and `raises` with `perform` and `performs`.
   Implemented: a source-breaking rename of the effect-operation vocabulary; it does not change
   response typing, effect identity, or handler behavior.
@@ -386,13 +391,13 @@ rider uses the library's `Filterable` contract without changing effect handling:
 - [ZEP-0112](./ZEP-0112.md) — structured concurrency on virtual threads. Implemented: a
   library-only `ConcurrentScope` / `Task<T, E>` track with cancellation and deadlines; effect rows are
   captured at the task boundary and re-raised at `value()`. Independent of response typing.
-- [ZEP-0165](./ZEP-0165.md) — unify `Task` and `Future` into a single async handle. Accepted:
+- [ZEP-0165](./ZEP-0165.md) — unify `Task` and `Future` into a single async handle. Implemented:
   collapses the eager `Future` wrapper into `Task`, keeps `spawn`/`await` on `Task`, and supersedes
   ZEP-0120's `Future` type. The blocking direct-style policy, effect capture, cancellation, and
   structured-scope semantics are retained. Its companion [ZEP-0164](./ZEP-0164.md) supplies the
   `Await` carrier and must ship the blocking entry handler with it so `main` stays ergonomic.
 - [ZEP-0164](./ZEP-0164.md) — non-generic `Await` carrier over `Completion` and blocking entry
-  handler. Accepted: adds a non-generic `Await` effect that responds `Unit` and carries a `Completion` view, changes `await`
+  handler. Implemented: adds a non-generic `Await` effect that responds `Unit` and carries a `Completion` view, changes `await`
   to `performs Await, E` followed by `Task.value()`, and installs a host-side blocking frame around
   the program entry. It stays identity-erased, so no effect-application ABI, wildcard handler,
   erased join, or class reification is needed. It depends on ZEP-0165's unified `Task` handle and
@@ -460,65 +465,42 @@ bytecode-quality rows here because ZEP-0095 is a compiler-wide emission program 
 ABI-changing primitive specialization; both would widen the release's internal surface at the same
 time as the response-typing and continuation work.
 
-ZEP-0000 requires an Accepted design before a `Candidate` row becomes `Planned`; all nineteen
-rows meet that gate and the bundle is approved for release. ZEP-0107 is `Accepted` but stays
-`Unscheduled`: its
+The `0.9.0` acceptance queue is closed; all nineteen rows are `Shipped` / `0.9.0`. ZEP-0107 is
+`Accepted` but stays `Unscheduled`: its
 implementation needs the generic-effect propagation work that ZEP-0005 leaves deferred, namely
 applications containing type parameters, forwarding through generic calls, and omitted handler
 arguments. ZEP-0121 remains `Deferred` and outside the bundle. ZEP-0111 shipped in `0.7.0`,
 ZEP-0110 is superseded by [ZEP-0146](./ZEP-0146.md), which shipped in `0.8.0`, and ZEP-0120 is
-superseded by [ZEP-0165](./ZEP-0165.md), which carries the unified `Task` surface into `0.9.0`
+superseded by [ZEP-0165](./ZEP-0165.md), which shipped the unified `Task` surface in `0.9.0`
 together with [ZEP-0164](./ZEP-0164.md)'s `Await` carrier and entry handler.
 
-### `0.10.0` — model system completion, scoped types, and resource handling (tentative)
+### Future work
 
-This bundle gives the model-metadata orphans a coherent home rather than scheduling annotation
-work in isolation. It is tentative and not scheduled, and it follows the `0.9.0` effect-control
-work. The accepted candidates are [ZEP-0091](./ZEP-0091.md) (annotation consumption) and
-[ZEP-0097](./ZEP-0097.md) (`MAPPING` annotation target for model clauses).
-[ZEP-0160](./ZEP-0160.md) defines `scoped` projection types, origins, and the escape checker;
-[ZEP-0161](./ZEP-0161.md) defines `scoped fn`, `scoped mut fn`, `Self` propagation, and contract
-conformance; and [ZEP-0158](./ZEP-0158.md) is the expression-valued resource block that consumes a
-`scoped &File` receiver. The three form a resource-handling companion. They are placed here because
-the blocks depend on the effect-control and continuation work in `0.9.0` settling first, and
-because their cleanup rules must agree with ZEP-0112's scope lifetime and ZEP-0119's resumption
-points. [ZEP-0162](./ZEP-0162.md) records the future generic admissibility rules and remains
-`Draft` / `Unscheduled`; version 1 deliberately rejects scoped type arguments and container
-scoping. ZEP-0097 depends on ZEP-0091's compiler-recognized annotation model; ZEP-0091 Direction B
-also unblocks external names in [ZEP-0092](./ZEP-0092.md).
+Future work is planned in concern-based workstreams. The central
+[workstream index](../workstreams/README.md) lists every concern, its parts, statuses, dependencies,
+and current focus. The current workstreams include:
 
-The model-improvement drafts [ZEP-0101](./ZEP-0101.md) (field representation adapters),
-[ZEP-0102](./ZEP-0102.md) (generic models through factories), and
-[ZEP-0103](./ZEP-0103.md) (polymorphic models for closed sums) are intended for the same bundle,
-but remain `Draft` / `Unscheduled` until their designs are accepted. They cannot be marked
-`Candidate` yet. The shipped model foundation is [ZEP-0079](./ZEP-0079.md), [ZEP-0092](./ZEP-0092.md),
-[ZEP-0093](./ZEP-0093.md), and [ZEP-0098](./ZEP-0098.md).
+- [model metadata](../workstreams/model-metadata/README.md) and
+  [scoped resources](../workstreams/scoped-resources/README.md) for declaration/model and resource
+  surfaces;
+- [Java interop](../workstreams/java-interop/README.md) for the remaining interoperability
+  inventory;
+- [test infrastructure](../workstreams/test-infrastructure/README.md) and
+  [continuation tooling](../workstreams/continuation-tooling/README.md) for development and runtime
+  support;
+- [bytecode quality](../workstreams/bytecode-quality/README.md) for emission and optimization work;
+- [static newtype verification](../workstreams/static-verification/README.md) for the predicate and
+  fact program;
+- [language ergonomics](../workstreams/language-ergonomics/README.md) for contained smoothing
+  changes;
+- [numeric surface](../workstreams/numeric-surface/README.md) for literals, units, suffixes, and
+  operators.
 
-[ZEP-0107](./ZEP-0107.md) is not part of this bundle. It extends runtime descriptors with ancestor
-metadata for generic effects, not model declarations or annotation metadata. It stays
-`Accepted` / `Unscheduled` until the generic-effect propagation slice it depends on exists; folding
-it into the model bundle would couple two unrelated API-index changes.
+No part is assigned a release version. A release selects parts that are `Ready`; the active
+[release plan](../releases/current.md) records candidates and selected scope, and the
+[release ledger](../workstreams/README.md#release-ledger) records only what has shipped.
 
-### Static newtype verification (proposed, unscheduled)
-
-Seven `Draft` / `Unscheduled` proposals record a static-verification track outside the current
-effect-control and model bundles. They are not candidates and have no release target. The proposed
-order is dependency-driven:
-
-1. [ZEP-0138](./ZEP-0138.md) — predicate and fact IR. This is the shared foundation and should be
-   designed and accepted before the feature ZEPs.
-2. [ZEP-0139](./ZEP-0139.md) — checked `new` for guarded newtypes. It is the most separable feature
-   and can start with constant evaluation plus a runtime fallback.
-3. [ZEP-0140](./ZEP-0140.md) — comparison and refined-type flow facts. It builds on ZEP-0131 and
-   supplies the first useful proofs for checked construction.
-4. [ZEP-0141](./ZEP-0141.md) — predicate functions. It depends on the fact IR and the flow-fact
-   transfer.
-5. [ZEP-0142](./ZEP-0142.md) — interval and difference-bound facts. It is the largest analysis
-   component and supplies the relational proofs used by ranges and parameter refinements.
-6. [ZEP-0143](./ZEP-0143.md) — `IntRange` bounds and loop facts. It depends on the interval backend.
-7. [ZEP-0144](./ZEP-0144.md) — parameter refinements. It is the capstone and consumes the fact
-   stores, predicate metadata, interval proofs, and range facts.
-
-The foundation and the first feature slice should be reviewed before a bundle is named. Promoting
-these rows to `Candidate` is a separate release decision and should not imply that all seven ship
-together.
+[ZEP-0107](./ZEP-0107.md) remains `Accepted` / `Unscheduled`. It extends runtime descriptors with
+ancestor metadata for generic effects, not model declarations or annotation metadata. It needs the
+generic-effect propagation slice that ZEP-0005 leaves deferred; it is not part of the model metadata
+workstream.

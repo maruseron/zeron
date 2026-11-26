@@ -430,6 +430,57 @@ public final class TypedRaisedEffectsTest {
                 .anyMatch(error -> error.message().contains("concrete effect type")));
     }
 
+    @Test
+    public void fieldOnlyEffectPositionalPatternsReportArityDiagnostics() {
+        final var unit = parse("FieldOnlyPattern.zn", """
+                effect E {
+                    b: Int;
+                    public s(): Unit = ();
+                }
+                fn main() {
+                    handle (perform E.new(2)) with {
+                        case E(a) -> ();
+                    };
+                }
+                """);
+        final var resolution = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+        assertFalse(resolution.errors().toString(), resolution.errors().isEmpty());
+        assertTrue(resolution.errors().toString(), resolution.errors().stream()
+                .anyMatch(error -> error.message()
+                        .contains("Effect payload pattern expects 0 component patterns")));
+    }
+
+    @Test
+    public void statelessEffectMethodsDispatchThroughTheirInterface() throws Exception {
+        final var packageName = "statelessDispatch" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-stateless-dispatch-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public effect E responds Int {
+                    public s(): Int = 7;
+                }
+                fn result(): Int = handle (perform E.new()) with {
+                    case E() as e, k -> k.resume(e.s());
+                };
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            final var resolution = compiler.resolveWithDiagnostics();
+            assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+            final var compilation = compiler.compileWithDiagnostics();
+            assertTrue(compilation.diagnostics().toString(), compilation.successful());
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(7, loader.loadClass(packageName + ".Main")
+                        .getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
     private static CompilationUnit parse(final String sourcePath, final String source) {
         return Parser.of(Scanner.from(source, sourcePath).scanTokens())
                 .parseCompilationUnit(sourcePath);

@@ -779,6 +779,8 @@ That program now compiles and folds `5 % 3` to `2` before emission.
 
 ## References
 
+- [Bytecode quality workstream](../workstreams/bytecode-quality/README.md) — parts and sequencing for
+  this inventory's optimization work.
 - [`NAVIGATION.md`](../../NAVIGATION.md) — compiler pipeline and module responsibilities.
 - [`design-document-03_lambda-lowering.md`](../design_documents/design-document-03_lambda-lowering.md) — current lambda lowering and known gaps.
 - [`design-document-06_intrinsic-arrays.md`](../design_documents/design-document-06_intrinsic-arrays.md) — intrinsic array types and operations.

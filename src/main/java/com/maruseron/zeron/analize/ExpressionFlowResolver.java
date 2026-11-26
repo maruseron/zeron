@@ -2774,12 +2774,16 @@ final class ExpressionFlowResolver {
         final var effectProduct = pattern.productPattern()
                 ? context.classes.get(patternTypeForResolution.name()) : null;
         if (pattern.productPattern() && effectProduct != null && effectProduct.isEffect()) {
+            final var properties = effectProduct.properties();
             if (pattern.type() != null && pattern.extractor() != null
-                    || pattern.arguments().size() != effectProduct.canonicalConstructorTypes().size()) {
+                    || pattern.arguments().size() != properties.size()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                         pattern.keyword(), "Effect payload pattern expects "
-                                + effectProduct.canonicalConstructorTypes().size()
-                                + " component patterns."));
+                                + properties.size() + " component patterns."));
+            }
+            if (properties.stream().anyMatch(property -> !property.isPublic())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                        pattern.keyword(), "Effect payload patterns require public properties."));
             }
             TypeResolver.validateType(context, patternTypeForResolution, pattern.keyword());
             if (root && rootKind != MatchRootKind.APPLIED) {
@@ -2805,13 +2809,13 @@ final class ExpressionFlowResolver {
             }
             final var substitutions = TypeResolver.substitutionsFor(
                     context, effectProduct.typeParameters(), patternTypeForResolution);
-            final var componentTypes = effectProduct.canonicalConstructorTypes();
             boolean refutable = root && rootKind == MatchRootKind.APPLIED
                     ? !patternTypeForResolution.equals(inputType)
                     : !root && !patternTypeForResolution.equals(inputType);
-            for (int index = 0; index < pattern.arguments().size(); index++) {
+            for (int index = 0; index < Math.min(properties.size(), pattern.arguments().size()); index++) {
                 final var argument = pattern.arguments().get(index);
-                final var componentType = TypeSubstitution.substitute(componentTypes.get(index), substitutions);
+                final var componentType = TypeSubstitution.substitute(
+                        properties.get(index).type(), substitutions);
                 final var nested = resolveMatchPattern(context, argument, componentType, false,
                         permittedNames, contractArguments, rootKind);
                 mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());

@@ -104,7 +104,9 @@ not edit generated class files as source; regenerate them from Java/Zeron source
 | `src/main/resources/style.toml` | Canonical formatter rules keyed by grammar production |
 | `src/test/java/com/maruseron/zeron/` | Tests mirroring compiler phases, plus Java interop fixtures |
 | `documents/design_documents/` | Authoritative design notes and the implemented grammar |
-| `documents/zeps/` | Proposals, tracker, and release-bundle state |
+| `documents/workstreams/` | Concern-based plans: index, numbered parts, dependencies, and release ledger |
+| `documents/releases/` | Release plans: candidates, selected scope, release engineering, and archived plans |
+| `documents/zeps/` | Proposals, decision records, and published release state |
 | `documents/developer_guides/` | Workflow guides: change surfaces, testing, diagnostics, artifacts |
 | `guide/` | User-facing tutorial; chapter order is in `guide/README.md`, not the file numbers |
 | `sample_programs/` | Runnable example projects (`jsonmodel`, `list_monad`, `query_engine`) |
@@ -134,7 +136,12 @@ lightweight editor grammar, not a second scanner; semantics come from the langua
 
 Each set has a different job. Keep them separate:
 
-- `documents/zeps/` — proposals, decisions, and release state. Not a tutorial.
+- `documents/workstreams/` — durable planning by concern: missions, numbered parts, dependencies,
+  statuses, and the release ledger. No future version candidates or release assignments.
+- `documents/releases/` — release-scoped planning: candidates, selected scope, release-local work,
+  and archived plans. The active plan is `documents/releases/current.md`.
+- `documents/zeps/` — proposals, decisions, and published release state. Not a tutorial and not a
+  future-version plan.
 - `documents/design_documents/` — semantics and rationale for implemented behavior.
 - `documents/developer_guides/` — task workflows and checklists. Link to the above instead of
   restating semantics.

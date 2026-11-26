@@ -41,12 +41,24 @@ Workflow guides:
 - [`generated-artifacts-and-release.md`](./documents/developer_guides/generated-artifacts-and-release.md) —
   generated output, API index versions, and release packaging.
 
-## Feature Roadmap and Shipping
+## Workstreams and Shipping
 
+- Planning uses concern-based workstreams, not future version candidates. Read
+  `documents/workstreams/README.md` and the relevant workstream page before starting feature work.
+  Follow `documents/zeps/ZEP-0176.md` for the planning model.
+- Release-scoped candidates and selected work are tracked in `documents/releases/current.md`, not
+  in workstream part tables. Follow `documents/zeps/ZEP-0179.md` for the release-plan model.
 - For feature work requiring a proposal, draft and resolve a ZEP before implementation. Follow
   `documents/zeps/ZEP-0000.md` and `ZEP-0001.md`, and register it in `documents/zeps/ZEP.md`.
+- Record the work as a numbered part on its workstream page. Do not assign a future version or add a
+  `Candidate`/`Planned` release state. A part becomes `Ready` only after its design is accepted, its
+  implementation lands, and dependencies are satisfied; a release selects `Ready` parts. Nominate
+  candidates through the active release plan, not through a release column on the workstream page.
 - Implement the accepted design, then update `CHANGELOG.md`, relevant design references, and the
-  ZEP proposal status. Keep the tracker synchronized whenever proposal status or title changes.
+  ZEP proposal status. Keep the workstream part table, central index rollup, and ZEP tracker
+  synchronized whenever status or scope changes.
+- At release time, mark shipped parts, update the release ledger, archive the release plan, and mark
+  the corresponding ZEP rows `Shipped` with the published version.
 - Update `README.md` and/or relevant `guide/` chapters to document user-facing behavior.
 
 ## Release Cycle and Process
@@ -71,14 +83,21 @@ Workflow guides:
   template in `documents/zeps/ZEP-0001.md`. Check `documents/zeps/ZEP.md` for the next available
   number; assign sequential zero-padded IDs, never reuse an ID, and add every new ZEP to the tracker.
   Keep the tracker in numerical order with links, titles, and current statuses, and update it whenever
-  a ZEP's status or title changes. Maintain release state and release/bundle reference only in that tracker,
-  separately from proposal status; update them as a ZEP becomes a candidate, is planned, deferred, or
-  shipped. Routine fixes and contained changes do not need a ZEP.
-- `documents/zeps/ZEP.md`: numerical tracker of Zeron Enhancement Proposals and canonical release
-  candidacy/bundle state.
+  a ZEP's status or title changes. Maintain proposal status and published release state only in that
+  tracker; future planning belongs in workstreams and release-scoped intent in release plans. Routine
+  fixes and contained changes do not need a ZEP.
+- `documents/workstreams/README.md`: central workstream index, statuses, and release ledger.
+- `documents/workstreams/<name>/README.md`: mission, numbered parts, dependencies, and statuses for
+  one concern. ZEPs stay central and are linked, not copied.
+- `documents/releases/README.md`: release-plan policy, candidate/selected scope, and archived plans.
+  The active plan is `documents/releases/current.md`.
+- `documents/zeps/ZEP.md`: numerical tracker of Zeron Enhancement Proposals and published release
+  state.
 - `documents/zeps/ZEP-0000.md`: ZEP scope, numbering, lifecycle, and decision process.
 - `documents/zeps/ZEP-0001.md`: ZEP authoring template.
 - `documents/zeps/ZEP-0012.md`: canonical artifact and public release-series versioning policy.
+- `documents/zeps/ZEP-0176.md`: workstream planning, part statuses, and release-ledger rules.
+- `documents/zeps/ZEP-0179.md`: release plans, candidate tracking, and selected-scope rules.
 - `documents/design_documents/design-document-01_grammar.ebnf`: implemented source grammar in ISO/IEC 14977 EBNF.
 - Retired, archive only: `documents/design_documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
 - `documents/design_documents/design-document-00.md`: language overview and intended features.

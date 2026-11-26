@@ -178,7 +178,10 @@ features and remaining work. The [design documents](documents/design_documents/)
 specifications and implementation notes.
 
 Contributor guidance for compiler changes, registries, intrinsics, and module conventions is in
-[`documents/developer_guides/`](documents/developer_guides/).
+[`documents/developer_guides/`](documents/developer_guides/). Current planning is organized by
+concern in the [workstream index](documents/workstreams/README.md), with ZEPs remaining the decision
+records. The active [release plan](documents/releases/current.md) lists release candidates and
+selected scope without changing proposal or workstream statuses.
 
 ## License
 

@@ -215,7 +215,7 @@
   is a product, and `Field` and `Vector2` are data classes. `Option` gains `flatMap`, and
   `Array.fold` is canonical with `foldLeft` as the `Foldable` bridge. The concurrent-scope source
   file follows the `snake_case` convention. `STANDARD_LIBRARY_API_VERSION` stays 22 because this
-  remains the same unreleased 0.9.0 API cycle.
+  remained part of the same 0.9.0 API cycle.
 
 ## [0.8.0] - 2026, 20 NOV
 

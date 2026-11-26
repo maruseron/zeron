@@ -795,7 +795,9 @@ final class ExpressionFlowEmitter {
                     productDeclaration.typeParameters(), matchType);
             final var dataComponents = productDeclaration.dataClass()
                     ? productDeclaration.dataComponents() : null;
-            for (int index = 0; index < pattern.arguments().size(); index++) {
+            final var componentCount = dataComponents == null
+                    ? productDeclaration.properties().size() : dataComponents.size();
+            for (int index = 0; index < Math.min(pattern.arguments().size(), componentCount); index++) {
                 final var argument = pattern.arguments().get(index);
                 if (argument.wildcard()) continue;
                 final var componentName = dataComponents == null

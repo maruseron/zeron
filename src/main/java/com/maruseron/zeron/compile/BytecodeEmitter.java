@@ -2491,6 +2491,11 @@ final class BytecodeEmitter {
         if (contractMethod != null) {
             composer.invokeinterface(ClassDesc.of(ownerName), call.name.lexeme(),
                     methodType);
+        } else if (classOwner != null && classOwner.isEffect() && classMethod.isPublic()
+                && classOwner.typeParameters().isEmpty()
+                && context.resolution.isStatelessEffect(ownerName)) {
+            composer.invokeinterface(ClassDesc.of(ownerName), call.name.lexeme(),
+                    methodType);
         } else if (!classMethod.isPublic() && context.emittingLambdaImplementation
                 && !isSamePackage(ownerName, context.mainClassName)) {
             final var erasedDescriptor = (FunctionDescriptor) TypeSubstitution.erase(invokedType);

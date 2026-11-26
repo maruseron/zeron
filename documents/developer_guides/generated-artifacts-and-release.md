@@ -69,16 +69,22 @@ The API index filename is versioned: `api-v<API_INDEX_SCHEMA_VERSION>.bin`, unde
 - `STANDARD_LIBRARY_API_VERSION` — bump only when the public standard-library surface changes.
 
 Each may be bumped once per release cycle. Consolidate required changes before incrementing
-either. Follow [`ZEP-0012.md`](../zeps/ZEP-0012.md) for the canonical versioning policy, and record
-the bundle state in [`ZEP.md`](../zeps/ZEP.md).
+either. Follow [`ZEP-0012.md`](../zeps/ZEP-0012.md) for the canonical versioning policy. Record the
+published release in [`ZEP.md`](../zeps/ZEP.md) and the
+[workstream release ledger](../workstreams/README.md#release-ledger); do not assign a future version
+to unfinished parts. Use the active [release plan](../releases/current.md) for candidate and selected
+scope; see [ZEP-0179](../zeps/ZEP-0179.md).
 
 When the index schema or the index filename changes, check readers and writers together, including
 backward-compatibility behavior for older indexes.
 
 ## Release process
 
-1. Bump the project version in [`pom.xml`](../../pom.xml).
-2. Run from the repository root:
+1. Confirm the selected scope in [`documents/releases/current.md`](../releases/current.md) contains
+   only `Ready` workstream parts with satisfied dependencies. Do not use a future version label as
+   planning state.
+2. Bump the project version in [`pom.xml`](../../pom.xml).
+3. Run from the repository root:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts/release.ps1
@@ -107,6 +113,10 @@ The script reads the POM version and both index versions, then:
 
 If you add a top-level distribution file or change the archive layout, update both the staging
 copies and the required-entry checks in the script.
+
+After the release is published, mark the included parts `Shipped` in their workstream pages, add the
+release-ledger row, and mark the corresponding ZEP rows `Shipped` with the published version. Archive
+the release plan as `documents/releases/<version>.md` and reset `current.md` to the planning state.
 
 ## GitHub release workflow
 
@@ -153,6 +163,7 @@ secret is required for GitHub Releases.
 
 ## Related
 
+- [Workstream index](../workstreams/README.md)
 - [`testing-and-verification.md`](./testing-and-verification.md)
 - [`change-surface-map.md`](./change-surface-map.md)
 - `guide/24-libraries-and-separate-compilation.md`

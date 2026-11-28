@@ -267,9 +267,11 @@ the requiring contract.
 
 Inherited defaults follow class conformance rules: a compatible public class method overrides a
 default, one unique applicable default can satisfy a requirement, and multiple applicable defaults
-require an explicit class method. A requiring contract may redeclare an inherited method with a
-compatible signature to replace its inherited default; redeclaration cannot change the inherited
-signature. Property requirements merge under the ordinary conformance rules.
+require an explicit class method. A requiring contract may redeclare an inherited method to replace
+its inherited default or to narrow its return type. The redeclaration must preserve parameter
+types, mutability, effect row, variadic shape, and default arity; only the return type may narrow
+under the ordinary subtype relation. The inherited descriptor is supplied by the class-side
+synthetic bridge. Property requirements merge under the ordinary conformance rules.
 
 Cycles in the requirement graph are invalid. The compiler checks requirements after type
 substitution, rejects incompatible inherited member requirements, and emits nominal JVM contract
@@ -397,7 +399,9 @@ contract Named {
 
 A default method may call required methods and read required properties through `this`; mutating
 defaults require `default mut` and a mutable receiver. A public class method overrides a compatible
-default. One unique compatible default may satisfy an abstract requirement, including a requirement
+default. [ZEP-0184](../zeps/ZEP-0184.md) adds a nominal `Self` result for classes and contracts: in
+a default body `this` has type `Self`, and each final implementing class substitutes its own type.
+`Self` in contract parameters, fields, and setters remains deferred. One unique compatible default may satisfy an abstract requirement, including a requirement
 from another contract implemented by the class. Multiple applicable defaults require an explicit
 class method. Default methods have no stored state and compile as JVM interface methods; calls use
 normal interface dispatch. Compiled API indexes preserve whether an exported contract method has a

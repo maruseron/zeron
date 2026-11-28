@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Date | 2026-11-26 |
+| Date | 2026-11-27 |
 | Scope | Proposal and release history in `documents/zeps/ZEP.md`, the workstream index, and the active release plan |
 | Purpose | Historical release record and entry point to current workstream and release planning |
 
@@ -23,17 +23,17 @@ release-scoped candidates live in the [current release plan](../releases/current
 (ZEP-0112, ZEP-0118, ZEP-0123, ZEP-0147, ZEP-0166, ZEP-0164, ZEP-0165, ZEP-0119, ZEP-0066,
 ZEP-0067, ZEP-0152–ZEP-0157, ZEP-0171, ZEP-0169, and ZEP-0174).
 
-Current active workstreams are model metadata and mapping, scoped resources, and test
-infrastructure. The proposed concerns are continuation tooling, Java interop, bytecode quality,
-static newtype verification, language ergonomics, and the numeric surface. The shipped effect-control and library-breadth workstreams are
+Current active workstreams are model metadata and mapping, scoped resources, test infrastructure,
+and static newtype verification. The proposed concerns are continuation tooling, Java interop,
+bytecode quality, language ergonomics, and the numeric surface. The shipped effect-control and library-breadth workstreams are
 complete. See the [index](../workstreams/README.md) for parts and statuses. ZEP-0170 records the
 for-expression/do-notation boundary as a `Draft` / `Unscheduled` policy proposal. ZEP-0172 and
 ZEP-0173 record portable continuations and debug metadata as `Draft` / `Unscheduled` parts of
 continuation tooling. ZEP-0175 records test reporting as a `Draft` / `Unscheduled` part of test
 infrastructure. ZEP-0149 is the single Java interop part, recorded as an inventory that is expected
 to split into independently shippable slices. ZEP-0095 and ZEP-0096 are the bytecode-quality parts;
-ZEP-0138–ZEP-0144 are the static-verification parts; ZEP-0085, ZEP-0163, ZEP-0167, and ZEP-0168 are
-the language-ergonomics parts; ZEP-0044, ZEP-0045, ZEP-0046, ZEP-0074, and ZEP-0075 are the numeric
+ZEP-0138–ZEP-0144 are the static-verification parts; ZEP-0163 and ZEP-0168 are the open
+language-ergonomics parts, and ZEP-0167 and ZEP-0085 are rejected; ZEP-0044, ZEP-0045, ZEP-0046, ZEP-0074, and ZEP-0075 are the numeric
 surface parts. ZEP-0099 remains a standalone unscheduled proposal until a concrete derivation
 companion is recorded. ZEP-0176 defines the workstream model itself; ZEP-0179 defines the release
 plan model.
@@ -71,12 +71,12 @@ are satisfied. A release selects `Ready` parts; only the release ledger records 
 version. The `Candidate` and `Planned` release states are retired and must not be reintroduced.
 
 Current active concerns are [model metadata](../workstreams/model-metadata/README.md),
-[scoped resources](../workstreams/scoped-resources/README.md), and
-[test infrastructure](../workstreams/test-infrastructure/README.md). Proposed concerns are
+[scoped resources](../workstreams/scoped-resources/README.md),
+[test infrastructure](../workstreams/test-infrastructure/README.md), and
+[static newtype verification](../workstreams/static-verification/README.md). Proposed concerns are
 [continuation tooling](../workstreams/continuation-tooling/README.md),
 [Java interop](../workstreams/java-interop/README.md),
 [bytecode quality](../workstreams/bytecode-quality/README.md),
-[static newtype verification](../workstreams/static-verification/README.md),
 [language ergonomics](../workstreams/language-ergonomics/README.md), and
 [numeric surface](../workstreams/numeric-surface/README.md). The completed `0.9.0`
 concerns are [effect control](../workstreams/effect-control/README.md) and
@@ -90,10 +90,15 @@ engineering tasks. A candidate may be `Draft` or `Accepted` and is not a version
 `Ready` part with satisfied dependencies may be selected; scope freeze drops everything else.
 
 `0.10.0` is the plan's working target, not an assignment to any workstream part or ZEP row. Its
-candidate slate has fifteen parts across model metadata, test infrastructure, language ergonomics,
-numeric surface, scoped resources, and static verification. Only model-metadata parts 1 and 2
-([ZEP-0091](../zeps/ZEP-0091.md) and [ZEP-0097](../zeps/ZEP-0097.md)) are `Accepted`; the rest are
-`Draft`. Selected scope is empty while the plan is in `Planning`. See
+candidate slate has thirteen parts across scoped resources, model metadata, language ergonomics,
+test infrastructure, and static verification. Scoped-resources parts 1–4
+([ZEP-0184](../zeps/ZEP-0184.md), [ZEP-0160](../zeps/ZEP-0160.md), [ZEP-0161](../zeps/ZEP-0161.md),
+and [ZEP-0185](../zeps/ZEP-0185.md)), model-metadata parts 1–3
+([ZEP-0091](../zeps/ZEP-0091.md), [ZEP-0097](../zeps/ZEP-0097.md), and
+[ZEP-0101](../zeps/ZEP-0101.md)), language-ergonomics parts 1 and 3
+([ZEP-0163](../zeps/ZEP-0163.md) and [ZEP-0168](../zeps/ZEP-0168.md)), and static-verification
+parts 1–2 ([ZEP-0138](../zeps/ZEP-0138.md) and [ZEP-0139](../zeps/ZEP-0139.md)) are `Accepted`;
+the rest are `Draft`. Selected scope is empty while the plan is in `Planning`. See
 [ZEP-0179](../zeps/ZEP-0179.md) and the [release-plan policy](../releases/README.md).
 
 ## `0.7.0` — Type identity, reification, and type bounds
@@ -237,8 +242,9 @@ effect applications as an implemented foundation for that slice: the generator b
 openly, inference unifies applied effects structurally, and existing index type-parameter references
 preserve the open form across separate compilation without a schema bump. Open runtime construction
 from a non-reified generic body remains unsupported.
-[ZEP-0167](../zeps/ZEP-0167.md) and [ZEP-0168](../zeps/ZEP-0168.md) record the dependent capability
-substitution and contract return-covariance questions. Neither is scheduled.
+ZEP-0168 records the contract return-covariance question and is not scheduled.
+[ZEP-0167](../zeps/ZEP-0167.md) recorded the dependent capability-substitution question, now
+rejected.
 
 ### Scope and risk
 
@@ -261,9 +267,11 @@ primitive specialization, so both belong in a later cycle.
 The former `0.10.0` model/scoped bundle was dissolved into the
 [model metadata](../workstreams/model-metadata/README.md) and
 [scoped resources](../workstreams/scoped-resources/README.md) workstreams. The current release plan
-now carries only model-metadata parts 1 and 2 as candidates; no part is selected. ZEP-0091 and
-ZEP-0097 remain accepted; ZEP-0160, ZEP-0161, and ZEP-0158 remain draft and are not candidates. The
-model foundation is already shipped in ZEP-0079, ZEP-0092, ZEP-0093, and ZEP-0098.
+carries five scoped-resources parts, three model-metadata parts, two language-ergonomics parts,
+test-infrastructure part 2, and two static-verification parts; no part is selected.
+ZEP-0184, ZEP-0160, ZEP-0161, and ZEP-0185 are accepted, as are the model and language-ergonomics
+parts and ZEP-0138–ZEP-0139; ZEP-0158 and ZEP-0175 remain draft. The model foundation is already
+shipped in ZEP-0079, ZEP-0092, ZEP-0093, and ZEP-0098.
 
 ZEP-0107 is not a model proposal. It extends runtime descriptors with ancestor metadata for generic
 effects, so it remains `Accepted` / `Unscheduled` outside the model workstream. If it returns, it
@@ -340,11 +348,44 @@ These decisions shape the current plan. Details live in each ZEP.
   External names, mapping metadata, and concrete format adapters are separate proposals.
 - **ZEP-0121:** proposal and release state are both `Deferred`; it is excluded from release
   planning and cannot enter a bundle without reopening the design.
-- **ZEP-0158 / ZEP-0160 / ZEP-0161:** non-escape is a type capability, not a receiver naming trick.
-  `scoped` is a restriction qualifier with an origin; version 1 limits it to non-generic nominal
-  types and rejects scoped type arguments and container scoping. `scoped fn` is the per-method
-  declaration surface; `scoped extension` is rejected. ZEP-0162 owns the future generic opt-in.
+- **ZEP-0184:** `Self` is nominal. In a class body it expands to the enclosing nominal type with
+  its type arguments; in a contract it is a result-only, late-bound type substituted with the final
+  implementing class. It erases to the contract type and reuses the ZEP-0168 class-side bridge. It
+  adds no inheritance, no F-bounded polymorphism, and no runtime descriptor.
+- **ZEP-0184 / ZEP-0160 / ZEP-0161 / ZEP-0185 / ZEP-0158:** non-escape is a declaration
+  capability, not a receiver naming trick. `Self` supplies the receiver name. `scoped` is a
+  parameter/receiver attribute with an internal origin token, not a type constructor: it adds no
+  subtype edge, join, top, or runtime descriptor. A scoped value is sealed to `scoped` members; the
+  receiver inside its own `scoped fn` keeps ordinary member access under the trusted-member
+  boundary. Receiver-tied results are explicit `scoped Self`; plain `Self` is an ordinary same-type
+  result and may be a newly constructed value. Contract conformance is monotone on receiver and
+  parameter flags and exact on the result flag. Version 1 rejects generic scoped forms and container
+  scoping; ZEP-0162 owns the future type-level qualifier and `admits scoped` opt-in.
 
+- **ZEP-0138:** the static-verification foundation is a typed scalar predicate IR. `>`, `>=`, and
+  `!=` are surface-only and normalize into `<`, `<=`, and `Not(==)`; type and null facts stay in the
+  existing flow layer and combine with scalar facts at the fact-context boundary. `Add`, `Sub`, and
+  `Neg` are core term forms whose formation requires an overflow-safety proof; interval reasoning
+  belongs to ZEP-0142. `decide` and `entails` are strong three-valued queries, with a separate
+  `isUnreachable` check so vacuous truth cannot suppress diagnostics. The first join intersects
+  normalized facts and ignores unreachable branches; invalidation uses a path-prefix rule. Exported
+  predicates are length-prefixed and independently versioned; version 1 exports positional
+  parameters, `Carrier(parameter)`, `Length(parameter)`, literals, and literal-initialized public
+  immutable scalar or `String` values encoded by value, with no member paths. Ground `Float` constants use the same
+  evaluator and documented IEEE semantics; `Float` does not enter flow facts. Type-intrinsic facts
+  require host interop and deserialization to preserve validated construction.
+- **ZEP-0139:** guarded newtypes gain checked `new`. A stable validator is one expressible in the
+  scalar IR over `value`, compile-time constants, and literal-initialized immutable scalar/String
+  values; a non-constant, non-stable validator uses the runtime path. Constant true elides the check,
+  constant false is an error on a reachable path, and `UNKNOWN` uses a runtime check. Ground constant
+  folding is independent of symbolic term formation and can evaluate a constant-foldable validator,
+  including ground `Float`. The argument and validator are each evaluated once;
+  `new` and `tryNew` differ only on a false result. A failed dynamic `new` raises
+  `zeron.runtime.ValidationException`, which extends `IllegalArgumentException`, names the
+  declaration without including the raw value, and is shared with ZEP-0144's parameter entry check.
+  A validator fault propagates unchanged. A ground-false `tryNew` warns; a runtime fallback may warn
+  but is not an error. No strict constructor or constant-expression form is added, and effectful
+  validators remain rejected.
 - **ZEP-0054:** full ordinary member model for effect payloads; canonical `new` plus delegating
   named constructors.
 - **ZEP-0013:** `under` modeled on contract conformance; JVM-hierarchy representation; `Effect` is
@@ -535,10 +576,11 @@ These decisions shape the current plan. Details live in each ZEP.
   ZEP-0174, and ZEP-0152–ZEP-0157); every row is `Shipped` / `0.9.0` and its acceptance queue is
   closed.
 - The former tentative model/scoped bundle is split into the model metadata and scoped resources
-  workstreams. ZEP-0091 and ZEP-0097 are accepted; ZEP-0158, ZEP-0160, ZEP-0161, and ZEP-0162 are
-  draft. None is assigned to a release. ZEP-0158's receiver surface depends on ZEP-0160 and
-  ZEP-0161, and its cleanup rules must agree with ZEP-0112's scope lifetime and ZEP-0119's
-  resumption points.
+  workstreams. ZEP-0184, ZEP-0160, ZEP-0161, and ZEP-0185 are accepted; ZEP-0158 and ZEP-0162 are
+  draft. None is assigned to a release. ZEP-0158's receiver surface depends on ZEP-0184 for `Self`,
+  on ZEP-0160 for the scoped value attribute, and on ZEP-0161 for class `scoped fn`; ZEP-0185
+  extends the same semantics to contracts and extensions but is not required by the block. Its
+  cleanup rules must agree with ZEP-0112's scope lifetime and ZEP-0119's resumption points.
 - The `0.7.0` acceptance queue is closed. The 15 shipped rows are the release set; ZEP-0107 and
   ZEP-0108 are outside it.
 - `0.6.0` shipped with 25 rows. ZEP-0068 is `Implemented` / `Shipped` `0.6.0`: its core contracts

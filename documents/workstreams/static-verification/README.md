@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Proposed |
+| Status | Active |
 | ZEPs | [ZEP-0138](../../zeps/ZEP-0138.md), [ZEP-0139](../../zeps/ZEP-0139.md), [ZEP-0140](../../zeps/ZEP-0140.md), [ZEP-0141](../../zeps/ZEP-0141.md), [ZEP-0142](../../zeps/ZEP-0142.md), [ZEP-0143](../../zeps/ZEP-0143.md), [ZEP-0144](../../zeps/ZEP-0144.md) |
 
 ## Mission
@@ -16,9 +16,9 @@ than adding independent ad-hoc checks.
 
 | Part | ZEP | Scope | Depends on | Status | Shipped |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [ZEP-0138](../../zeps/ZEP-0138.md) | Predicate and fact IR, normalization, three-valued decisions, constant evaluation, trust boundary, and index encoding | — | Draft | — |
-| 2 | [ZEP-0139](../../zeps/ZEP-0139.md) | Checked `new` for guarded newtypes with constant proof and runtime fallback | 1 | Draft | — |
-| 3 | [ZEP-0140](../../zeps/ZEP-0140.md) | Comparison facts and type-intrinsic newtype facts in flow typing | 1 | Draft | — |
+| 1 | [ZEP-0138](../../zeps/ZEP-0138.md) | Scalar predicate and fact IR, normalization, three-valued decisions, reachability, constant evaluation, trust boundary, and index encoding | — | Accepted | — |
+| 2 | [ZEP-0139](../../zeps/ZEP-0139.md) | Checked `new` for guarded newtypes with constant proof, stable validators, and `ValidationException` runtime fallback | 1 | Accepted | — |
+| 3 | [ZEP-0140](../../zeps/ZEP-0140.md) | Comparison facts and type-intrinsic newtype facts in flow typing | 1 | Accepted | — |
 | 4 | [ZEP-0141](../../zeps/ZEP-0141.md) | Predicate functions and call-site fact transfer | 1, 3 | Draft | — |
 | 5 | [ZEP-0142](../../zeps/ZEP-0142.md) | Interval and difference-bound facts over stable terms | 1, 3 | Draft | — |
 | 6 | [ZEP-0143](../../zeps/ZEP-0143.md) | `IntRange` bounds, half-open ranges, and loop facts | 5 | Draft | — |
@@ -26,11 +26,11 @@ than adding independent ad-hoc checks.
 
 ## Sequencing
 
-Part 1 is the shared foundation and should be designed and accepted before the feature parts. Part 2
-is the most separable first feature: it can begin with constant evaluation and a runtime fallback.
-Part 3 supplies the first useful flow proofs for checked construction. Parts 4 and 5 consume the
-fact IR and comparison facts; part 6 supplies range-loop facts; part 7 is the capstone and should not
-become `Ready` until the fact stores, predicate metadata, interval proofs, and range facts are stable.
+Part 1 is the accepted shared foundation. Part 2 is the most separable first feature and is also
+accepted; it begins with constant evaluation and a runtime fallback. Part 3 supplies the first useful
+flow proofs for checked construction. Parts 4 and 5 consume the fact IR and comparison facts; part 6 supplies
+range-loop facts; part 7 is the capstone and should not become `Ready` until the fact stores,
+predicate metadata, interval proofs, and range facts are stable.
 
 The parts are dependency-ordered and can ship incrementally. No part is assigned to a release, and
 recording the workstream does not imply that all seven parts ship together.
@@ -45,5 +45,7 @@ recording the workstream does not imply that all seven parts ship together.
 
 ## Current focus
 
-Review and accept the fact IR in [ZEP-0138](../../zeps/ZEP-0138.md). The later parts remain `Draft`
-until that foundation is stable.
+Implement the accepted scalar fact IR in [ZEP-0138](../../zeps/ZEP-0138.md), checked construction
+in [ZEP-0139](../../zeps/ZEP-0139.md), and comparison/refined-type facts in
+[ZEP-0140](../../zeps/ZEP-0140.md). The remaining parts 4–7 stay `Draft` until their designs are
+accepted.

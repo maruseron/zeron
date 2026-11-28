@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Status | Discussion draft (revision 4: language constraints confirmed; effect rows ([ZEP-0086](./ZEP-0086.md)) considered) |
+| Status | Discussion draft (revision 4: language constraints confirmed; effect rows ([ZEP-0086](../zeps/ZEP-0086.md)) considered) |
 | Author | Marcelo Rodríguez |
 | Created | 2026-11-02 |
 | Scope | `List`, `Map`, `Set`, `Stream`, and the capability contracts between them |
@@ -117,14 +117,16 @@ What remains is the first two, and the ergonomics of naming.
 
 1. **No inheritance.** Hierarchies are built from `requires` between contracts and conformance by
    final classes. Shared implementation comes from default methods.
-2. **No `Self`.** Contract methods cannot return "the same implementation".
+2. **No `Self` at the time of this design.** Contract methods cannot return "the same implementation".
+   [ZEP-0184](../zeps/ZEP-0184.md), accepted later, adds a nominal `Self` for class aliases and
+   result-only contract substitution; this document does not rely on it.
 3. **Mutability is a view.** A contract with `mut` methods can only be implemented by a
    representation that can mutate. Mutation is already isolated in capabilities (`Sink`) and `mut`
    methods.
 4. **Erasure.** Generic collections store erased elements; use-site adapters recover behavior.
 5. **Static dispatch is a stated project value.** A change should not make the common case slower
    or less predictable without measurement.
-6. **Effects.** Function types carry effect rows ([ZEP-0086](./ZEP-0086.md), implemented):
+6. **Effects.** Function types carry effect rows ([ZEP-0086](../zeps/ZEP-0086.md), implemented):
    `(T) -> R performs E` with `E admits effect...`. Row variables are quantified on declarations only, a
    contract method may not widen its row (an open row needs a row parameter on the method or the
    interface), and at most one row variable may appear in a single `performs` list. The standard
@@ -301,7 +303,7 @@ monomorphic and bimorphic sites, but it is unmeasured, and it is the first exper
   ordinary contracts. This is why terminal operations belong on `Iterable` as defaults, and why
   `reversed` and `sorted` for a contract-typed list would be defaults that build the default
   implementation.
-- **Serialization** ([ZEP-0092](./ZEP-0092.md)). Encoding works for any implementation through its
+- **Serialization** ([ZEP-0092](../zeps/ZEP-0092.md)). Encoding works for any implementation through its
   iteration. Decoding needs a concrete type: a field typed with a contract decodes into the default
   implementation, a field typed with a concrete class decodes into that.
 - **Pattern matching.** `ConstructList` is naturally `Nil | Cons(head, tail)`. Sequence patterns
@@ -357,7 +359,7 @@ operators would duplicate code without adding behavior. `Stream` as a final clas
   each call. A one-shot source (a connection, a generator with state) cannot honestly be an
   `Iterable`, and such sources need either caching or a different type. This should be written down.
 - **Laziness and effects.** Effect-row polymorphism is implemented
-  ([ZEP-0086](./ZEP-0086.md)), but the standard-library APIs have not adopted it. Three consequences
+  ([ZEP-0086](../zeps/ZEP-0086.md)), but the standard-library APIs have not adopted it. Three consequences
   for collections:
   1. *Strict higher-order operations are straightforward.* `forEach`, `foldLeft`, and `fold` take a
      row parameter and propagate it, which is correct because the callback runs during the call:
@@ -367,7 +369,7 @@ operators would duplicate code without adding behavior. `Stream` as a final clas
      `performs E` would let the effect escape the handler scope enclosing the call. The stream type
      itself would have to carry the row (`Stream<T, E admits effect...>`), and each operator would return a
      stream whose row is the union of the upstream row and the callback's row: a union of two row
-     variables in a type argument. [ZEP-0086](./ZEP-0086.md) allows one row variable per `performs`
+     variables in a type argument. [ZEP-0086](../zeps/ZEP-0086.md) allows one row variable per `performs`
      list and does not say whether that restriction covers type-argument rows.
   3. *Iteration itself has the empty row.* `Iterator.next` and `Iterable.iterator` declare no row, so
      an implementation cannot perform. An effectful source (reading a file) must report failures as
@@ -424,7 +426,7 @@ library parameters to the contracts; and only then alternative implementations.
   is not needed for Option 1, but would help factories.
 - Does Zeron have conditional conformance, as list equality requires?
 - How do `TreeMap` and `RedBlackMap` differ: two implementations, or a contract and one implementation?
-- Does the one-row-variable restriction of [ZEP-0086](./ZEP-0086.md) apply to rows in type-argument
+- Does the one-row-variable restriction of [ZEP-0086](../zeps/ZEP-0086.md) apply to rows in type-argument
   position, and would a union of two row variables there be admissible?
 - Should `Iterator` and `Iterable` gain a row parameter to admit effectful sources, or should such
   sources report failures as data?

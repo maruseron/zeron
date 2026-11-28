@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Proposed |
-| ZEPs | [ZEP-0085](../../zeps/ZEP-0085.md), [ZEP-0163](../../zeps/ZEP-0163.md), [ZEP-0167](../../zeps/ZEP-0167.md), [ZEP-0168](../../zeps/ZEP-0168.md) |
+| Status | Active |
+| ZEPs | [ZEP-0085](../../zeps/ZEP-0085.md), [ZEP-0163](../../zeps/ZEP-0163.md), [ZEP-0167](../../zeps/ZEP-0167.md), [ZEP-0168](../../zeps/ZEP-0168.md), [ZEP-0170](../../zeps/ZEP-0170.md), [ZEP-0186](../../zeps/ZEP-0186.md) |
 
 ## Mission
 
@@ -18,17 +18,18 @@ resource scoping, and bytecode representation changes have their own workstreams
 
 | Part | ZEP | Scope | Depends on | Status | Shipped |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [ZEP-0163](../../zeps/ZEP-0163.md) | Widen mutable-projection receivers to read-only bases when solving inherited read-only generic method bounds | — | Draft | — |
-| 2 | [ZEP-0167](../../zeps/ZEP-0167.md) | Separate capability requirements from allowed instantiations in generic type arguments | — | Draft | — |
-| 3 | [ZEP-0168](../../zeps/ZEP-0168.md) | Allow covariant return refinement in contract inheritance and emit the required bridge | — | Draft | — |
-| 4 | [ZEP-0085](../../zeps/ZEP-0085.md) | Default inferred bindings to read-only projections and add explicit `mut` preservation of a mutable view | — | Draft | — |
+| 1 | [ZEP-0163](../../zeps/ZEP-0163.md) | Admit mutable-reference receivers for inherited read-only generic method binders without changing the element type | — | Accepted | — |
+| 2 | [ZEP-0167](../../zeps/ZEP-0167.md) | Separate capability requirements from allowed instantiations in generic type arguments | — | Rejected | — |
+| 3 | [ZEP-0168](../../zeps/ZEP-0168.md) | Allow covariant return refinement in a contract redeclaration and reuse the class-side bridge | — | Accepted | — |
+| 4 | [ZEP-0085](../../zeps/ZEP-0085.md) | Default inferred bindings to read-only projections and add explicit `mut` preservation of a mutable view | — | Rejected | — |
+| 5 | [ZEP-0186](../../zeps/ZEP-0186.md) | Add apply, mapping, filtering, and bind pipe operators with a scoped subject placeholder, zero-argument extension references, and argument-bearing extension calls; syntax-only, with no new runtime or type-system subsystem | — | Accepted | — |
+| 6 | [ZEP-0170](../../zeps/ZEP-0170.md) | Warn when a comprehension-shaped `do` block targets concrete `Stream<_>` where a `for` expression is clearer; advisory only | — | Accepted | — |
 
 ## Sequencing
 
-The parts are independent. Part 3 interacts with capability handling from part 2, but it records no
-hard dependency and can be designed separately. Part 4 is a contained binding-inference rule and
-does not depend on the generic-bound or capability parts. Each part is `Draft` and none is assigned
-to a release.
+The parts were designed independently. Parts 1, 3, 5, and 6 are `Accepted`; parts 2 and 4 are
+`Rejected`. Parts 1, 3, 5, and 6 are candidates in the
+[0.10.0 release plan](../../releases/current.md); candidacy is not a release assignment.
 
 Additional small proposals can join this workstream when they share the same test: the change is
 independently shippable, has a concrete ergonomics benefit, and does not introduce a new language

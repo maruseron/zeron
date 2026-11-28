@@ -25,7 +25,7 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | Java SAM conversion | 0047-0050 | ZEP-0148 (Implemented; shipped in `0.8.0`) |
 | Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063 and ZEP-0064 shipped in `0.8.0`; ZEP-0066 and ZEP-0067 shipped in `0.9.0` |
 | Model, callable, and existential follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0109 (implemented, accepted, deferred, or Draft) |
-| 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
+| 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0089 (mutable projections closed: ZEP-0085 rejected) |
 | Annotation consumption | 0031 | ZEP-0091 (Accepted) |
 | Annotation target for model mapping clauses | 0079 | ZEP-0097 (Accepted) |
 | Block values, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0146 shipped in `0.8.0` (supersedes ZEP-0110); ZEP-0111 shipped in `0.7.0`; ZEP-0174 adds `do` guards through `Filterable` (shipped in `0.9.0`); ZEP-0112 shipped in `0.9.0`; resumption split across ZEP-0118–ZEP-0121 |
@@ -201,7 +201,9 @@ Source: ZEP-0005.
 - **Generator functions, async sequences, fused `for` lowering, and `break`/`continue` in
   comprehensions** - ZEP-0058 `[E/I]`. Generator functions are the main language feature; fusion is
   an optimization.
-- **General `Self` type** - ZEP-0082 `[E]`.
+- **General `Self` type** - ZEP-0082 `[E]`; accepted as [ZEP-0184](../zeps/ZEP-0184.md) for
+  nominal class aliases and contract results. Contract parameters, nested self types, and F-bounded
+  use remain deferred.
 - **User-defined syntax extensions** - ZEP-0082 `[E]`.
 - **Higher-rank effect-row quantification inside function types** - ZEP-0086 `[E]`. Requires
   first-class polymorphic function types. Binder-dependent rank-2 effect rows remain excluded by

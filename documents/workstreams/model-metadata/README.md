@@ -23,15 +23,16 @@ design, not the already shipped runtime operations.
 | --- | --- | --- | --- | --- | --- |
 | 1 | [ZEP-0091](../../zeps/ZEP-0091.md) | Compiler-recognized annotation consumption | — | Accepted | — |
 | 2 | [ZEP-0097](../../zeps/ZEP-0097.md) | `MAPPING` annotation target for model mapping clauses | 1 | Accepted | — |
-| 3 | [ZEP-0101](../../zeps/ZEP-0101.md) | Field representation adapters for model mappings | 1 | Draft | — |
+| 3 | [ZEP-0101](../../zeps/ZEP-0101.md) | Field representation adapters for model mappings | — | Accepted | — |
 | 4 | [ZEP-0102](../../zeps/ZEP-0102.md) | Generic models through model factories | 3 | Draft | — |
 | 5 | [ZEP-0103](../../zeps/ZEP-0103.md) | Polymorphic models for closed sum types | 4 | Draft | — |
 
 ## Sequencing
 
-Part 1 lands the annotation model that part 2 consumes. Part 3 can be designed in parallel but should
-not be treated as `Ready` before part 1's annotation model is stable. Parts 4 and 5 are later layers;
-they remain `Draft` until their designs are accepted.
+Part 1 lands the annotation model that part 2 consumes. Part 3 no longer depends on part 1 for its
+core: `via` names values rather than annotations, and only reusing adapters in serialization
+derivation waits for the annotation model. Parts 4 and 5 are later layers; they remain `Draft` until
+their designs are accepted.
 
 Parts 1–3 are candidates in the active [release plan](../../releases/current.md). Candidacy is
 visibility, not a version assignment; the parts become eligible for selection only when their status

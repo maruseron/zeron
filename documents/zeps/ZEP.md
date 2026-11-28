@@ -107,7 +107,7 @@ by other proposals does not keep the original row `Accepted` after its release r
 | [ZEP-0082](./ZEP-0082.md) | Receiver Lambdas and Type-Safe Builders | Implemented | Shipped | 0.6.0 |
 | [ZEP-0083](./ZEP-0083.md) | Lambda and Function-Type Syntax Ergonomics | Implemented | Shipped | 0.6.0 |
 | [ZEP-0084](./ZEP-0084.md) | 64-Bit Hashes for Zeron Values | Implemented | Shipped | 0.6.0 |
-| [ZEP-0085](./ZEP-0085.md) | Explicit Mutable Projections for Inferred Bindings | Draft | Unscheduled | - |
+| [ZEP-0085](./ZEP-0085.md) | Explicit Mutable Projections for Inferred Bindings | Rejected | Unscheduled | — |
 | [ZEP-0086](./ZEP-0086.md) | Effect-Row Polymorphism | Implemented | Shipped | 0.6.0 |
 | [ZEP-0087](./ZEP-0087.md) | Negative Flow Refinement for Closed Sum Types | Implemented | Shipped | 0.6.0 |
 | [ZEP-0088](./ZEP-0088.md) | Non-Null Assertion Operator | Implemented | Shipped | 0.6.0 |
@@ -123,7 +123,7 @@ by other proposals does not keep the original row `Accepted` after its release r
 | [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Shipped | 0.8.0 |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
 | [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
-| [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Draft | Unscheduled | — |
+| [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Accepted | Unscheduled | — |
 | [ZEP-0102](./ZEP-0102.md) | Generic Models through Model Factories | Draft | Unscheduled | — |
 | [ZEP-0103](./ZEP-0103.md) | Polymorphic Models for Closed Sum Types | Draft | Unscheduled | — |
 | [ZEP-0104](./ZEP-0104.md) | Wildcard Existentials and Type-Bound Pattern Matching | Implemented | Shipped | 0.7.0 |
@@ -160,9 +160,9 @@ by other proposals does not keep the original row `Accepted` after its release r
 | [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Shipped | 0.8.0 |
 | [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Implemented | Shipped | 0.8.0 |
 | [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Implemented | Shipped | 0.8.0 |
-| [ZEP-0138](./ZEP-0138.md) | Predicate and Fact IR for Static Verification | Draft | Unscheduled | - |
-| [ZEP-0139](./ZEP-0139.md) | Checked Construction for Guarded Newtypes | Draft | Unscheduled | - |
-| [ZEP-0140](./ZEP-0140.md) | Comparison and Refined-Type Flow Facts | Draft | Unscheduled | - |
+| [ZEP-0138](./ZEP-0138.md) | Predicate and Fact IR for Static Verification | Accepted | Unscheduled | - |
+| [ZEP-0139](./ZEP-0139.md) | Checked Construction for Guarded Newtypes | Accepted | Unscheduled | - |
+| [ZEP-0140](./ZEP-0140.md) | Comparison and Refined-Type Flow Facts | Accepted | Unscheduled | - |
 | [ZEP-0141](./ZEP-0141.md) | Predicate Functions and Fact Transfer | Draft | Unscheduled | - |
 | [ZEP-0142](./ZEP-0142.md) | Interval and Difference-Bound Flow Facts | Draft | Unscheduled | - |
 | [ZEP-0143](./ZEP-0143.md) | IntRange Bounds and Loop Facts | Draft | Unscheduled | - |
@@ -182,17 +182,17 @@ by other proposals does not keep the original row `Accepted` after its release r
 | [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Implemented | Shipped | 0.9.0 |
 | [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Unscheduled | — |
 | [ZEP-0159](./ZEP-0159.md) | Generated Standard-Library Reference | Draft | Unscheduled | — |
-| [ZEP-0160](./ZEP-0160.md) | Scoped Projection Types | Draft | Unscheduled | — |
-| [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Unscheduled | — |
+| [ZEP-0160](./ZEP-0160.md) | Scoped Values and Non-Escape Checking | Accepted | Unscheduled | — |
+| [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods | Accepted | Unscheduled | — |
 | [ZEP-0162](./ZEP-0162.md) | Scoped Generic Admissibility | Draft | Unscheduled | — |
-| [ZEP-0163](./ZEP-0163.md) | Automatic Read-Only Widening for Inherited Generic Method Bounds | Draft | Unscheduled | — |
+| [ZEP-0163](./ZEP-0163.md) | Mutable-Reference Admission for Inherited Generic Method Binders | Accepted | Unscheduled | — |
 | [ZEP-0164](./ZEP-0164.md) | Erased `Await` Carrier and Blocking Entry Handler | Implemented | Shipped | 0.9.0 |
 | [ZEP-0165](./ZEP-0165.md) | Unify `Task` and `Future` into a Single Async Handle | Implemented | Shipped | 0.9.0 |
 | [ZEP-0166](./ZEP-0166.md) | Open Generic Effect Applications | Implemented | Shipped | 0.9.0 |
-| [ZEP-0167](./ZEP-0167.md) | Capability Requirements in Generic Type Arguments | Draft | Unscheduled | — |
-| [ZEP-0168](./ZEP-0168.md) | Return Covariance in Contract Inheritance | Draft | Unscheduled | — |
+| [ZEP-0167](./ZEP-0167.md) | Capability Requirements in Generic Type Arguments | Rejected | Unscheduled | — |
+| [ZEP-0168](./ZEP-0168.md) | Return Covariance in Contract Inheritance | Accepted | Unscheduled | — |
 | [ZEP-0169](./ZEP-0169.md) | Standard-Library Test Split and `@CompileFailure` | Implemented | Shipped | 0.9.0 |
-| [ZEP-0170](./ZEP-0170.md) | For-Expression and Do-Notation Boundary | Draft | Unscheduled | — |
+| [ZEP-0170](./ZEP-0170.md) | For-Expression and Do-Notation Boundary | Accepted | Unscheduled | — |
 | [ZEP-0171](./ZEP-0171.md) | Fail-Fast Concurrent Scopes and the `concurrent` Helper | Implemented | Shipped | 0.9.0 |
 | [ZEP-0172](./ZEP-0172.md) | Portable Compiler-Managed Continuation Backend | Draft | Unscheduled | — |
 | [ZEP-0173](./ZEP-0173.md) | Source-Level Debug Metadata and IDE Stepping | Draft | Unscheduled | — |
@@ -202,6 +202,13 @@ by other proposals does not keep the original row `Accepted` after its release r
 | [ZEP-0177](./ZEP-0177.md) | Canonical Effect Payloads with Derived Behavior | Draft | Unscheduled | — |
 | [ZEP-0178](./ZEP-0178.md) | Generic Effect Propagation through Reified Effect Variables | Draft | Unscheduled | — |
 | [ZEP-0179](./ZEP-0179.md) | Release Plans and Candidate Tracking | Accepted | Not applicable | — |
+| [ZEP-0180](./ZEP-0180.md) | Witness-Interface Evidence Passing | Draft | Unscheduled | — |
+| [ZEP-0181](./ZEP-0181.md) | Bootstrapped Constants and Shared Bytecode Runtime | Draft | Unscheduled | — |
+| [ZEP-0182](./ZEP-0182.md) | Hidden-Class Anonymous Constants | Draft | Unscheduled | — |
+| [ZEP-0183](./ZEP-0183.md) | Switch-Bootstrapped Match Dispatch | Draft | Unscheduled | — |
+| [ZEP-0184](./ZEP-0184.md) | Nominal `Self` in Classes and Contracts | Accepted | Unscheduled | — |
+| [ZEP-0185](./ZEP-0185.md) | Scoped Methods in Contracts and Extensions | Accepted | Unscheduled | — |
+| [ZEP-0186](./ZEP-0186.md) | Piped Application, Mapping, Filtering, and Bind Operators | Accepted | Unscheduled | — |
 
 ## Release history
 

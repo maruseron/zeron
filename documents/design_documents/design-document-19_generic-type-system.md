@@ -142,6 +142,15 @@ not be taken as a commitment to implement every deferred feature.
 - Preserve ZEP-0053's entailment boundary with positive and negative tests for exact applied
   conformances, covariance through nested generic arguments, safe projections, and library-loaded
   declarations.
+- Relax contract conformance from exact admissibility-marker equality to set inclusion, so an
+  implementation may admit at least the capabilities its contract admits. Keep exact equality in
+  function-shape and witness identity, and cover conformance plus separate compilation with tests.
+  Inferred capability requirements remain rejected; see ZEP-0167's decision.
+- Allow a contract redeclaration to narrow a method's return type under ZEP-0168, reusing the
+  class-side synthetic bridge. Inherited-only refinement and interface bridges stay out of scope.
+- Use the nominal `Self` result from ZEP-0184 for contract results, substituting the final
+  implementing class at conformance. F-bounded use, `Self` in contract parameters, and nested self
+  types remain deferred.
 
 ### 3. Finish rank-2 polymorphic values and decide on broader rank
 
